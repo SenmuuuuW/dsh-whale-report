@@ -10,7 +10,7 @@ import {
   nightOwlIndex,
 } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
-import type { Insight } from "./insights.js";
+import { toolFamilies, type Insight } from "./insights.js";
 import type { PeriodStatsRecord } from "./state.js";
 
 export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";
@@ -134,9 +134,12 @@ export function renderReport(
     `- 工具调用 **${stats.toolCallsTotal}** 次（失败 ${stats.toolErrors} 次）、bash 命令 **${stats.commands}** 条`,
   );
   lines.push("");
-  lines.push("**常用工具：**");
-  lines.push(topTools(stats));
-  lines.push("");
+  const families = toolFamilies(stats.toolCalls).slice(0, 5);
+  if (families.length > 0) {
+    lines.push("**工具使用（按族）：**");
+    lines.push(families.map((f) => `- ${f.family} × ${f.count}`).join("\n"));
+    lines.push("");
+  }
 
   // —— Token 消耗与模型用量
   lines.push("## Token 消耗");
@@ -177,6 +180,30 @@ export function renderReport(
     lines.push(`- 最忙的一天：**${stats.busiestDay.date}**（${stats.busiestDay.events} 条事件）`);
   }
   lines.push("");
+
+  if (stats.secretHits.length > 0) {
+    lines.push("## 敏感信息");
+    lines.push("");
+    const byLabel = new Map<string, number>();
+    for (const hit of stats.secretHits) byLabel.set(hit.label, (byLabel.get(hit.label) ?? 0) + 1);
+    lines.push(`检测到 **${stats.secretHits.length}** 处疑似密钥/令牌（未展示原文）：`);
+    lines.push("");
+    for (const [label, count] of byLabel) lines.push(`- ${label} × ${count}`);
+    lines.push("");
+    lines.push("建议尽快轮换对应密钥。");
+    lines.push("");
+  }
+
+  if (stats.burstSamples.length > 0) {
+    lines.push("## 重试诊断");
+    lines.push("");
+    for (const sample of stats.burstSamples.slice(0, 5)) {
+      const when = new Date(sample.time).toISOString().slice(0, 16).replace("T", " ");
+      lines.push(`- \`${sample.cmd}\` 重复 ${sample.count} 次 · ${when}`);
+      if (sample.error !== undefined) lines.push(`  ${sample.error.slice(0, 100)}`);
+    }
+    lines.push("");
+  }
 
   // —— 危险操作：分类分析 + 少量样本
   lines.push("## 危险操作");

@@ -5,7 +5,7 @@
  */
 import { type ReportStats } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
-import type { Insight } from "./insights.js";
+import { type Insight } from "./insights.js";
 import type { PeriodStatsRecord } from "./state.js";
 export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 export declare const PRESET_LABELS: Record<ReportPreset, string>;

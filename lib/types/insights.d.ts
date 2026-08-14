@@ -36,4 +36,9 @@ export declare function computeInsights(input: InsightInput): Insight[];
 export declare function periodKey(preset: string, toMs: number): string;
 /** 上一周期 key（按 preset 回退一档）。 */
 export declare function previousPeriodKey(preset: string, toMs: number): string;
+/** 按工具调用数归族排序（面板与 markdown 共用）。 */
+export declare function toolFamilies(toolCalls: Record<string, number>): {
+    family: string;
+    count: number;
+}[];
 //# sourceMappingURL=insights.d.ts.map

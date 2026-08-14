@@ -293,6 +293,10 @@ describe("洞察引擎", () => {
     expect(red!.pattern.test("rm -rf ~/backups")).toBe(false);
     expect(red!.pattern.test("rm -rf / && echo done")).toBe(true);
     expect(red!.pattern.test("rm -rf ~/.dsh/profiles/node_modules")).toBe(false);
+    // 引号内搜索模式不误报（需经引擎的 stripQuotes 路径验证）
+    const grepCmd = ev("tool/call", 1786100000000 + 5000, { name: "bash", arguments: JSON.stringify({ command: 'grep -n "rm -rf / && echo done" x.ts' }) });
+    const gstats = aggregate([grepCmd], { from: 1786100000000, to: 1786100000000 + 3600000 });
+    expect(gstats.dangerousCommands.length).toBe(0);
     const shutdown = DANGEROUS_PATTERNS.find((p) => p.label === "关机/重启");
     expect(shutdown!.pattern.test("sed -n '1,60p' $SRC/process-shutdown.ts")).toBe(false);
     expect(shutdown!.pattern.test("shutdown -h now")).toBe(true);
@@ -330,5 +334,45 @@ describe("维护加固：边界与不误报", () => {
     const stats = aggregate([ev("turn/start", base)], { from: base - 1000, to: base + 3600000 });
     const insights = computeInsights({ stats, budgetWeeklyCny: 50, cost: { perModel: {}, total: 0.5, currency: "CNY", source: "builtin" as const, fetchedAt: 0 } });
     expect(insights.length).toBe(0);
+  });
+});
+
+describe("密钥扫描与重试诊断（只读安全）", () => {
+  it("user/message 里的密钥被检出，且只存标签不存原文", () => {
+    const base = new Date(2026, 7, 10).getTime();
+    const events = [
+      ev("user/message", base, { content: [{ type: "text", text: "用这个 key: sk-abc1234567890abcdefgh 调 API" }] }),
+      ev("user/message", base + 1, { content: [{ type: "text", text: "普通消息" }] }),
+    ];
+    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
+    expect(stats.secretHits.length).toBe(1);
+    expect(stats.secretHits[0].label).toContain("OpenAI");
+    expect(JSON.stringify(stats.secretHits)).not.toContain("sk-abc");
+  });
+
+  it("重试风暴带错误摘要（诊断素材）", () => {
+    const base = new Date(2026, 7, 10).getTime();
+    const mkCmd = (n: number) => ev("tool/call", base + n * 1000, { name: "bash", arguments: JSON.stringify({ command: "pnpm install" }) });
+    const events = [
+      mkCmd(0),
+      ev("tool/result", base + 1000, { message: { isError: true, content: "ELIFECYCLE: command failed" } }),
+      mkCmd(2),
+      ev("tool/result", base + 3000, { message: { isError: true, content: "ELIFECYCLE: command failed" } }),
+      mkCmd(4),
+      ev("tool/result", base + 5000, { message: { isError: true, content: "ELIFECYCLE: command failed" } }),
+    ];
+    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
+    expect(stats.retryBursts).toBe(1);
+    expect(stats.burstSamples.length).toBe(1);
+    expect(stats.burstSamples[0].count).toBe(3);
+    expect(stats.burstSamples[0].error).toContain("ELIFECYCLE");
+  });
+
+  it("工具族排行：已知映射与未识别兜底", async () => {
+    const { toolFamilies } = await import("../src/insights.js");
+    const rows = toolFamilies({ bash: 10, whale_report: 3, todo_write: 2, xxx_custom: 1 });
+    expect(rows[0]).toEqual({ family: "核心工具", count: 10 });
+    expect(rows.some((r) => r.family === "深迹" && r.count === 3)).toBe(true);
+    expect(rows.some((r) => r.family === "其他" && r.count === 1)).toBe(true);
   });
 });

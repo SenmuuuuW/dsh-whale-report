@@ -13,6 +13,7 @@
  * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
 import { Component, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
+import { toolFamilies } from "../insights.js";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -155,6 +156,12 @@ const CSS = `
   border: 1px solid #fecaca;
 }
 [data-whale-report-dangercat] b { font-weight: 800; }
+[data-whale-report-secretcat] {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+  border-radius: 999px; font-size: 11.5px; background: #f5f3ff; color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+[data-whale-report-secretcat] b { font-weight: 800; }
 [data-whale-report-danger] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
   background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
@@ -291,6 +298,9 @@ interface StatsJson {
   halfHourHistogram: number[];
   dailySeries: { date: string; count: number }[];
   dayHourSeries: { date: string; hours: number[] }[];
+  retryBursts?: number;
+  burstSamples?: { cmd: string; count: number; time: number; error?: string }[];
+  secretHits?: { label: string; time: number; source: string }[];
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
@@ -585,7 +595,7 @@ function InsightsSection({ insights }: { insights: InsightJson[] }): ReactNode {
                 <b>{insight.title}</b>
               </div>
               <div data-whale-report-insightdetail>{insight.detail}</div>
-              <div data-whale-report-insightaction>建议：{insight.action}</div>
+              <div data-whale-report-insightaction>{insight.action}</div>
               {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
             </div>
           );
@@ -607,7 +617,7 @@ function dangerSummary(danger: StatsJson["dangerousCommands"]): string {
     const h = new Date(d.time).getHours();
     return h < 6 || h >= 23;
   }).length;
-  return `本报告期内共 ${danger.length} 条危险操作，以「${top[0]}」为主（${top[1]} 条，占 ${share}%）${night > 0 ? `，其中 ${night} 条发生在深夜时段，建议回顾审批习惯` : ""}。`;
+  return `共 ${danger.length} 条，以「${top[0]}」为主（${top[1]} 条，占 ${share}%）${night > 0 ? `，${night} 条在深夜时段` : ""}。`;
 }
 
 function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: string) => void }): ReactNode {
@@ -702,17 +712,35 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       </div>
 
       <div data-whale-report-card>
-        <div data-whale-report-h2>常用工具</div>
-        {topTools.length === 0 ? (
+        <div data-whale-report-h2>工具使用（按族）</div>
+        {toolFamilies(s.toolCalls ?? {}).length === 0 ? (
           <div data-whale-report-tokenline>（没有调用工具）</div>
         ) : (
-          topTools.map(([toolName, count]) => (
-            <div key={toolName} data-whale-report-tokenline>
-              <code>{toolName}</code> × {count}
+          toolFamilies(s.toolCalls ?? {}).map((fam) => (
+            <div key={fam.family} data-whale-report-tokenline>
+              <code>{fam.family}</code> × {fam.count}
             </div>
           ))
         )}
       </div>
+
+      {(s.burstSamples ?? []).length > 0 && (() => {
+        const bursts = s.burstSamples ?? [];
+        return (
+        <div data-whale-report-card>
+          <div data-whale-report-h2>重试诊断（{bursts.length}）</div>
+          {bursts.map((b, i) => (
+            <div key={i} data-whale-report-danger data-sev="amber">
+              {b.cmd}
+              <em>
+                重复 {b.count} 次 · {new Date(b.time).toISOString().slice(0, 16).replace("T", " ")}
+                {b.error !== undefined ? <> · 错误：{b.error.slice(0, 90)}</> : null}
+              </em>
+            </div>
+          ))}
+        </div>
+        );
+      })()}
 
       <div data-whale-report-card>
         <div data-whale-report-h2>危险操作（{danger.length}）</div>
@@ -756,6 +784,22 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           </>
         )}
       </div>
+
+      {(s.secretHits ?? []).length > 0 && (() => {
+        const hits = s.secretHits ?? [];
+        return (
+        <div data-whale-report-card>
+          <div data-whale-report-h2>敏感信息（{hits.length}）</div>
+          <div data-whale-report-tokenline>疑似密钥/令牌出现在会话中，未展示原文。</div>
+          <div data-whale-report-dangercats>
+            {[...hits.reduce((m: Map<string, number>, h: { label: string }) => m.set(h.label, (m.get(h.label) ?? 0) + 1), new Map<string, number>()).entries()].map(([label, count]) => (
+              <span key={label} data-whale-report-secretcat>{label} <b>{count}</b></span>
+            ))}
+          </div>
+          <div data-whale-report-tokenline style={{ marginTop: 6 }}>建议尽快轮换对应密钥。</div>
+        </div>
+        );
+      })()}
 
       {(s.titles ?? []).length > 0 && (
         <div data-whale-report-card>
@@ -956,7 +1000,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
                 </div>
                 {loading && <div data-whale-report-loading>正在生成报告…</div>}
                 <div data-whale-report-budgetedit>
-                  <span>每周预算（¥，可选）：</span>
+                  <span>周预算（¥）：</span>
                   <input
                     type="number"
                     min="0"

@@ -87,10 +87,43 @@ export interface ReportStats {
   dayHourSeries: { date: string; hours: number[] }[];
   /** 重试风暴次数：同一命令连续重复 ≥3 次（洞察引擎用）。 */
   retryBursts: number;
+  /** 重试风暴样本（只读诊断用）：命令首行 + 次数 + 最近一次错误摘要。 */
+  burstSamples: { cmd: string; count: number; time: number; error?: string }[];
+  /** 疑似密钥/令牌命中（只存标签与时间，不存原文）。 */
+  secretHits: { label: string; time: number; source: "user" | "tool" }[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+
+/** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
+export const SECRET_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\bsk-[A-Za-z0-9]{16,}\b/, label: "OpenAI 风格密钥" },
+  { pattern: /\bAKIA[0-9A-Z]{16}\b/, label: "AWS Access Key" },
+  { pattern: /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/, label: "私钥块" },
+  { pattern: /\bghp_[A-Za-z0-9]{20,}\b/, label: "GitHub PAT" },
+  { pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, label: "Slack Token" },
+  { pattern: /\b(?:api[_-]?key|token|password|secret)\b\s*[=:]\s*['"]?[A-Za-z0-9_.-]{12,}/i, label: "配置型密钥" },
+];
+
+/** 剥离引号段：grep/echo 里的搜索模式不算真实操作。 */
+function stripQuotes(s: string): string {
+  return s.replace(/["'][^"'\n]*["']/g, " ");
+}
+
+/** 从 user/message 的 content 块里提取文本（逐块扫，不拼接全文）。 */
+function textOfUserMessage(data: Record<string, unknown> | undefined): string[] {
+  const content = data?.content;
+  if (!Array.isArray(content)) return [];
+  const texts: string[] = [];
+  for (const block of content) {
+    if (typeof block === "object" && block !== null && (block as Record<string, unknown>).type === "text") {
+      const text = (block as Record<string, unknown>).text;
+      if (typeof text === "string") texts.push(text);
+    }
+  }
+  return texts;
+}
 
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
 export type DangerSeverity = "red" | "amber";
@@ -138,6 +171,8 @@ export function emptyStats(period: Period): ReportStats {
     dailySeries: [],
     dayHourSeries: [],
     retryBursts: 0,
+    burstSamples: [],
+    secretHits: [],
   };
 }
 
@@ -210,6 +245,8 @@ export function aggregate(
   const dayHourMap = new Map<string, number[]>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
+  const burstStart = new Map<string, number>();
+  const lastError = new Map<string, string | undefined>();
   const sessionIdsByEvent: string[] = [];
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
@@ -251,9 +288,18 @@ export function aggregate(
       case "step/start":
         stats.steps += 1;
         break;
-      case "user/message":
+      case "user/message": {
         stats.userMessages += 1;
+        for (const text of textOfUserMessage(data)) {
+          for (const { pattern, label } of SECRET_PATTERNS) {
+            if (pattern.test(text)) {
+              stats.secretHits.push({ label, time: event.time, source: "user" });
+              break;
+            }
+          }
+        }
         break;
+      }
       case "assistant/message": {
         stats.assistantMessages += 1;
         const usage = usageOf(data);
@@ -287,17 +333,38 @@ export function aggregate(
           stats.commands += 1;
           // 只对命令首行做危险匹配：heredoc 正文里的字样不算真实操作。
           const firstLine = command.split("\n", 1)[0];
+          const matchText = stripQuotes(firstLine);
           const prev = lastCommand.get(sessionId);
           if (prev === firstLine) {
             const streak = (commandStreak.get(sessionId) ?? 1) + 1;
             commandStreak.set(sessionId, streak);
-            if (streak === 3) stats.retryBursts += 1;
+            if (streak === 3) {
+              stats.retryBursts += 1;
+              if (stats.burstSamples.length < 10) {
+                stats.burstSamples.push({
+                  cmd: firstLine.slice(0, 80),
+                  count: streak,
+                  time: burstStart.get(sessionId) ?? event.time,
+                  error: lastError.get(sessionId),
+                });
+              }
+            } else if (streak > 3) {
+              const sample = stats.burstSamples[stats.burstSamples.length - 1];
+              if (sample !== undefined && sample.cmd === firstLine.slice(0, 80)) sample.count = streak;
+            }
           } else {
             lastCommand.set(sessionId, firstLine);
             commandStreak.set(sessionId, 1);
+            burstStart.set(sessionId, event.time);
+          }
+          for (const { pattern, label } of SECRET_PATTERNS) {
+            if (pattern.test(firstLine)) {
+              stats.secretHits.push({ label, time: event.time, source: "tool" });
+              break;
+            }
           }
           for (const { pattern, label, sev } of DANGEROUS_PATTERNS) {
-            if (pattern.test(firstLine)) {
+            if (pattern.test(matchText)) {
               stats.dangerousCommands.push({ command: firstLine, time: event.time, sessionId, label, sev });
               break;
             }
@@ -305,9 +372,29 @@ export function aggregate(
         }
         break;
       }
-      case "tool/result":
-        if (resultIsError(data)) stats.toolErrors += 1;
+      case "tool/result": {
+        const failed = resultIsError(data);
+        if (failed) stats.toolErrors += 1;
+        // 记录错误摘要供重试诊断（只保留前 120 字符）。
+        const content = (data?.message as Record<string, unknown> | undefined)?.content;
+        let snippet: string | undefined;
+        if (failed) {
+          if (typeof content === "string") snippet = content.slice(0, 120);
+          else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (typeof block === "object" && block !== null) {
+                const text = (block as Record<string, unknown>).text;
+                if (typeof text === "string") {
+                  snippet = text.slice(0, 120);
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (snippet !== undefined) lastError.set(sessionId, snippet);
         break;
+      }
       case "session/title": {
         const title = typeof data?.title === "string" ? data.title : null;
         if (title && !stats.titles.includes(title)) stats.titles.push(title);
@@ -392,6 +479,10 @@ export interface HourBucket {
   modelUsage: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
   /** 该分桶内重试风暴（连续相同命令 ≥3 次）的次数。 */
   retryBursts: number;
+  /** 重试风暴样本（会话级，上限 5）。 */
+  burstSamples: { cmd: string; count: number; time: number; error?: string }[];
+  /** 疑似密钥命中（只存标签与时间）。 */
+  secretHits: { label: string; time: number; source: "user" | "tool" }[];
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -421,6 +512,8 @@ function newBucket(h: number): HourBucket {
     danger: [],
     modelUsage: {},
     retryBursts: 0,
+    burstSamples: [],
+    secretHits: [],
   };
 }
 
@@ -444,6 +537,8 @@ export function bucketizeOwnEvents(
   let lastMs = 0;
   let lastCommand = "";
   let commandStreak = 0;
+  let burstStart = 0;
+  let lastError: string | undefined;
   for (const event of events) {
     if (event.seq < ownStart) continue;
     if (stopAfter !== undefined && event.time >= stopAfter) break;
@@ -464,9 +559,18 @@ export function bucketizeOwnEvents(
       case "step/start":
         bucket.steps += 1;
         break;
-      case "user/message":
+      case "user/message": {
         bucket.userMessages += 1;
+        for (const text of textOfUserMessage(data)) {
+          for (const { pattern, label } of SECRET_PATTERNS) {
+            if (pattern.test(text)) {
+              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "user" });
+              break;
+            }
+          }
+        }
         break;
+      }
       case "assistant/message": {
         bucket.assistantMessages += 1;
         const usage = usageOf(data);
@@ -498,16 +602,32 @@ export function bucketizeOwnEvents(
         if (command) {
           bucket.commands += 1;
           const firstLine = command.split("\n", 1)[0];
+          const matchText = stripQuotes(firstLine);
           if (lastCommand === firstLine) {
             commandStreak += 1;
-            if (commandStreak === 3) bucket.retryBursts += 1;
+            if (commandStreak === 3) {
+              bucket.retryBursts += 1;
+              if (bucket.burstSamples.length < 5) {
+                bucket.burstSamples.push({ cmd: firstLine.slice(0, 80), count: commandStreak, time: burstStart, error: lastError });
+              }
+            } else if (commandStreak > 3) {
+              const sample = bucket.burstSamples[bucket.burstSamples.length - 1];
+              if (sample !== undefined && sample.cmd === firstLine.slice(0, 80)) sample.count = commandStreak;
+            }
           } else {
             lastCommand = firstLine;
             commandStreak = 1;
+            burstStart = event.time;
+          }
+          for (const { pattern, label } of SECRET_PATTERNS) {
+            if (pattern.test(firstLine)) {
+              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "tool" });
+              break;
+            }
           }
           if (bucket.danger.length < DANGER_SAMPLE_CAP) {
             for (const { pattern, label, sev } of DANGEROUS_PATTERNS) {
-              if (pattern.test(firstLine)) {
+              if (pattern.test(matchText)) {
                 bucket.danger.push({ cmd: firstLine, ms: event.time, label, sev });
                 break;
               }
@@ -516,9 +636,28 @@ export function bucketizeOwnEvents(
         }
         break;
       }
-      case "tool/result":
-        if (resultIsError(data)) bucket.toolErrors += 1;
+      case "tool/result": {
+        const failed = resultIsError(data);
+        if (failed) bucket.toolErrors += 1;
+        const content = (data?.message as Record<string, unknown> | undefined)?.content;
+        let snippet: string | undefined;
+        if (failed) {
+          if (typeof content === "string") snippet = content.slice(0, 120);
+          else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (typeof block === "object" && block !== null) {
+                const text = (block as Record<string, unknown>).text;
+                if (typeof text === "string") {
+                  snippet = text.slice(0, 120);
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (snippet !== undefined) lastError = snippet;
         break;
+      }
       case "session/title": {
         const title = typeof data?.title === "string" ? data.title : null;
         if (title && !titles.includes(title)) titles.push(title);
@@ -551,6 +690,8 @@ export function aggregateBuckets(
   const dayHourMap = new Map<string, number[]>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
+  const burstStart = new Map<string, number>();
+  const lastError = new Map<string, string | undefined>();
   const days = new Map<string, number>();
 
   for (const view of views) {
@@ -582,6 +723,12 @@ export function aggregateBuckets(
       stats.toolErrors += bucket.toolErrors;
       stats.commands += bucket.commands;
       stats.retryBursts += bucket.retryBursts ?? 0;
+      for (const sample of bucket.burstSamples ?? []) {
+        if (stats.burstSamples.length < 10) stats.burstSamples.push(sample);
+      }
+      for (const hit of bucket.secretHits ?? []) {
+        if (stats.secretHits.length < 10) stats.secretHits.push(hit);
+      }
       for (const [model, usage] of Object.entries(bucket.modelUsage ?? {})) {
         const m = (stats.models[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
         m.input += usage.input;

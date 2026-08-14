@@ -96,7 +96,25 @@ export interface ReportStats {
     }[];
     /** 重试风暴次数：同一命令连续重复 ≥3 次（洞察引擎用）。 */
     retryBursts: number;
+    /** 重试风暴样本（只读诊断用）：命令首行 + 次数 + 最近一次错误摘要。 */
+    burstSamples: {
+        cmd: string;
+        count: number;
+        time: number;
+        error?: string;
+    }[];
+    /** 疑似密钥/令牌命中（只存标签与时间，不存原文）。 */
+    secretHits: {
+        label: string;
+        time: number;
+        source: "user" | "tool";
+    }[];
 }
+/** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
+export declare const SECRET_PATTERNS: {
+    pattern: RegExp;
+    label: string;
+}[];
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
 export type DangerSeverity = "red" | "amber";
 /**
@@ -156,6 +174,19 @@ export interface HourBucket {
     }>;
     /** 该分桶内重试风暴（连续相同命令 ≥3 次）的次数。 */
     retryBursts: number;
+    /** 重试风暴样本（会话级，上限 5）。 */
+    burstSamples: {
+        cmd: string;
+        count: number;
+        time: number;
+        error?: string;
+    }[];
+    /** 疑似密钥命中（只存标签与时间）。 */
+    secretHits: {
+        label: string;
+        time: number;
+        source: "user" | "tool";
+    }[];
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
