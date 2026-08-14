@@ -1,0 +1,1 @@
+{"version":3,"file":"trust-fence.d.ts","sourceRoot":"","sources":["../../src/trust-fence.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AACH,OAAO,KAAK,EAAE,mBAAmB,EAAE,MAAM,WAAW,CAAC;AAErD,MAAM,WAAW,eAAe;IAC9B,OAAO,EAAE,mBAAmB,CAAC;CAC9B;AAOD,wBAAgB,kBAAkB,CAAC,QAAQ,EAAE,MAAM,GAAG,OAAO,CAQ5D;AAED,sDAAsD;AACtD,wBAAgB,mBAAmB,CAAC,OAAO,EAAE,eAAe,GAAG,OAAO,CAkBrE"}

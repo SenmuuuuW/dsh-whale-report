@@ -1,10 +1,13 @@
 /**
  * 「鲸鱼记事本」插件入口 —— cordis 三件套。
  *
- * 与 dsh-study 一样的骨架，但依赖的是另一个官方接缝：
- *   sessionQuery —— 会话查询服务（列表 + 完整日志读取）。
- * 默认 web profile 已挂载（dsh-session-query + sqlite 后端），
- * 所以 bundle patch 里除了插入自己，什么都不用带。
+ * 宿主 half 现在有四个接缝：
+ *   tools        —— whale_report 聊天工具（对话路径）
+ *   sessionQuery —— 会话日志读取（数据源）
+ *   storageDomain—— 报告历史持久化（whale 域）
+ *   webServer    —— /whale/api 面板数据通道（专属界面路径）
+ * 浏览器 half（src/client）通过 package.json 的 dsh.client 声明注册，
+ * 由官方 client-modules 接缝装载。
  */
 import type { Context } from "@deepseek-ai/cordis";
 export declare const name = "whale-report-core";

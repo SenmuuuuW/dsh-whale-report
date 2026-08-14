@@ -1,21 +1,34 @@
 /**
  * 「鲸鱼记事本」插件入口 —— cordis 三件套。
  *
- * 与 dsh-study 一样的骨架，但依赖的是另一个官方接缝：
- *   sessionQuery —— 会话查询服务（列表 + 完整日志读取）。
- * 默认 web profile 已挂载（dsh-session-query + sqlite 后端），
- * 所以 bundle patch 里除了插入自己，什么都不用带。
+ * 宿主 half 现在有四个接缝：
+ *   tools        —— whale_report 聊天工具（对话路径）
+ *   sessionQuery —— 会话日志读取（数据源）
+ *   storageDomain—— 报告历史持久化（whale 域）
+ *   webServer    —— /whale/api 面板数据通道（专属界面路径）
+ * 浏览器 half（src/client）通过 package.json 的 dsh.client 声明注册，
+ * 由官方 client-modules 接缝装载。
  */
 import type { Context } from "@deepseek-ai/cordis";
+import type { DomainFacility } from "@deepseek-ai/dsh-storage-domain";
+import { whaleDomain } from "./state.js";
+import { registerApiRoutes, type ApiServices } from "./api.js";
 import { registerReportTools, type ReportServices, type SessionQueryLike, type ToolsHost } from "./tools.js";
 
 export const name = "whale-report-core";
-export const inject = ["tools", "sessionQuery"];
+export const inject = ["tools", "sessionQuery", "storageDomain", "webServer"];
 
 export function apply(ctx: Context) {
-  const services: ReportServices = {
-    // 结构化断言：兼容不同快照里 sessionQuery 实现的类名差异。
-    sessionQuery: (ctx as Context & { sessionQuery: unknown }).sessionQuery as SessionQueryLike,
-  };
-  registerReportTools(ctx as unknown as ToolsHost, services);
+  const sessionQuery = (ctx as Context & { sessionQuery: unknown }).sessionQuery as SessionQueryLike;
+  const toolServices: ReportServices = { sessionQuery };
+  registerReportTools(ctx as unknown as ToolsHost, toolServices);
+
+  ctx.inject(["storageDomain"], async (domainCtx) => {
+    const facility = (domainCtx as Context & { storageDomain: DomainFacility }).storageDomain;
+    const domain = await facility.open(whaleDomain);
+    ctx.effect(() => () => {
+      void domain.close();
+    });
+    registerApiRoutes(ctx, { sessionQuery, domain });
+  });
 }

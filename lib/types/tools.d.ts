@@ -7,6 +7,7 @@
  * 引擎只读，不写回任何会话数据。
  */
 import { type ToolDefinition } from "@deepseek-ai/dsh-tools";
+import { type RawEvent, type RawSessionHeader } from "./stats.js";
 /**
  * 结构化类型：只依赖 sessionQuery 的行为面，不依赖具体类名。
  *
@@ -57,5 +58,13 @@ export interface ToolsHost {
         register(definition: ToolDefinition): unknown;
     };
 }
+/** 从会话查询服务收集区间内的所有事件（宽容模式：单会话失败不阻塞整体）。 */
+export declare function collectEvents(svc: ReportServices, period: {
+    from: number;
+    to: number;
+}): Promise<{
+    events: RawEvent[];
+    headers: RawSessionHeader[];
+}>;
 export declare function registerReportTools(ctx: ToolsHost, svc: ReportServices): void;
 //# sourceMappingURL=tools.d.ts.map

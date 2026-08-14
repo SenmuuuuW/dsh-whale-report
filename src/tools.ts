@@ -65,7 +65,7 @@ function parseTime(value: string | undefined, fallback: number): number {
 }
 
 /** 从会话查询服务收集区间内的所有事件（宽容模式：单会话失败不阻塞整体）。 */
-async function collectEvents(
+export async function collectEvents(
   svc: ReportServices,
   period: { from: number; to: number },
 ): Promise<{ events: RawEvent[]; headers: RawSessionHeader[] }> {
