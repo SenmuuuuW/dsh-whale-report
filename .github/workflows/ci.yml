@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # harness 包已发布在公共 npm（@deepseek-ai/dsh-*）。
+      # 插件运行时由 profile 提供这些 peer；CI 里从 npm 装上即可做完整 typecheck。
+      - name: Install harness peers from npm
+        run: pnpm add -D @deepseek-ai/dsh-tools@0.1.0-rc.6 @deepseek-ai/dsh-session@0.1.0-rc.6 @deepseek-ai/dsh-session-query@0.1.0-rc.6 @deepseek-ai/cordis@0.1.0-rc.6 @deepseek-ai/schemastery@3.18.1
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

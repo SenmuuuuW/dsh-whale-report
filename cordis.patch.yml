@@ -1,0 +1,8 @@
+# dsh-whale-report bundle patch — 挂载「鲸鱼记事本」。
+# 插件本体注入 tools + sessionQuery，两者都由默认 web profile 提供
+# （sessionQuery = @deepseek-ai/dsh-session-query + sqlite 后端）。
+# 零核心改动：卸载即从装配图摘除，报告数据只读、不改任何会话。
+
+- insert:
+    - id: whale-report-core
+      name: 'dsh-whale-report'
