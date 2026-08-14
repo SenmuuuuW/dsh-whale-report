@@ -1,16 +1,18 @@
 /**
- * 「鲸鱼记事本」客户端 half：右下角鲸鱼按钮 → 右侧抽屉面板。
+ * 「鲸鱼记事本」客户端 half。
  *
- * 这是插件"不只像 skill"的那一半：一个专属的地方。
- * - 不经过聊天：面板直接 fetch /whale/api（宿主 half 的围栏路由）
- * - 报告在这里渲染成卡片 + 热度条 + 惊魂清单，可一键导出 PDF（浏览器打印）
- * - 历史报告落库在宿主 storage domain，面板里随时回看
+ * 呈现形态两级：
+ * 1. Tab 优先 —— 若装了 DSH-better-sidebar（ctx.betterSidebar 服务存在），
+ *    就往它的工作台注册一个「🐋 鲸鱼记事本」Tab，报告面板成为侧栏的
+ *    原生一员（第三方扩展的官方接缝 registerTab）。
+ * 2. 悬浮球兜底 —— 没有 better-sidebar 时，右下角鲸鱼按钮 + 抽屉面板。
  *
- * 客户端插件通过 window.__ModuleLoader__.load({id, factory}) 注册
- * （tsdown.config.ts 生成的 banner/footer），cordis 客户端内核负责装配。
- * 无服务注入 —— 纯 DOM/React，只依赖模块表里的 react。
+ * 数据不经过聊天：面板直接 fetch /whale/api（宿主 half 的围栏路由）。
+ * 客户端插件通过 window.__ModuleLoader__.load({id, factory}) 注册，
+ * cordis 客户端内核负责装配；betterSidebar 服务用惰性注入消费
+ * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
-import { Component, type ChangeEvent, type ReactNode } from "react";
+import { Component, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -96,6 +98,17 @@ const CSS = `
 [data-whale-report-hitem] b { font-size: 13.5px; color: #fff; }
 [data-whale-report-hitem] span { display: block; font-size: 11.5px; color: #9aa0b5; margin-top: 4px; }
 [data-whale-report-loading] { color: #9aa0b5; font-size: 13px; padding: 20px 0; text-align: center; }
+
+/* Tab 形态：填满侧栏 pane，自带滚动 */
+[data-whale-report-tabhost] {
+  height: 100%; overflow-y: auto; padding: 12px 16px 24px;
+  color: #e6e8f0; background: transparent;
+}
+[data-whale-report-tabhost] [data-whale-report-card] { background: rgba(255,255,255,.05); }
+[data-whale-report-tabhost] [data-whale-report-hitem],
+[data-whale-report-tabhost] [data-whale-report-chip],
+[data-whale-report-tabhost] [data-whale-report-tab] { background: rgba(255,255,255,.06); }
+[data-whale-report-tabhost] [data-whale-report-inputs] input { background: rgba(255,255,255,.07); }
 
 @media print {
   body * { visibility: hidden; }
@@ -200,7 +213,6 @@ function dateStr(ms: number): string {
 function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
   const max = Math.max(1, ...histogram);
   const hue = (level: number): string => {
-    // 鲸鱼蓝渐变：低 → 高
     const a = 0.12 + level * 0.8;
     return `rgba(77,107,254,${a.toFixed(2)})`;
   };
@@ -222,7 +234,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
     <div>
       <div data-whale-report-actions>
         <button data-whale-report-btn onClick={() => window.print()}>导出 PDF / 打印</button>
-        <button data-whale-report-btndata-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
+        <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
       </div>
 
       <div data-whale-report-h2>⚙️ 干了多少活</div>
@@ -288,10 +300,9 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   );
 }
 
-// ─────────────────────────── 抽屉根组件 ───────────────────────────
+// ─────────────────────────── 核心内容组件（抽屉与 Tab 共用） ───────────────────────────
 
-interface AppState {
-  open: boolean;
+interface ContentState {
   tab: "report" | "history";
   preset: (typeof PRESETS)[number]["key"];
   from: string;
@@ -302,9 +313,8 @@ interface AppState {
   history: ReportMeta[] | null;
 }
 
-class App extends Component<Record<string, never>, AppState> {
-  state: AppState = {
-    open: false,
+class WhaleContent extends Component<Record<string, never>, ContentState> {
+  state: ContentState = {
     tab: "report",
     preset: "weekly",
     from: dateStr(Date.now() - 7 * 86400000),
@@ -313,13 +323,6 @@ class App extends Component<Record<string, never>, AppState> {
     error: null,
     current: null,
     history: null,
-  };
-
-  toggle = (): void => {
-    this.setState((prev) => ({ open: !prev.open }));
-    if (!this.state.open && this.state.tab === "history" && this.state.history === null) {
-      void this.loadHistory();
-    }
   };
 
   async loadHistory(): Promise<void> {
@@ -368,7 +371,142 @@ class App extends Component<Record<string, never>, AppState> {
   }
 
   render(): ReactNode {
-    const { open, tab, preset, loading, error, current, history } = this.state;
+    const { tab, preset, loading, error, current, history } = this.state;
+    return (
+      <>
+        <div data-whale-report-tabs>
+          <button data-whale-report-tab data-active={tab === "report"} onClick={() => this.setState({ tab: "report" })}>
+            新报告
+          </button>
+          <button
+            data-whale-report-tab
+            data-active={tab === "history"}
+            onClick={() => {
+              this.setState({ tab: "history" });
+              if (history === null) void this.loadHistory();
+            }}
+          >
+            历史
+          </button>
+        </div>
+
+        {error !== null && <div data-whale-report-danger>出错了：{error}</div>}
+
+        {tab === "history" && history === null && <div data-whale-report-loading>加载中…</div>}
+        {tab === "history" && history !== null && history.length === 0 && (
+          <div data-whale-report-empty>还没有报告。去「新报告」生成第一份吧 🐋</div>
+        )}
+        {tab === "history" && history !== null && history.length > 0 && (
+          <div>
+            {history.map((item) => (
+              <div key={item.id} data-whale-report-hitem onClick={() => void this.openHistory(item.id)}>
+                <b>
+                  {PRESETS.find((p) => p.key === item.preset)?.label ?? item.preset} · {dateStr(item.from)} ~ {dateStr(item.to)}
+                </b>
+                <span>
+                  {item.sessions} 会话 · {item.turns} 回合 · {fmt(item.totalEvents)} 事件 · {dateStr(item.createdAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "report" && (
+          <>
+            {current === null && (
+              <>
+                <div data-whale-report-chips>
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      data-whale-report-chip
+                      data-active={preset === p.key}
+                      onClick={() => this.setState({ preset: p.key })}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                {preset === "custom" && (
+                  <div data-whale-report-inputs>
+                    <input
+                      type="date"
+                      value={this.state.from}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ from: e.target.value })}
+                    />
+                    <input
+                      type="date"
+                      value={this.state.to}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ to: e.target.value })}
+                    />
+                  </div>
+                )}
+                <div data-whale-report-actions>
+                  <button data-whale-report-btn onClick={() => void this.generate()} disabled={loading}>
+                    {loading ? "生成中…" : "生成报告"}
+                  </button>
+                </div>
+                {loading && <div data-whale-report-loading>鲸鱼正在翻你的日志…</div>}
+              </>
+            )}
+            {current !== null && <ReportView report={current} onDelete={(id) => void this.deleteReport(id)} />}
+          </>
+        )}
+      </>
+    );
+  }
+}
+
+// ─────────────────────────── Tab 模式标记（better-sidebar 存在时隐藏悬浮球） ───────────────────────────
+
+let tabRegistered = false;
+const tabModeListeners = new Set<() => void>();
+function setTabRegistered(value: boolean): void {
+  if (tabRegistered === value) return;
+  tabRegistered = value;
+  for (const listener of tabModeListeners) listener();
+}
+function subscribeTabMode(listener: () => void): () => void {
+  tabModeListeners.add(listener);
+  return () => tabModeListeners.delete(listener);
+}
+
+/** better-sidebar 注册服务的最小结构化视图。 */
+interface BetterSidebarLike {
+  registerTab(descriptor: {
+    id: string;
+    title: string;
+    icon?: ReactNode;
+    order?: number;
+    single?: boolean;
+    component: (props: unknown) => ReactNode;
+  }): () => void;
+}
+
+/** better-sidebar 里的鲸鱼 Tab（与抽屉共用 WhaleContent）。 */
+function SidebarTab(): ReactNode {
+  return (
+    <div data-whale-report-tabhost>
+      <WhaleContent />
+    </div>
+  );
+}
+
+// ─────────────────────────── 兜底：悬浮球 + 抽屉 ───────────────────────────
+
+interface DrawerState {
+  open: boolean;
+}
+
+class DrawerPanel extends Component<Record<string, never>, DrawerState> {
+  state: DrawerState = { open: false };
+
+  toggle = (): void => {
+    this.setState((prev) => ({ open: !prev.open }));
+  };
+
+  render(): ReactNode {
+    const { open } = this.state;
     return (
       <>
         <button data-whale-report-fab onClick={this.toggle} title="鲸鱼记事本" aria-label="鲸鱼记事本">
@@ -381,84 +519,8 @@ class App extends Component<Record<string, never>, AppState> {
               ✕
             </button>
           </div>
-          <div data-whale-report-tabs>
-            <button data-whale-report-tab data-active={tab === "report"} onClick={() => this.setState({ tab: "report" })}>
-              新报告
-            </button>
-            <button
-              data-whale-report-tab
-              data-active={tab === "history"}
-              onClick={() => {
-                this.setState({ tab: "history" });
-                if (history === null) void this.loadHistory();
-              }}
-            >
-              历史
-            </button>
-          </div>
           <div data-whale-report-body>
-            {error !== null && <div data-whale-report-danger>出错了：{error}</div>}
-
-            {tab === "history" && history === null && <div data-whale-report-loading>加载中…</div>}
-            {tab === "history" && history !== null && history.length === 0 && (
-              <div data-whale-report-empty>还没有报告。去「新报告」生成第一份吧 🐋</div>
-            )}
-            {tab === "history" && history !== null && history.length > 0 && (
-              <div>
-                {history.map((item) => (
-                  <div key={item.id} data-whale-report-hitem onClick={() => void this.openHistory(item.id)}>
-                    <b>
-                      {PRESETS.find((p) => p.key === item.preset)?.label ?? item.preset} · {dateStr(item.from)} ~ {dateStr(item.to)}
-                    </b>
-                    <span>
-                      {item.sessions} 会话 · {item.turns} 回合 · {fmt(item.totalEvents)} 事件 · {dateStr(item.createdAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {tab === "report" && (
-              <>
-                {current === null && (
-                  <>
-                    <div data-whale-report-chips>
-                      {PRESETS.map((p) => (
-                        <button
-                          key={p.key}
-                          data-whale-report-chip
-                          data-active={preset === p.key}
-                          onClick={() => this.setState({ preset: p.key })}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                    {preset === "custom" && (
-                      <div data-whale-report-inputs>
-                        <input
-                          type="date"
-                          value={this.state.from}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ from: e.target.value })}
-                        />
-                        <input
-                          type="date"
-                          value={this.state.to}
-                          onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ to: e.target.value })}
-                        />
-                      </div>
-                    )}
-                    <div data-whale-report-actions>
-                      <button data-whale-report-btn onClick={() => void this.generate()} disabled={loading}>
-                        {loading ? "生成中…" : "生成报告"}
-                      </button>
-                    </div>
-                    {loading && <div data-whale-report-loading>鲸鱼正在翻你的日志…</div>}
-                  </>
-                )}
-                {current !== null && <ReportView report={current} onDelete={(id) => void this.deleteReport(id)} />}
-              </>
-            )}
+            <WhaleContent />
           </div>
         </div>
       </>
@@ -466,26 +528,52 @@ class App extends Component<Record<string, never>, AppState> {
   }
 }
 
+/** 函数包装：Tab 已注册时悬浮球整体退场（hooks 只能在函数组件里用）。 */
+function FallbackDrawer(): ReactNode {
+  const tabMode = useSyncExternalStore(subscribeTabMode, () => tabRegistered);
+  if (tabMode) return null; // 已在 better-sidebar 里，悬浮球退场
+  return <DrawerPanel />;
+}
+
 // ─────────────────────────── 客户端插件装配 ───────────────────────────
 
 /** 客户端 cordis 上下文的最小结构化视图（type-only，不引入运行时依赖）。 */
 interface ClientContext {
   effect(execute: () => () => void): unknown;
+  inject(names: string[], callback: (ctx: Record<string, unknown>) => void): unknown;
 }
 
 export function apply(ctx: ClientContext): void {
   injectStyle();
-  // 挂载与清理都放进 ctx.effect：客户端 fiber 卸载（HMR / 插件移除）时
-  // 自动 unmount React 根并移除 DOM —— 时间可组合性在浏览器 half 的版本。
+
+  // 兜底 UI 永远挂载：better-sidebar 不存在时提供悬浮球抽屉；
+  // 一旦 Tab 注册成功（tabRegistered 翻转），悬浮球自动隐藏。
   ctx.effect(() => {
     const host = document.createElement("div");
     host.setAttribute("data-whale-report", "");
     document.body.appendChild(host);
     const root: Root = createRoot(host);
-    root.render(<App />);
+    root.render(<FallbackDrawer />);
     return () => {
       root.unmount();
       host.remove();
     };
+  });
+
+  // Tab 优先：better-sidebar 的注册服务存在时，把鲸鱼做进它的工作台。
+  // 惰性注入：服务缺失只跳过回调，绝不阻塞装配。
+  ctx.inject(["betterSidebar"], (injected) => {
+    const service = injected.betterSidebar as BetterSidebarLike | undefined;
+    if (service === undefined) return;
+    ctx.effect(() =>
+      service.registerTab({
+        id: "dsh-whale-report:report",
+        title: "🐋 鲸鱼记事本",
+        order: 90,
+        single: true,
+        component: () => <SidebarTab />,
+      }),
+    );
+    setTabRegistered(true);
   });
 }
