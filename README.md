@@ -1,5 +1,8 @@
 # 🐋 鲸鱼记事本（dsh-whale-report）
 
+[![CI](https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml/badge.svg)](https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > 你的 Agent 年度报告：从会话事件日志里长出来的数据新闻官。
 > 日报 / 周报 / 月报 / 年报 / 任意区间，一份就能发朋友圈。
 
