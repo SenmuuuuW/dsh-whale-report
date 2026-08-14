@@ -39,8 +39,26 @@ pnpm report -- --from 2026-08-01 --to 2026-08-14   # 自定义区间
 
 ```sh
 dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
-# 重启 dsh web 后，直接说"给我一份周报"
+# 重启 dsh web
 ```
+
+装好后有**两个入口**：
+
+### 🐋 专属面板（v0.2，主入口 —— 不是聊天里的 skill）
+
+重启后 Web GUI 右下角会出现鲸鱼按钮 → 点开是「鲸鱼记事本」抽屉面板：
+
+- 日报/周报/月报/年报/自定义区间，一键生成
+- 报告渲染成统计卡片 + 24 小时作息热力条 + 惊魂清单（DSH 主题配色）
+- **导出 PDF**（浏览器打印）→ 直接发群发朋友圈
+- 「历史」页：所有报告落库保存，随时回看、删除
+
+面板不经过聊天：走插件自己的 `/whale/api` 路由（本机同源围栏），
+由官方 client-modules 接缝装载的浏览器 half 渲染。
+
+### 💬 聊天路径（保留）
+
+也可以直接说"给我一份周报"——`whale_report` 工具会把 markdown 报告发到对话里。
 
 插件走官方接缝：`ctx.sessionQuery`（listSessions + readSession），
 零补丁、零核心改动，卸载即净。报告生成时还会把 `whale/report` 事件
@@ -52,17 +70,21 @@ dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
 | --- | --- |
 | `src/stats.ts` | 报告引擎：纯函数聚合、事件宽容解析、可单测的数据层 |
 | `src/report.ts` | 文案层：数字 + 人设评语 + 热力条，markdown 报告 |
-| `src/tools.ts` | `whale_report` 工具：任意区间 + 会话事件声明合并 |
-| `src/index.ts` | cordis 三件套 + sessionQuery 接缝 |
+| `src/api.ts` | 宿主 API：`/whale/api` 路由 + 信任围栏 + 历史存储 |
+| `src/state.ts` | whale 存储域：报告历史跨会话落库 |
+| `src/tools.ts` | `whale_report` 聊天工具 + 会话事件声明合并 |
+| `src/client/index.tsx` | 浏览器 half：鲸鱼抽屉面板（React + 模块表装配） |
+| `src/trust-fence.ts` | 本机同源围栏：DNS rebinding / 跨站防御 |
 | `scripts/report-now.mjs` | 多帧 zstd 解压、脱离 harness 独立读存档 |
+| `tsdown.config.ts` | 客户端单文件 bundle：`__ModuleLoader__.load` 注册 |
 | `tests/stats.test.ts` | 12 个单测：计数/危险命令/作息/文案 |
 
 ## Roadmap
 
-- [x] v0.1：任意区间报告 + 独立 CLI（今天刚跑通你的真实数据）
-- [ ] v0.2：**定时生成**——"每早 9 点日报 / 每周五 17:00 周报"（接 dsh-schedule）
-- [ ] v0.3：危险命令**风险分级**（/tmp 清理 = 正常开发，rm -rf / 才是红色警报）
-- [ ] v0.4：精美卡片 / HTML 导出，一键发 X/群；金句语录卡
+- [x] v0.1：任意区间报告 + 独立 CLI（跑通真实数据）
+- [x] v0.2：专属鲸鱼面板（客户端 half + /whale/api + 历史落库）—— 不再是聊天里的 skill
+- [ ] v0.3：定时生成——"每早 9 点日报 / 每周五下班周报"（接 dsh-schedule）
+- [ ] v0.4：危险命令风险分级（/tmp 清理 = 正常开发，rm -rf / 才是红色警报）
 - [ ] v1.0：报告轨道开放——其他插件往报告里贡献板块（"你装了 30 个插件，7 个在吃灰"）
 
 ## License

@@ -22,7 +22,8 @@
   },
   "files": [
     "lib/index.js",
-    "lib/client.js",
+    "lib/*.js",
+    "lib/*.js.map",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml"
   ],
