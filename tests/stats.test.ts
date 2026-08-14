@@ -303,3 +303,32 @@ describe("洞察引擎", () => {
     expect(amber!.pattern.test("rm -rf /tmp/x")).toBe(true);
   });
 });
+
+describe("维护加固：边界与不误报", () => {
+  it("周期 key 边界：月末/年末/周初周日", async () => {
+    const { periodKey, previousPeriodKey } = await import("../src/insights.js");
+    expect(periodKey("monthly", Date.parse("2026-08-31T23:00:00Z"))).toBe("mo-2026-08");
+    expect(previousPeriodKey("monthly", Date.parse("2026-01-15T12:00:00Z"))).toBe("mo-2025-12");
+    expect(periodKey("yearly", Date.parse("2026-12-31T23:59:00Z"))).toBe("yr-2026");
+    expect(previousPeriodKey("yearly", Date.parse("2026-01-01T00:00:00Z"))).toBe("yr-2025");
+    expect(previousPeriodKey("daily", Date.parse("2026-08-01T00:00:00Z"))).toBe("dy-2026-07-31");
+  });
+
+  it("预算边界：预算为 0 或未设置不触发护栏", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const base = new Date(2026, 7, 10).getTime();
+    const events = [ev("turn/start", base), ev("assistant/message", base, { usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, reasoningTokens: 5 } })];
+    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
+    const cost = { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 };
+    expect(computeInsights({ stats, budgetWeeklyCny: 0, cost }).some((i) => i.id.startsWith("budget"))).toBe(false);
+    expect(computeInsights({ stats, cost }).some((i) => i.id.startsWith("budget"))).toBe(false);
+  });
+
+  it("数据不足时不触发任何洞察（避免噪音）", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const base = new Date(2026, 7, 10).getTime();
+    const stats = aggregate([ev("turn/start", base)], { from: base - 1000, to: base + 3600000 });
+    const insights = computeInsights({ stats, budgetWeeklyCny: 50, cost: { perModel: {}, total: 0.5, currency: "CNY", source: "builtin", fetchedAt: 0 } });
+    expect(insights.length).toBe(0);
+  });
+});
