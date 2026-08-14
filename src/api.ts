@@ -17,6 +17,7 @@ import { isTrustedApiRequest } from "./trust-fence.js";
 import { whaleDomain, type ReportRecord } from "./state.js";
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
+import { renderHtmlReport } from "./html.js";
 import { computeCost } from "./pricing.js";
 import type { ReportServices } from "./tools.js";
 
@@ -146,6 +147,24 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 return;
               }
               writeJson(res, 200, { ok: true, report: record });
+              return;
+            }
+            if (req.method === "GET" && method === "html") {
+              // 独立可打印 HTML 页（面板"导出 PDF"用；浏览器打印 → 另存为 PDF）
+              const url = new URL(req.url ?? "/", "http://dsh.internal");
+              const id = url.searchParams.get("id") ?? "";
+              const record = table.get(id);
+              if (!record) {
+                writeJson(res, 404, { ok: false, error: { code: "not-found", message: "报告不存在" } });
+                return;
+              }
+              const html = renderHtmlReport(record);
+              res.writeHead(200, {
+                "content-type": "text/html; charset=utf-8",
+                "cache-control": "no-store",
+                "content-length": Buffer.byteLength(html),
+              });
+              res.end(html);
               return;
             }
             if (req.method === "POST") {

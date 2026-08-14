@@ -33,7 +33,7 @@ const CSS = `
 [data-whale-report-fab]:hover { transform: translateY(-2px); background: #3e5bf5; }
 [data-whale-report-drawer] {
   position: fixed; top: 0; right: 0; height: 100vh; width: 480px; max-width: 92vw;
-  z-index: 2147482999; background: #ffffff; color: #111827;
+  z-index: 2147482999; background: #f6f7fb; color: #111827;
   box-shadow: -12px 0 40px rgba(15,23,42,.12);
   display: flex; flex-direction: column;
   transform: translateX(0); transition: transform .22s ease;
@@ -42,7 +42,7 @@ const CSS = `
 [data-whale-report-drawer][hidden] { transform: translateX(100%); pointer-events: none; }
 [data-whale-report-head] {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid #e5e7eb; background: #fff;
+  padding: 14px 20px; border-bottom: 1px solid #e5e7eb; background: #fff;
 }
 [data-whale-report-title] { font-size: 15px; font-weight: 700; color: #111827; letter-spacing: .01em; }
 [data-whale-report-close] { background: none; border: none; color: #6b7280; font-size: 16px; cursor: pointer; }
@@ -54,7 +54,7 @@ const CSS = `
   margin-bottom: -1px;
 }
 [data-whale-report-tab][data-active="true"] { color: #4d6bfe; border-bottom-color: #4d6bfe; }
-[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 20px; background: #fff; }
+[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 16px; background: #f6f7fb; }
 [data-whale-report-chips] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 [data-whale-report-chip] {
   padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
@@ -68,7 +68,7 @@ const CSS = `
   border-radius: 8px; padding: 8px 12px; font-size: 13px;
 }
 [data-whale-report-inputs] input:focus { outline: none; border-color: #4d6bfe; box-shadow: 0 0 0 3px rgba(77,107,254,.12); }
-[data-whale-report-actions] { display: flex; gap: 8px; margin-bottom: 20px; }
+[data-whale-report-actions] { display: flex; gap: 8px; margin-bottom: 14px; }
 [data-whale-report-btn] {
   padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
   border: 1px solid transparent; background: #4d6bfe; color: #fff;
@@ -76,75 +76,70 @@ const CSS = `
 [data-whale-report-btn]:hover { background: #3e5bf5; }
 [data-whale-report-btn][data-ghost="true"] { background: #fff; border-color: #d1d5db; color: #374151; }
 [data-whale-report-btn][data-ghost="true"]:hover { border-color: #9ca3af; }
-[data-whale-report-h2] { font-size: 14px; font-weight: 700; color: #111827; margin: 22px 0 10px; }
-[data-whale-report-cards] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-[data-whale-report-card] {
-  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px;
-  padding: 12px 14px;
-}
-[data-whale-report-card] b { display: block; font-size: 22px; font-weight: 800; color: #111827; }
-[data-whale-report-card] span { font-size: 12px; color: #4b5563; }
-[data-whale-report-tokenline] { font-size: 13px; color: #374151; line-height: 1.9; }
-[data-whale-report-heat] { display: flex; gap: 2px; margin: 10px 0 6px; }
-[data-whale-report-heat] i { flex: 1; height: 36px; border-radius: 4px; background: #eef2ff; }
-[data-whale-report-danger] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-  background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
-  padding: 8px 10px; margin: 6px 0; color: #b91c1c; word-break: break-all;
-}
-[data-whale-report-danger] em { display: block; font-style: normal; font-size: 11px; color: #dc2626; opacity: .75; margin-top: 4px; }
-[data-whale-report-titles] li { font-size: 13px; color: #374151; margin: 5px 0; }
-[data-whale-report-empty] { color: #6b7280; font-size: 13.5px; text-align: center; padding: 48px 0; }
-[data-whale-report-hitem] {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
-  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
-}
-[data-whale-report-hitem]:hover { border-color: #4d6bfe; box-shadow: 0 2px 8px rgba(77,107,254,.08); }
-[data-whale-report-hitem] b { font-size: 13.5px; font-weight: 700; color: #111827; }
-[data-whale-report-hitem] span { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
-[data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
 
-[data-whale-report-heatlabels] { display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; margin-top: 4px; }
-[data-whale-report-heatlabels] span { width: 16px; text-align: center; transform: translateX(-50%); }
-[data-whale-report-heatlabels] span:first-child { transform: none; }
-[data-whale-report-heatlabels] span:last-child { transform: translateX(-100%); }
-[data-whale-report-heat] { display: flex; gap: 1px; margin: 8px 0 2px; }
-[data-whale-report-heat] i { flex: 1; height: 44px; border-radius: 2px; background: #eef2ff; }
-[data-whale-report-summary] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 4px; }
-[data-whale-report-sumitem] {
-  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px;
-  padding: 10px 14px; display: flex; flex-direction: column; gap: 2px;
+/* ── 报告视图：hero + 白卡片分区 ── */
+[data-whale-report-hero] {
+  border-radius: 14px; padding: 18px 20px; margin-bottom: 12px;
+  background: #4d6bfe; color: #fff;
 }
-[data-whale-report-sumitem] b { font-size: 20px; font-weight: 800; color: #111827; }
-[data-whale-report-sumitem] span { font-size: 11.5px; color: #6b7280; }
+[data-whale-report-herotitle] { font-size: 16px; font-weight: 700; }
+[data-whale-report-herosub] { font-size: 12px; opacity: .85; margin-top: 3px; }
+[data-whale-report-herostat] { display: flex; gap: 18px; margin-top: 14px; flex-wrap: wrap; }
+[data-whale-report-herostat] div { display: flex; flex-direction: column; }
+[data-whale-report-herostat] b { font-size: 19px; font-weight: 800; }
+[data-whale-report-herostat] span { font-size: 11px; opacity: .8; margin-top: 1px; }
+[data-whale-report-card] {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.03);
+}
+[data-whale-report-h2] {
+  font-size: 13.5px; font-weight: 700; color: #111827; margin: 0 0 10px;
+  display: flex; align-items: center; gap: 7px;
+}
+[data-whale-report-h2]::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: #4d6bfe; }
+[data-whale-report-tokenline] { font-size: 12.5px; color: #374151; line-height: 1.9; }
+[data-whale-report-tokenline] .muted { color: #9ca3af; }
+
+/* 活动矩阵：行=24h 列=天 */
+[data-whale-report-gridwrap] { margin: 6px 0 2px; }
+[data-whale-report-grid] { display: flex; gap: 3px; align-items: stretch; }
+[data-whale-report-gridhours] { display: flex; flex-direction: column; gap: 3px; margin-right: 5px; flex-shrink: 0; }
+[data-whale-report-gridhours] span { height: 10px; font-size: 8.5px; color: #9ca3af; line-height: 10px; text-align: right; width: 22px; }
+[data-whale-report-gridcol] { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+[data-whale-report-gridcol] i { height: 10px; border-radius: 2px; }
+[data-whale-report-griddates] { display: flex; gap: 3px; margin: 6px 0 0 27px; }
+[data-whale-report-griddates] span { flex: 1; min-width: 0; font-size: 8.5px; color: #9ca3af; text-align: center; overflow: hidden; white-space: nowrap; }
+[data-whale-report-gridempty] { font-size: 12px; color: #6b7280; padding: 8px 0; }
+
+/* 每日活跃柱状 */
+[data-whale-report-daily] { display: flex; align-items: flex-end; gap: 3px; height: 88px; margin: 10px 0 4px; }
+[data-whale-report-dailycol] { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 4px; min-width: 0; }
+[data-whale-report-dailycol] i { display: block; width: 100%; max-width: 20px; border-radius: 3px 3px 0 0; background: #4d6bfe; }
+[data-whale-report-dailycol] span { font-size: 9px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* Token 构成 */
 [data-whale-report-tokenbar] { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #f3f4f6; margin: 8px 0 6px; }
 [data-whale-report-tokenbar] i { display: block; height: 100%; }
 [data-whale-report-tokenlegend] { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: #4b5563; }
 [data-whale-report-tokenlegend] span { display: inline-flex; align-items: center; gap: 4px; }
 [data-whale-report-tokenlegend] i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
-[data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 10px; }
-[data-whale-report-modelrow] {
-  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px;
-}
+
+/* 模型用量 */
+[data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 8px; }
+[data-whale-report-modelrow] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; }
 [data-whale-report-modelhead] { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
 [data-whale-report-modelhead] b { font-size: 13px; font-weight: 700; color: #111827; }
-[data-whale-report-modelhead] span { font-size: 12px; font-weight: 600; color: #4d6bfe; }
+[data-whale-report-modelhead] span { font-size: 12px; font-weight: 700; color: #4d6bfe; }
 [data-whale-report-modelbar] { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f3f4f6; }
 [data-whale-report-modelbar] i { display: block; height: 100%; }
 [data-whale-report-modelnums] { font-size: 11px; color: #6b7280; margin-top: 6px; }
-[data-whale-report-daily] { display: flex; align-items: flex-end; gap: 3px; height: 96px; margin: 10px 0 6px; }
-[data-whale-report-dailycol] { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 4px; min-width: 0; }
-[data-whale-report-dailycol] i { display: block; width: 100%; max-width: 22px; border-radius: 3px 3px 0 0; background: #4d6bfe; }
-[data-whale-report-dailycol] span { font-size: 9.5px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
-[data-whale-report-gridwrap] { margin: 10px 0 4px; }
-[data-whale-report-grid] { display: flex; gap: 3px; align-items: stretch; }
-[data-whale-report-gridhours] { display: flex; flex-direction: column; gap: 3px; margin-right: 4px; flex-shrink: 0; }
-[data-whale-report-gridhours] span { height: 9px; font-size: 8.5px; color: #9ca3af; line-height: 9px; text-align: right; width: 20px; }
-[data-whale-report-gridcol] { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-[data-whale-report-gridcol] i { height: 9px; border-radius: 2px; }
-[data-whale-report-griddates] { display: flex; gap: 3px; margin: 6px 0 0 24px; }
-[data-whale-report-griddates] span { flex: 1; min-width: 0; font-size: 8.5px; color: #9ca3af; text-align: center; overflow: hidden; white-space: nowrap; }
+/* 危险操作 */
+[data-whale-report-dangersum] {
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; color: #3730a3; line-height: 1.7; margin-bottom: 8px;
+}
 [data-whale-report-dangercats] { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 [data-whale-report-dangercat] {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
@@ -152,10 +147,31 @@ const CSS = `
   border: 1px solid #fecaca;
 }
 [data-whale-report-dangercat] b { font-weight: 800; }
+[data-whale-report-danger] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+  padding: 8px 10px; margin: 6px 0; color: #b91c1c; word-break: break-all;
+}
+[data-whale-report-danger] em { display: block; font-style: normal; font-size: 11px; color: #dc2626; opacity: .75; margin-top: 4px; }
+[data-whale-report-samplesbtn] { margin-top: 4px; }
+[data-whale-report-titles] li { font-size: 12.5px; color: #374151; margin: 5px 0; }
+[data-whale-report-empty] { color: #6b7280; font-size: 13.5px; text-align: center; padding: 48px 0; }
+[data-whale-report-hitem] {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+}
+[data-whale-report-hitem]:hover { border-color: #4d6bfe; box-shadow: 0 2px 8px rgba(77,107,254,.08); }
+[data-whale-report-hitem] b { font-size: 13.5px; font-weight: 700; color: #111827; }
+[data-whale-report-hitem] span { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
+[data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
+[data-whale-report-summary] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0; }
+[data-whale-report-sumitem] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
+[data-whale-report-sumitem] b { font-size: 20px; font-weight: 800; color: #111827; }
+[data-whale-report-sumitem] span { font-size: 11.5px; color: #6b7280; }
 
-/* Tab 形态：填满侧栏 pane，白底 + 自带滚动 */
-[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 16px 20px 24px; color: #111827; background: #ffffff; }
-[data-whale-report-tabhost] [data-whale-report-card] { background: #f9fafb; }
+/* Tab 形态 */
+[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 14px 16px 24px; color: #111827; background: #f6f7fb; }
+[data-whale-report-tabhost] [data-whale-report-card] { background: #fff; }
 
 @media print {
   body * { visibility: hidden; }
@@ -166,14 +182,11 @@ const CSS = `
   }
   [data-whale-report-fab], [data-whale-report-close], [data-whale-report-tabs],
   [data-whale-report-chips], [data-whale-report-inputs], [data-whale-report-actions] { display: none !important; }
-  [data-whale-report-card] { background: #f9fafb; border-color: #e2e4ee; }
-  [data-whale-report-card] b { color: #111; }
-  [data-whale-report-card] span { color: #555; }
-  [data-whale-report-tokenline] { color: #333; }
-  [data-whale-report-danger] { background: #fdf0f0; color: #7f1d1d; border-color: #f5c6c6; }
-  [data-whale-report-h2], [data-whale-report-titles] li { color: #111; }
+  [data-whale-report-hero] { background: #4d6bfe; color: #fff; }
+  [data-whale-report-card] { box-shadow: none; break-inside: avoid; }
 }
 `;
+
 
 let styleInjected = false;
 function injectStyle(): void {
@@ -413,108 +426,163 @@ function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: Repo
   );
 }
 
+/** 危险操作自动总结（规则生成，不用 LLM）。 */
+function dangerSummary(danger: StatsJson["dangerousCommands"]): string {
+  if (danger.length === 0) return "";
+  danger = danger.map((d) => ({ ...d, label: d.label ?? "未分类" }));
+  const byLabel = new Map<string, number>();
+  for (const d of danger) byLabel.set(d.label, (byLabel.get(d.label) ?? 0) + 1);
+  const top = [...byLabel.entries()].sort((a, b) => b[1] - a[1])[0];
+  const share = Math.round((top[1] / danger.length) * 100);
+  const night = danger.filter((d) => {
+    const h = new Date(d.time).getHours();
+    return h < 6 || h >= 23;
+  }).length;
+  return `本报告期内共 ${danger.length} 条危险操作，以「${top[0]}」为主（${top[1]} 条，占 ${share}%）${night > 0 ? `，其中 ${night} 条发生在深夜时段，建议回顾审批习惯` : ""}。`;
+}
+
 function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: string) => void }): ReactNode {
   const s = report.stats;
   const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   const topTools = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
   const [dangerExpanded, setDangerExpanded] = useState(false);
-  const danger = s.dangerousCommands ?? [];
-  const shownDanger = dangerExpanded ? danger.slice(0, 20) : danger.slice(0, 5);
+  const [samplesShown, setSamplesShown] = useState(false);
+  const danger = (s.dangerousCommands ?? []).map((d) => ({ ...d, label: d.label ?? "未分类" }));
+  const shownDanger = dangerExpanded ? danger.slice(0, 30) : danger.slice(0, 3);
+  const summary = dangerSummary(danger);
+
+  const exportPdf = (): void => {
+    const url = `/whale/api/html?id=${encodeURIComponent(report.id)}`;
+    window.open(url, "_blank");
+  };
+
   return (
     <div>
       <div data-whale-report-actions>
-        <button data-whale-report-btn onClick={() => window.print()}>导出 PDF / 打印</button>
+        <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
         <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
       </div>
 
-      <div data-whale-report-summary>
-        <div data-whale-report-sumitem><b>{s.sessions}</b><span>会话</span></div>
-        <div data-whale-report-sumitem><b>{s.turns}</b><span>回合</span></div>
-        <div data-whale-report-sumitem><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
-        <div data-whale-report-sumitem><b>{fmt(s.commands)}</b><span>命令</span></div>
-        <div data-whale-report-sumitem><b>{fmt(totalTokens)}</b><span>Token</span></div>
-        <div data-whale-report-sumitem><b>{Object.keys(s.models ?? {}).length}</b><span>模型</span></div>
+      <div data-whale-report-hero>
+        <div data-whale-report-herotitle>深迹 {PRESETS.find((p) => p.key === report.preset)?.label ?? "报告"}</div>
+        <div data-whale-report-herosub>{dateStr(report.from)} ~ {dateStr(report.to)}</div>
+        <div data-whale-report-herostat>
+          <div><b>{s.sessions}</b><span>会话</span></div>
+          <div><b>{s.turns}</b><span>回合</span></div>
+          <div><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
+          <div><b>{fmt(s.commands)}</b><span>命令</span></div>
+          <div><b>{fmt(totalTokens)}</b><span>Token</span></div>
+          {typeof report.cost?.total === "number" && (
+            <div><b>¥{report.cost.total.toFixed(2)}</b><span>预估费用</span></div>
+          )}
+        </div>
       </div>
 
-      <div data-whale-report-h2>Token 构成</div>
-      <TokenBar tokens={s.tokens} />
-
-      <div data-whale-report-h2>模型用量（DeepSeek 官方计价）</div>
-      <ModelTable models={s.models ?? {}} cost={report.cost} />
-      {typeof report.cost?.total === "number" && report.cost.total > 0 && (
+      <div data-whale-report-card>
+        <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
+        {(s.dayHourSeries ?? []).length > 0 ? (
+          <ActivityGrid series={s.dayHourSeries} />
+        ) : (
+          <div data-whale-report-gridempty>该报告生成于旧版本，无逐时数据。重新生成即可。</div>
+        )}
         <div data-whale-report-tokenline>
-          预估费用合计 <b>¥{report.cost.total.toFixed(2)}</b>
-          <span style={{ color: "#9ca3af" }}>（{report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 仅计费估算，以平台账单为准）</span>
+          活跃 {s.activeDays} 天
+          {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
         </div>
-      )}
-
-      <div data-whale-report-h2>活跃时段（GitHub 风格 · 凌晨 {night}%）</div>
-      <ActivityGrid series={s.dayHourSeries ?? []} />
-      <div data-whale-report-tokenline>
-        活跃 {s.activeDays} 天
-        {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
       </div>
 
       {(s.dailySeries ?? []).length > 0 && (
-        <>
+        <div data-whale-report-card>
           <div data-whale-report-h2>每日活跃</div>
           <DailyBars series={s.dailySeries} />
-        </>
+        </div>
       )}
 
-      <div data-whale-report-h2>常用工具</div>
-      {topTools.length === 0 ? (
-        <div data-whale-report-tokenline>（没有调用工具）</div>
-      ) : (
-        topTools.map(([toolName, count]) => (
-          <div key={toolName} data-whale-report-tokenline>
-            <code>{toolName}</code> × {count}
-          </div>
-        ))
-      )}
+      <div data-whale-report-card>
+        <div data-whale-report-h2>Token 构成</div>
+        <TokenBar tokens={s.tokens} />
+      </div>
 
-      <div data-whale-report-h2>危险操作（{danger.length}）</div>
-      {danger.length === 0 ? (
-        <div data-whale-report-tokenline>无危险操作</div>
-      ) : (
-        <>
-          <div data-whale-report-dangercats>
-            {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
-              .sort((a, b) => b[1] - a[1])
-              .map(([label, count]) => (
-                <span key={label} data-whale-report-dangercat>
-                  {label} <b>{count}</b>
-                </span>
-              ))}
+      <div data-whale-report-card>
+        <div data-whale-report-h2>模型用量（DeepSeek 官方计价）</div>
+        <ModelTable models={s.models ?? {}} cost={report.cost} />
+        {typeof report.cost?.total === "number" && report.cost.total > 0 && (
+          <div data-whale-report-tokenline style={{ marginTop: 8 }}>
+            预估合计 <b>¥{report.cost.total.toFixed(2)}</b>
+            <span className="muted"> · {report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 以平台账单为准</span>
           </div>
-          <div data-whale-report-tokenline>最近样本：</div>
-          {shownDanger.map((d, i) => (
-            <div key={i} data-whale-report-danger>
-              {d.command.replace(/\s+/g, " ").slice(0, 64)}
-              <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
+        )}
+      </div>
+
+      <div data-whale-report-card>
+        <div data-whale-report-h2>常用工具</div>
+        {topTools.length === 0 ? (
+          <div data-whale-report-tokenline>（没有调用工具）</div>
+        ) : (
+          topTools.map(([toolName, count]) => (
+            <div key={toolName} data-whale-report-tokenline>
+              <code>{toolName}</code> × {count}
             </div>
-          ))}
-          {danger.length > 5 && (
-            <button data-whale-report-chip onClick={() => setDangerExpanded(!dangerExpanded)}>
-              {dangerExpanded ? "收起" : `查看全部 ${danger.length} 条`}
+          ))
+        )}
+      </div>
+
+      <div data-whale-report-card>
+        <div data-whale-report-h2>危险操作（{danger.length}）</div>
+        {danger.length === 0 ? (
+          <div data-whale-report-tokenline>无危险操作</div>
+        ) : (
+          <>
+            <div data-whale-report-dangersum>{summary}</div>
+            <div data-whale-report-dangercats>
+              {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([label, count]) => (
+                  <span key={label} data-whale-report-dangercat>
+                    {label} <b>{count}</b>
+                  </span>
+                ))}
+            </div>
+            <button
+              data-whale-report-chip
+              data-whale-report-samplesbtn
+              onClick={() => {
+                setSamplesShown(!samplesShown);
+                setDangerExpanded(false);
+              }}
+            >
+              {samplesShown ? "收起样本" : `查看样本（${danger.length}）`}
             </button>
-          )}
-        </>
-      )}
+            {samplesShown && (
+              <>
+                {shownDanger.map((d, i) => (
+                  <div key={i} data-whale-report-danger>
+                    {d.command.replace(/\s+/g, " ").slice(0, 64)}
+                    <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
+                  </div>
+                ))}
+                {danger.length > 3 && !dangerExpanded && (
+                  <button data-whale-report-chip onClick={() => setDangerExpanded(true)}>展开更多</button>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
 
       {(s.titles ?? []).length > 0 && (
-        <>
+        <div data-whale-report-card>
           <div data-whale-report-h2>会话标题</div>
           <ul data-whale-report-titles>
             {s.titles.slice(0, 8).map((t) => (
               <li key={t}>{t}</li>
             ))}
           </ul>
-        </>
+        </div>
       )}
 
-      <div data-whale-report-tokenline style={{ marginTop: 16, fontSize: 11 }}>
+      <div data-whale-report-tokenline style={{ fontSize: 11 }} className="muted">
         基于 {s.totalEvents} 条会话事件 · 只读 · 生成于 {dateStr(report.createdAt)}
       </div>
     </div>
