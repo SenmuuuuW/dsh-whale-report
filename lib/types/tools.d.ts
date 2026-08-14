@@ -28,9 +28,11 @@ export interface SessionQueryLike {
     readSession(sessionId: string): Promise<{
         session: {
             id: string;
+            seedLength?: number;
         };
         events: {
             type: string;
+            seq: number;
             time: number;
             data: unknown;
         }[];

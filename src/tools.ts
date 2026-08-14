@@ -24,8 +24,8 @@ export interface SessionQueryLike {
     { header: { id: string; createdAt: number; cwd?: string; delegationDepth?: number } }[]
   >;
   readSession(sessionId: string): Promise<{
-    session: { id: string };
-    events: { type: string; time: number; data: unknown }[];
+    session: { id: string; seedLength?: number };
+    events: { type: string; seq: number; time: number; data: unknown }[];
   }>;
 }
 
@@ -79,11 +79,17 @@ export async function collectEvents(
 
   const events: RawEvent[] = [];
   let failed = 0;
+  // 关键：readSession 返回"完整逻辑日志"，其中子代理/续聊会话的前缀是
+  // 继承自父会话的种子事件（seed，seq < header.seedLength）。若不去重，
+  // 一个父会话的事件会被它的每个后代重复计数（实测放大了 50 倍）。
+  // 正解：只统计每个会话"自己的"事件（seedLength 之后的），
+  // 这样每个事件恰好在其属主会话被计一次。
   for (const record of sessions) {
-    // 时间粗筛：会话创建于区间结束之后 / 之前很久的，跳过完整读取。
     try {
       const snapshot = await svc.sessionQuery.readSession(record.header.id);
+      const ownStart = snapshot.session.seedLength ?? 0;
       for (const event of snapshot.events) {
+        if (event.seq < ownStart) continue;
         if (event.time < period.from || event.time >= period.to) continue;
         events.push({
           type: event.type,
