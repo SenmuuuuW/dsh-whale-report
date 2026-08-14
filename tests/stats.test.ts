@@ -193,6 +193,8 @@ describe("索引层：bucketizeOwnEvents + aggregateBuckets 与 aggregate 等价
     expect(indexed.toolErrors).toBe(direct.toolErrors);
     expect(indexed.commands).toBe(direct.commands);
     expect(indexed.dangerousCommands.length).toBe(direct.dangerousCommands.length);
+    expect(indexed.dangerousCommands[0].label).toBe(direct.dangerousCommands[0].label);
+    expect(indexed.dayHourSeries).toEqual(direct.dayHourSeries);
     expect(indexed.titles).toEqual(direct.titles);
     expect(indexed.sessions).toBe(direct.sessions);
   });
@@ -208,5 +210,27 @@ describe("索引层：bucketizeOwnEvents + aggregateBuckets 与 aggregate 等价
     const total = built.buckets.reduce((s, b) => s + b.turns, 0);
     expect(total).toBe(1);
     expect(built.lastSeq).toBe(2);
+  });
+});
+
+describe("DeepSeek 计费（pricing）", () => {
+  it("费用按三桶计算：缓存命中 + 未命中 + 输出", async () => {
+    const { modelCost, modelTier } = await import("../src/pricing.js");
+    const flash = {
+      cacheReadPerMillion: 0.02,
+      inputPerMillion: 1,
+      outputPerMillion: 2,
+    };
+    const usage = { input: 3_000_000, output: 500_000, cacheRead: 2_000_000, reasoning: 100_000 };
+    // 命中 2M×0.02 + 未命中 1M×1 + 输出 0.5M×2 = 0.04 + 1 + 1 = 2.04
+    expect(modelCost(usage, flash)).toBeCloseTo(2.04, 4);
+    expect(modelTier("deepseek-v4-pro")).toBe("pro");
+    expect(modelTier("deepseek-v4-flash")).toBe("flash");
+  });
+
+  it("内置回退价存在且为正", async () => {
+    const { BUILTIN_PRICES } = await import("../src/pricing.js");
+    expect(BUILTIN_PRICES.flash.inputPerMillion).toBeGreaterThan(0);
+    expect(BUILTIN_PRICES.pro.inputPerMillion).toBeGreaterThan(0);
   });
 });

@@ -17,6 +17,7 @@ import { isTrustedApiRequest } from "./trust-fence.js";
 import { whaleDomain, type ReportRecord } from "./state.js";
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
+import { computeCost } from "./pricing.js";
 import type { ReportServices } from "./tools.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -84,7 +85,8 @@ async function generateReport(
 
   const { collectEvents } = await import("./tools.js");
   const stats = await collectEvents(svc, range);
-  const markdown = renderReport(stats, preset);
+  const cost = await computeCost(stats.models);
+  const markdown = renderReport(stats, preset, cost);
 
   const record: ReportRecord = {
     id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -97,6 +99,7 @@ async function generateReport(
     totalEvents: stats.totalEvents,
     stats: stats as unknown,
     markdown,
+    cost,
   };
   await svc.domain.table("reports").put(record.id, record);
   return record;

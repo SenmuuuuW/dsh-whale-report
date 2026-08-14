@@ -59,11 +59,12 @@ export interface ReportStats {
     toolErrors: number;
     /** bash 命令总数。 */
     commands: number;
-    /** 危险命令列表（最刺激的部分）。 */
+    /** 危险命令列表（带分类标签）。 */
     dangerousCommands: {
         command: string;
         time: number;
         sessionId: string;
+        label: string;
     }[];
     /** 24 小时直方图：凌晨 0 点到 23 点各有多少条事件。 */
     hourHistogram: number[];
@@ -86,6 +87,11 @@ export interface ReportStats {
     dailySeries: {
         date: string;
         count: number;
+    }[];
+    /** 按日 × 24 小时的事件矩阵（GitHub 贡献图风格的活动图）。 */
+    dayHourSeries: {
+        date: string;
+        hours: number[];
     }[];
 }
 /** 危险命令特征（正则，匹配 bash 命令字符串）。 */
@@ -125,10 +131,11 @@ export interface HourBucket {
     toolCalls: Record<string, number>;
     toolErrors: number;
     commands: number;
-    /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP）。 */
+    /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签。 */
     danger: {
         cmd: string;
         ms: number;
+        label: string;
     }[];
     /** 该分桶内按模型的 token 用量。 */
     modelUsage: Record<string, {

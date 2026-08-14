@@ -9,6 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord } from "./state.js";
+import { computeCost } from "./pricing.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
@@ -91,7 +92,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 2;
+export const INDEX_VERSION = 3;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -252,7 +253,8 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
       }
 
       const stats = await collectEvents(svc, range);
-      const report = renderReport(stats, preset);
+      const cost = await computeCost(stats.models);
+      const report = renderReport(stats, preset, cost);
 
       // 报告本身也写进会话日志 —— 鲸鱼记事本记下它自己写的账。
       // （读与写同源：下次报告会数到这一次。）
@@ -276,6 +278,7 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
         turns: stats.turns,
         totalEvents: stats.totalEvents,
         report,
+        cost: { perModel: cost.perModel, total: cost.total, currency: cost.currency, source: cost.source },
       };
     },
     presentCall: (args) => ({

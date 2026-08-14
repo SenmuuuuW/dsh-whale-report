@@ -21,6 +21,8 @@ export const ReportRecordSchema = z.object({
   stats: z.unknown(),
   /** 渲染好的 markdown 报告（聊天路径 / 复制分享用）。 */
   markdown: z.string(),
+  /** 费用拆解（CostBreakdown，由 pricing.ts 计算；旧记录可缺省）。 */
+  cost: z.unknown().optional(),
 });
 
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;

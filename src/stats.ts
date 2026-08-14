@@ -65,8 +65,8 @@ export interface ReportStats {
   toolErrors: number;
   /** bash 命令总数。 */
   commands: number;
-  /** 危险命令列表（最刺激的部分）。 */
-  dangerousCommands: { command: string; time: number; sessionId: string }[];
+  /** 危险命令列表（带分类标签）。 */
+  dangerousCommands: { command: string; time: number; sessionId: string; label: string }[];
   /** 24 小时直方图：凌晨 0 点到 23 点各有多少条事件。 */
   hourHistogram: number[];
   /** 有事件的天数。 */
@@ -83,6 +83,8 @@ export interface ReportStats {
   halfHourHistogram: number[];
   /** 按日事件数序列（趋势图用）。 */
   dailySeries: { date: string; count: number }[];
+  /** 按日 × 24 小时的事件矩阵（GitHub 贡献图风格的活动图）。 */
+  dayHourSeries: { date: string; hours: number[] }[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -125,6 +127,7 @@ export function emptyStats(period: Period): ReportStats {
     models: {},
     halfHourHistogram: new Array(48).fill(0) as number[],
     dailySeries: [],
+    dayHourSeries: [],
   };
 }
 
@@ -194,6 +197,7 @@ export function aggregate(
   const stats = emptyStats(period);
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
+  const dayHourMap = new Map<string, number[]>();
   const sessionIdsByEvent: string[] = [];
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
@@ -217,6 +221,12 @@ export function aggregate(
 
     const day = new Date(event.time).toISOString().slice(0, 10);
     days.set(day, (days.get(day) ?? 0) + 1);
+    let dayHour = dayHourMap.get(day);
+    if (dayHour === undefined) {
+      dayHour = new Array(24).fill(0) as number[];
+      dayHourMap.set(day, dayHour);
+    }
+    dayHour[hour] += 1;
 
     const data = event.data as Record<string, unknown> | undefined;
     const sessionId = (data?.sessionId as string) ?? lastHeader?.id ?? "unknown";
@@ -265,7 +275,7 @@ export function aggregate(
           stats.commands += 1;
           for (const { pattern, label } of DANGEROUS_PATTERNS) {
             if (pattern.test(command)) {
-              stats.dangerousCommands.push({ command, time: event.time, sessionId });
+              stats.dangerousCommands.push({ command, time: event.time, sessionId, label });
               break;
             }
           }
@@ -302,6 +312,7 @@ export function aggregate(
   }
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
+  stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
 
   return stats;
 }
@@ -352,8 +363,8 @@ export interface HourBucket {
   toolCalls: Record<string, number>;
   toolErrors: number;
   commands: number;
-  /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP）。 */
-  danger: { cmd: string; ms: number }[];
+  /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签。 */
+  danger: { cmd: string; ms: number; label: string }[];
   /** 该分桶内按模型的 token 用量。 */
   modelUsage: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
 }
@@ -459,9 +470,9 @@ export function bucketizeOwnEvents(
         if (command) {
           bucket.commands += 1;
           if (bucket.danger.length < DANGER_SAMPLE_CAP) {
-            for (const { pattern } of DANGEROUS_PATTERNS) {
+            for (const { pattern, label } of DANGEROUS_PATTERNS) {
               if (pattern.test(command)) {
-                bucket.danger.push({ cmd: command, ms: event.time });
+                bucket.danger.push({ cmd: command, ms: event.time, label });
                 break;
               }
             }
@@ -501,6 +512,7 @@ export function aggregateBuckets(
   const stats = emptyStats(period);
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
+  const dayHourMap = new Map<string, number[]>();
   const days = new Map<string, number>();
 
   for (const view of views) {
@@ -539,7 +551,7 @@ export function aggregateBuckets(
         m.reasoning += usage.reasoning;
       }
       for (const d of bucket.danger) {
-        stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId });
+        stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId, label: d.label });
       }
       const d = new Date(bucket.h);
       const hour = d.getHours();
@@ -547,6 +559,12 @@ export function aggregateBuckets(
       stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += bucket.total;
       const day = new Date(bucket.h).toISOString().slice(0, 10);
       days.set(day, (days.get(day) ?? 0) + bucket.total);
+      let dayHour = dayHourMap.get(day);
+      if (dayHour === undefined) {
+        dayHour = new Array(24).fill(0) as number[];
+        dayHourMap.set(day, dayHour);
+      }
+      dayHour[new Date(bucket.h).getHours()] += bucket.total;
     }
     for (const title of view.titles) {
       if (!stats.titles.includes(title)) stats.titles.push(title);
@@ -567,5 +585,6 @@ export function aggregateBuckets(
   }
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
+  stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
   return stats;
 }

@@ -137,6 +137,22 @@ const CSS = `
 [data-whale-report-dailycol] i { display: block; width: 100%; max-width: 22px; border-radius: 3px 3px 0 0; background: #4d6bfe; }
 [data-whale-report-dailycol] span { font-size: 9.5px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
+[data-whale-report-gridwrap] { margin: 10px 0 4px; }
+[data-whale-report-grid] { display: flex; gap: 3px; align-items: stretch; }
+[data-whale-report-gridhours] { display: flex; flex-direction: column; gap: 3px; margin-right: 4px; flex-shrink: 0; }
+[data-whale-report-gridhours] span { height: 9px; font-size: 8.5px; color: #9ca3af; line-height: 9px; text-align: right; width: 20px; }
+[data-whale-report-gridcol] { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+[data-whale-report-gridcol] i { height: 9px; border-radius: 2px; }
+[data-whale-report-griddates] { display: flex; gap: 3px; margin: 6px 0 0 24px; }
+[data-whale-report-griddates] span { flex: 1; min-width: 0; font-size: 8.5px; color: #9ca3af; text-align: center; overflow: hidden; white-space: nowrap; }
+[data-whale-report-dangercats] { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+[data-whale-report-dangercat] {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+  border-radius: 999px; font-size: 11.5px; background: #fef2f2; color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+[data-whale-report-dangercat] b { font-weight: 800; }
+
 /* Tab 形态：填满侧栏 pane，白底 + 自带滚动 */
 [data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 16px 20px 24px; color: #111827; background: #ffffff; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #f9fafb; }
@@ -185,6 +201,7 @@ interface ReportMeta {
 interface ReportFull extends ReportMeta {
   stats: StatsJson;
   markdown: string;
+  cost?: { perModel: Record<string, number>; total: number; currency: string; source: string };
 }
 
 interface StatsJson {
@@ -200,7 +217,7 @@ interface StatsJson {
   toolCallsTotal: number;
   toolErrors: number;
   commands: number;
-  dangerousCommands: { command: string; time: number; sessionId: string }[];
+  dangerousCommands: { command: string; time: number; sessionId: string; label: string }[];
   hourHistogram: number[];
   activeDays: number;
   busiestDay: { date: string; events: number } | null;
@@ -209,6 +226,7 @@ interface StatsJson {
   models: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
   halfHourHistogram: number[];
   dailySeries: { date: string; count: number }[];
+  dayHourSeries: { date: string; hours: number[] }[];
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
@@ -298,6 +316,46 @@ function DailyBars({ series }: { series: { date: string; count: number }[] }): R
   );
 }
 
+/** GitHub 贡献图风格的活动矩阵：行 = 24 小时，列 = 天。 */
+function ActivityGrid({ series }: { series: { date: string; hours: number[] }[] }): ReactNode {
+  if (series.length === 0) return null;
+  const max = Math.max(1, ...series.flatMap((s) => s.hours));
+  const hue = (count: number): string => {
+    if (count === 0) return "#f3f4f6";
+    const level = Math.max(0.15, Math.min(1, count / max));
+    return `rgba(77,107,254,${level.toFixed(2)})`;
+  };
+  const hourLabels = ["00", "06", "12", "18", "23"];
+  const shown = series.slice(-30); // 最多 30 列
+  return (
+    <div data-whale-report-gridwrap>
+      <div data-whale-report-grid>
+        <div data-whale-report-gridhours>
+          {Array.from({ length: 24 }, (_, h) => (
+            <span key={h}>{hourLabels.includes(String(h).padStart(2, "0")) ? String(h).padStart(2, "0") : ""}</span>
+          ))}
+        </div>
+        {shown.map((day) => (
+          <div key={day.date} data-whale-report-gridcol>
+            {day.hours.map((count, h) => (
+              <i
+                key={h}
+                title={`${day.date} ${String(h).padStart(2, "0")}:00 · ${count} 事件`}
+                style={{ background: hue(count) }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <div data-whale-report-griddates>
+        {shown.map((day) => (
+          <span key={day.date}>{day.date.slice(5)}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
 function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
   const total = tokens.input + tokens.output + tokens.cacheRead + tokens.reasoning;
@@ -324,7 +382,7 @@ function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
 }
 
 /** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
-function ModelTable({ models }: { models: StatsJson["models"] }): ReactNode {
+function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: ReportFull["cost"] }): ReactNode {
   const entries = Object.entries(models).sort(
     (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
   );
@@ -337,7 +395,7 @@ function ModelTable({ models }: { models: StatsJson["models"] }): ReactNode {
           <div key={model} data-whale-report-modelrow>
             <div data-whale-report-modelhead>
               <b>{model}</b>
-              <span>{fmt(total)} token</span>
+              <span>{fmt(total)} token{typeof cost?.perModel[model] === "number" ? ` · ¥${cost.perModel[model].toFixed(2)}` : ""}</span>
             </div>
             <div data-whale-report-modelbar>
               <i title={`输入 ${fmt(u.input)}`} style={{ width: `${(u.input / total) * 100}%`, background: "#4d6bfe" }} />
@@ -382,11 +440,17 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       <div data-whale-report-h2>Token 构成</div>
       <TokenBar tokens={s.tokens} />
 
-      <div data-whale-report-h2>模型用量</div>
-      <ModelTable models={s.models ?? {}} />
+      <div data-whale-report-h2>模型用量（DeepSeek 官方计价）</div>
+      <ModelTable models={s.models ?? {}} cost={report.cost} />
+      {typeof report.cost?.total === "number" && report.cost.total > 0 && (
+        <div data-whale-report-tokenline>
+          预估费用合计 <b>¥{report.cost.total.toFixed(2)}</b>
+          <span style={{ color: "#9ca3af" }}>（{report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 仅计费估算，以平台账单为准）</span>
+        </div>
+      )}
 
-      <div data-whale-report-h2>活跃时段（30 分钟粒度 · 凌晨 {night}%）</div>
-      <Heatmap histogram={s.halfHourHistogram ?? []} />
+      <div data-whale-report-h2>活跃时段（GitHub 风格 · 凌晨 {night}%）</div>
+      <ActivityGrid series={s.dayHourSeries ?? []} />
       <div data-whale-report-tokenline>
         活跃 {s.activeDays} 天
         {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
@@ -415,10 +479,20 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         <div data-whale-report-tokenline>无危险操作</div>
       ) : (
         <>
+          <div data-whale-report-dangercats>
+            {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([label, count]) => (
+                <span key={label} data-whale-report-dangercat>
+                  {label} <b>{count}</b>
+                </span>
+              ))}
+          </div>
+          <div data-whale-report-tokenline>最近样本：</div>
           {shownDanger.map((d, i) => (
             <div key={i} data-whale-report-danger>
               {d.command.replace(/\s+/g, " ").slice(0, 64)}
-              <em>{new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
+              <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
             </div>
           ))}
           {danger.length > 5 && (

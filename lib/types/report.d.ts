@@ -4,6 +4,7 @@
  * 文案规则：数字先说、事实直陈、不加装饰。
  */
 import { type ReportStats } from "./stats.js";
+import type { CostBreakdown } from "./pricing.js";
 export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 export declare const PRESET_LABELS: Record<ReportPreset, string>;
 /** 预设区间 → [from, to) 毫秒。 */
@@ -11,5 +12,5 @@ export declare function presetRange(preset: ReportPreset, now: number): {
     from: number;
     to: number;
 };
-export declare function renderReport(stats: ReportStats, preset: ReportPreset): string;
+export declare function renderReport(stats: ReportStats, preset: ReportPreset, cost?: CostBreakdown): string;
 //# sourceMappingURL=report.d.ts.map
