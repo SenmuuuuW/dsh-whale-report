@@ -101,6 +101,13 @@ const CSS = `
 [data-whale-report-tokenline] { font-size: 12.5px; color: #374151; line-height: 1.9; }
 [data-whale-report-tokenline] .muted { color: #9ca3af; }
 
+/* 单行活动条（日报 30min / 月报 1天 / 年报 1周） */
+[data-whale-report-strip] { display: flex; gap: 2px; margin: 8px 0 4px; }
+[data-whale-report-strip] i { flex: 1; height: 18px; border-radius: 3px; min-width: 0; }
+[data-whale-report-striplabels] { display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; }
+[data-whale-report-legend] { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #9ca3af; margin-top: 8px; }
+[data-whale-report-legend] i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
 /* 活动矩阵：行=24h 列=天 */
 [data-whale-report-gridwrap] { margin: 6px 0 2px; }
 [data-whale-report-grid] { display: flex; gap: 3px; align-items: stretch; }
@@ -315,61 +322,147 @@ function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
 }
 
 /** 每日事件趋势：纯 CSS 柱状图。 */
-function DailyBars({ series }: { series: { date: string; count: number }[] }): ReactNode {
-  const max = Math.max(1, ...series.map((s) => s.count));
+/** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
+/** 绿色强度（越绿越活跃）。 */
+function green(level: number): string {
+  return `rgba(34,197,94,${(0.14 + level * 0.86).toFixed(2)})`;
+}
+
+/** 图例：少 → 多。 */
+function Legend(): ReactNode {
   return (
-    <div data-whale-report-daily>
-      {series.map((s) => (
-        <div key={s.date} data-whale-report-dailycol title={`${s.date} · ${fmt(s.count)} 事件`}>
-          <i style={{ height: `${Math.max(3, Math.round((s.count / max) * 100))}%` }} />
-          <span>{s.date.slice(5)}</span>
-        </div>
-      ))}
+    <div data-whale-report-legend>
+      <span>少</span>
+      <i style={{ background: green(0) }} />
+      <i style={{ background: green(0.3) }} />
+      <i style={{ background: green(0.6) }} />
+      <i style={{ background: green(1) }} />
+      <span>多</span>
     </div>
   );
 }
 
-/** GitHub 贡献图风格的活动矩阵：行 = 24 小时，列 = 天。 */
-function ActivityGrid({ series }: { series: { date: string; hours: number[] }[] }): ReactNode {
-  if (series.length === 0) return null;
-  const max = Math.max(1, ...series.flatMap((s) => s.hours));
-  const hue = (count: number): string => {
-    if (count === 0) return "#f3f4f6";
-    const level = Math.max(0.15, Math.min(1, count / max));
-    return `rgba(77,107,254,${level.toFixed(2)})`;
-  };
-  const hourLabels = ["00", "06", "12", "18", "23"];
-  const shown = series.slice(-30); // 最多 30 列
-  return (
-    <div data-whale-report-gridwrap>
-      <div data-whale-report-grid>
-        <div data-whale-report-gridhours>
-          {Array.from({ length: 24 }, (_, h) => (
-            <span key={h}>{hourLabels.includes(String(h).padStart(2, "0")) ? String(h).padStart(2, "0") : ""}</span>
+function EmptyActivity(): ReactNode {
+  return <div data-whale-report-gridempty>该报告生成于旧版本，无逐时数据。重新生成即可。</div>;
+}
+
+/**
+ * 活动可视化：按报告周期自适应粒度。
+ *   日报 → 每格 30 分钟（48 格一行）
+ *   周报 → 每格 1 小时（24 行 × 7 天矩阵）
+ *   月报 → 每格 1 天（约 30 格一行）
+ *   年报 → 每格 1 周（约 52 格一行）
+ * 颜色越绿代表事件越多。
+ */
+function ActivityStrip({ report }: { report: ReportFull }): ReactNode {
+  const s = report.stats;
+  const preset = report.preset;
+
+  if (preset === "daily") {
+    const hist = s.halfHourHistogram ?? [];
+    if (hist.length === 0) return <EmptyActivity />;
+    const max = Math.max(1, ...hist);
+    const labels = ["00:00", "06:00", "12:00", "18:00", "24:00"];
+    return (
+      <div>
+        <div data-whale-report-strip>
+          {hist.map((count, idx) => (
+            <i
+              key={idx}
+              title={`${String(Math.floor(idx / 2)).padStart(2, "0")}:${idx % 2 ? "30" : "00"} · ${count}`}
+              style={{ background: count === 0 ? "#f1f5f9" : green(count / max) }}
+            />
           ))}
         </div>
-        {shown.map((day) => (
-          <div key={day.date} data-whale-report-gridcol>
-            {day.hours.map((count, h) => (
-              <i
-                key={h}
-                title={`${day.date} ${String(h).padStart(2, "0")}:00 · ${count} 事件`}
-                style={{ background: hue(count) }}
-              />
+        <div data-whale-report-striplabels>
+          {labels.map((l) => (
+            <span key={l}>{l}</span>
+          ))}
+        </div>
+        <Legend />
+      </div>
+    );
+  }
+
+  if (preset === "weekly" || preset === "custom") {
+    const series = s.dayHourSeries ?? [];
+    if (series.length === 0) return <EmptyActivity />;
+    const max = Math.max(1, ...series.flatMap((d) => d.hours));
+    const hourLabels = ["00", "06", "12", "18", "23"];
+    const shown = series.slice(-30);
+    return (
+      <div>
+        <div data-whale-report-gridwrap>
+          <div data-whale-report-grid>
+            <div data-whale-report-gridhours>
+              {Array.from({ length: 24 }, (_, h) => (
+                <span key={h}>{hourLabels.includes(String(h).padStart(2, "0")) ? String(h).padStart(2, "0") : ""}</span>
+              ))}
+            </div>
+            {shown.map((day) => (
+              <div key={day.date} data-whale-report-gridcol>
+                {day.hours.map((count, h) => (
+                  <i
+                    key={h}
+                    title={`${day.date} ${String(h).padStart(2, "0")}:00 · ${count}`}
+                    style={{ background: count === 0 ? "#f1f5f9" : green(count / max) }}
+                  />
+                ))}
+              </div>
             ))}
           </div>
+          <div data-whale-report-griddates>
+            {shown.map((day) => (
+              <span key={day.date}>{day.date.slice(5)}</span>
+            ))}
+          </div>
+        </div>
+        <Legend />
+      </div>
+    );
+  }
+
+  // monthly：每格 1 天；yearly：每格 1 周
+  const series = s.dailySeries ?? [];
+  if (series.length === 0) return <EmptyActivity />;
+  const buckets =
+    preset === "yearly"
+      ? (() => {
+          const weekly: { label: string; count: number }[] = [];
+          const weekMs = 7 * 86400000;
+          for (const day of series) {
+            const t = Date.parse(day.date + "T00:00:00");
+            const weekStart = new Date(Math.floor(t / weekMs) * weekMs);
+            const label = weekStart.toISOString().slice(5, 10);
+            const last = weekly[weekly.length - 1];
+            if (last !== undefined && last.label === label) last.count += day.count;
+            else weekly.push({ label, count: day.count });
+          }
+          return weekly;
+        })()
+      : series.map((d) => ({ label: d.date.slice(5), count: d.count }));
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  return (
+    <div>
+      <div data-whale-report-strip>
+        {buckets.map((b) => (
+          <i
+            key={b.label}
+            title={`${b.label} · ${b.count} 事件`}
+            style={{ background: b.count === 0 ? "#f1f5f9" : green(b.count / max) }}
+          />
         ))}
       </div>
-      <div data-whale-report-griddates>
-        {shown.map((day) => (
-          <span key={day.date}>{day.date.slice(5)}</span>
-        ))}
+      <div data-whale-report-striplabels>
+        <span>{buckets[0]?.label}</span>
+        <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>
+        <span>{buckets[buckets.length - 1]?.label}</span>
       </div>
+      <Legend />
     </div>
   );
 }
 
-/** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
 function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
   const total = tokens.input + tokens.output + tokens.cacheRead + tokens.reasoning;
   if (total === 0) return null;
@@ -481,23 +574,12 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
 
       <div data-whale-report-card>
         <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
-        {(s.dayHourSeries ?? []).length > 0 ? (
-          <ActivityGrid series={s.dayHourSeries} />
-        ) : (
-          <div data-whale-report-gridempty>该报告生成于旧版本，无逐时数据。重新生成即可。</div>
-        )}
+        <ActivityStrip report={report} />
         <div data-whale-report-tokenline>
           活跃 {s.activeDays} 天
           {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
         </div>
       </div>
-
-      {(s.dailySeries ?? []).length > 0 && (
-        <div data-whale-report-card>
-          <div data-whale-report-h2>每日活跃</div>
-          <DailyBars series={s.dailySeries} />
-        </div>
-      )}
 
       <div data-whale-report-card>
         <div data-whale-report-h2>Token 构成</div>
