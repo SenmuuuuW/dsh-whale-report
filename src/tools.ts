@@ -90,6 +90,8 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
+/** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
+export const INDEX_VERSION = 2;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -119,7 +121,7 @@ export async function collectEvents(
     // 持久化会话：索引新鲜直接复用
     if (!record.live) {
       const cached = svc.index.get(record.header.id);
-      if (cached !== undefined && now - cached.builtAt < INDEX_TTL_MS) {
+      if (cached !== undefined && cached.v === INDEX_VERSION && now - cached.builtAt < INDEX_TTL_MS) {
         views.push({
           sessionId: cached.sessionId,
           buckets: cached.buckets as SessionBucketView["buckets"],
@@ -140,7 +142,7 @@ export async function collectEvents(
       if (!record.live) {
         await svc.index.put(record.header.id, {
           sessionId: snapshot.session.id,
-          v: 1,
+          v: INDEX_VERSION,
           builtAt: now,
           lastSeq: built.lastSeq,
           lastMs: built.lastMs,
@@ -170,7 +172,7 @@ export async function warmIndex(svc: ReportServices): Promise<void> {
       const built = bucketizeOwnEvents(snapshot.session.id, snapshot.events, snapshot.session.seedLength ?? 0);
       await svc.index.put(record.header.id, {
         sessionId: snapshot.session.id,
-        v: 1,
+        v: INDEX_VERSION,
         builtAt: Date.now(),
         lastSeq: built.lastSeq,
         lastMs: built.lastMs,

@@ -12,7 +12,7 @@
  * cordis 客户端内核负责装配；betterSidebar 服务用惰性注入消费
  * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
-import { Component, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
+import { Component, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -104,6 +104,39 @@ const CSS = `
 [data-whale-report-hitem] span { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
 [data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
 
+[data-whale-report-heatlabels] { display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; margin-top: 4px; }
+[data-whale-report-heatlabels] span { width: 16px; text-align: center; transform: translateX(-50%); }
+[data-whale-report-heatlabels] span:first-child { transform: none; }
+[data-whale-report-heatlabels] span:last-child { transform: translateX(-100%); }
+[data-whale-report-heat] { display: flex; gap: 1px; margin: 8px 0 2px; }
+[data-whale-report-heat] i { flex: 1; height: 44px; border-radius: 2px; background: #eef2ff; }
+[data-whale-report-summary] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 4px; }
+[data-whale-report-sumitem] {
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 2px;
+}
+[data-whale-report-sumitem] b { font-size: 20px; font-weight: 800; color: #111827; }
+[data-whale-report-sumitem] span { font-size: 11.5px; color: #6b7280; }
+[data-whale-report-tokenbar] { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #f3f4f6; margin: 8px 0 6px; }
+[data-whale-report-tokenbar] i { display: block; height: 100%; }
+[data-whale-report-tokenlegend] { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: #4b5563; }
+[data-whale-report-tokenlegend] span { display: inline-flex; align-items: center; gap: 4px; }
+[data-whale-report-tokenlegend] i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+[data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 10px; }
+[data-whale-report-modelrow] {
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px;
+}
+[data-whale-report-modelhead] { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+[data-whale-report-modelhead] b { font-size: 13px; font-weight: 700; color: #111827; }
+[data-whale-report-modelhead] span { font-size: 12px; font-weight: 600; color: #4d6bfe; }
+[data-whale-report-modelbar] { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f3f4f6; }
+[data-whale-report-modelbar] i { display: block; height: 100%; }
+[data-whale-report-modelnums] { font-size: 11px; color: #6b7280; margin-top: 6px; }
+[data-whale-report-daily] { display: flex; align-items: flex-end; gap: 3px; height: 96px; margin: 10px 0 6px; }
+[data-whale-report-dailycol] { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 4px; min-width: 0; }
+[data-whale-report-dailycol] i { display: block; width: 100%; max-width: 22px; border-radius: 3px 3px 0 0; background: #4d6bfe; }
+[data-whale-report-dailycol] span { font-size: 9.5px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
 /* Tab 形态：填满侧栏 pane，白底 + 自带滚动 */
 [data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 16px 20px 24px; color: #111827; background: #ffffff; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #f9fafb; }
@@ -173,6 +206,9 @@ interface StatsJson {
   busiestDay: { date: string; events: number } | null;
   titles: string[];
   totalEvents: number;
+  models: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
+  halfHourHistogram: number[];
+  dailySeries: { date: string; count: number }[];
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
@@ -222,14 +258,99 @@ function dateStr(ms: number): string {
 function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
   const max = Math.max(1, ...histogram);
   const hue = (level: number): string => {
-    const a = 0.12 + level * 0.8;
+    const a = 0.14 + level * 0.82;
     return `rgba(77,107,254,${a.toFixed(2)})`;
   };
+  // 48 格 = 30 分钟粒度；每 4 格（2 小时）打一个轴标签
+  const labels = ["00:00", "02:00", "04:00", "06:00", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "24:00"];
   return (
-    <div data-whale-report-heat>
-      {histogram.map((count, hour) => (
-        <i key={hour} title={`${String(hour).padStart(2, "0")}:00 · ${count}`} style={{ background: hue(count / max) }} />
+    <div>
+      <div data-whale-report-heat>
+        {histogram.map((count, idx) => (
+          <i
+            key={idx}
+            title={`${String(Math.floor(idx / 2)).padStart(2, "0")}:${idx % 2 === 0 ? "00" : "30"} · ${count}`}
+            style={{ background: hue(count / max) }}
+          />
+        ))}
+      </div>
+      <div data-whale-report-heatlabels>
+        {labels.map((l) => (
+          <span key={l}>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 每日事件趋势：纯 CSS 柱状图。 */
+function DailyBars({ series }: { series: { date: string; count: number }[] }): ReactNode {
+  const max = Math.max(1, ...series.map((s) => s.count));
+  return (
+    <div data-whale-report-daily>
+      {series.map((s) => (
+        <div key={s.date} data-whale-report-dailycol title={`${s.date} · ${fmt(s.count)} 事件`}>
+          <i style={{ height: `${Math.max(3, Math.round((s.count / max) * 100))}%` }} />
+          <span>{s.date.slice(5)}</span>
+        </div>
       ))}
+    </div>
+  );
+}
+
+/** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
+function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
+  const total = tokens.input + tokens.output + tokens.cacheRead + tokens.reasoning;
+  if (total === 0) return null;
+  const seg = (value: number, color: string, name: string) => (
+    <i key={name} title={`${name} ${fmt(value)}`} style={{ width: `${(value / total) * 100}%`, background: color }} />
+  );
+  return (
+    <div>
+      <div data-whale-report-tokenbar>
+        {seg(tokens.input, "#4d6bfe", "输入")}
+        {seg(tokens.output, "#38bdf8", "输出")}
+        {seg(tokens.cacheRead, "#94a3b8", "缓存命中")}
+        {seg(tokens.reasoning, "#c4b5fd", "思考")}
+      </div>
+      <div data-whale-report-tokenlegend>
+        <span><i style={{ background: "#4d6bfe" }} />输入 {fmt(tokens.input)}</span>
+        <span><i style={{ background: "#38bdf8" }} />输出 {fmt(tokens.output)}</span>
+        <span><i style={{ background: "#94a3b8" }} />缓存 {fmt(tokens.cacheRead)}</span>
+        <span><i style={{ background: "#c4b5fd" }} />思考 {fmt(tokens.reasoning)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
+function ModelTable({ models }: { models: StatsJson["models"] }): ReactNode {
+  const entries = Object.entries(models).sort(
+    (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
+  );
+  if (entries.length === 0) return <div data-whale-report-tokenline>（无模型用量数据）</div>;
+  return (
+    <div data-whale-report-modeltable>
+      {entries.map(([model, u]) => {
+        const total = u.input + u.output + u.cacheRead + u.reasoning;
+        return (
+          <div key={model} data-whale-report-modelrow>
+            <div data-whale-report-modelhead>
+              <b>{model}</b>
+              <span>{fmt(total)} token</span>
+            </div>
+            <div data-whale-report-modelbar>
+              <i title={`输入 ${fmt(u.input)}`} style={{ width: `${(u.input / total) * 100}%`, background: "#4d6bfe" }} />
+              <i title={`输出 ${fmt(u.output)}`} style={{ width: `${(u.output / total) * 100}%`, background: "#38bdf8" }} />
+              <i title={`缓存命中 ${fmt(u.cacheRead)}`} style={{ width: `${(u.cacheRead / total) * 100}%`, background: "#94a3b8" }} />
+              <i title={`思考 ${fmt(u.reasoning)}`} style={{ width: `${(u.reasoning / total) * 100}%`, background: "#c4b5fd" }} />
+            </div>
+            <div data-whale-report-modelnums>
+              输入 {fmt(u.input)} · 输出 {fmt(u.output)} · 缓存 {fmt(u.cacheRead)} · 思考 {fmt(u.reasoning)}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -239,6 +360,9 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   const topTools = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
+  const [dangerExpanded, setDangerExpanded] = useState(false);
+  const danger = s.dangerousCommands ?? [];
+  const shownDanger = dangerExpanded ? danger.slice(0, 20) : danger.slice(0, 5);
   return (
     <div>
       <div data-whale-report-actions>
@@ -246,15 +370,35 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
       </div>
 
-      <div data-whale-report-h2>工作量</div>
-      <div data-whale-report-cards>
-        <div data-whale-report-card><b>{s.sessions}</b><span>会话（子代理 {s.subagentSessions}）</span></div>
-        <div data-whale-report-card><b>{s.turns}</b><span>回合</span></div>
-        <div data-whale-report-card><b>{fmt(s.toolCallsTotal)}</b><span>工具调用（失败 {s.toolErrors}）</span></div>
-        <div data-whale-report-card><b>{fmt(s.commands)}</b><span>bash 命令</span></div>
-        <div data-whale-report-card><b>{s.userMessages}</b><span>用户消息</span></div>
-        <div data-whale-report-card><b>{fmt(s.assistantMessages)}</b><span>助手消息</span></div>
+      <div data-whale-report-summary>
+        <div data-whale-report-sumitem><b>{s.sessions}</b><span>会话</span></div>
+        <div data-whale-report-sumitem><b>{s.turns}</b><span>回合</span></div>
+        <div data-whale-report-sumitem><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
+        <div data-whale-report-sumitem><b>{fmt(s.commands)}</b><span>命令</span></div>
+        <div data-whale-report-sumitem><b>{fmt(totalTokens)}</b><span>Token</span></div>
+        <div data-whale-report-sumitem><b>{Object.keys(s.models ?? {}).length}</b><span>模型</span></div>
       </div>
+
+      <div data-whale-report-h2>Token 构成</div>
+      <TokenBar tokens={s.tokens} />
+
+      <div data-whale-report-h2>模型用量</div>
+      <ModelTable models={s.models ?? {}} />
+
+      <div data-whale-report-h2>活跃时段（30 分钟粒度 · 凌晨 {night}%）</div>
+      <Heatmap histogram={s.halfHourHistogram ?? []} />
+      <div data-whale-report-tokenline>
+        活跃 {s.activeDays} 天
+        {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
+      </div>
+
+      {(s.dailySeries ?? []).length > 0 && (
+        <>
+          <div data-whale-report-h2>每日活跃</div>
+          <DailyBars series={s.dailySeries} />
+        </>
+      )}
+
       <div data-whale-report-h2>常用工具</div>
       {topTools.length === 0 ? (
         <div data-whale-report-tokenline>（没有调用工具）</div>
@@ -266,29 +410,23 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         ))
       )}
 
-      <div data-whale-report-h2>Token 消耗</div>
-      <div data-whale-report-tokenline>
-        输入 {fmt(s.tokens.input)} · 输出 {fmt(s.tokens.output)} · 缓存命中 {fmt(s.tokens.cacheRead)} · 思考 {fmt(s.tokens.reasoning)}
-        <br />合计约 <b>{fmt(totalTokens)}</b> token
-      </div>
-
-      <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
-      <Heatmap histogram={s.hourHistogram ?? []} />
-      <div data-whale-report-tokenline>
-        活跃 {s.activeDays} 天
-        {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
-      </div>
-
-      <div data-whale-report-h2>危险操作（{s.dangerousCommands?.length ?? 0}）</div>
-      {(s.dangerousCommands ?? []).length === 0 ? (
+      <div data-whale-report-h2>危险操作（{danger.length}）</div>
+      {danger.length === 0 ? (
         <div data-whale-report-tokenline>无危险操作</div>
       ) : (
-        s.dangerousCommands.slice(0, 10).map((d, i) => (
-          <div key={i} data-whale-report-danger>
-            {d.command.replace(/\s+/g, " ")}
-            <em>{new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
-          </div>
-        ))
+        <>
+          {shownDanger.map((d, i) => (
+            <div key={i} data-whale-report-danger>
+              {d.command.replace(/\s+/g, " ").slice(0, 64)}
+              <em>{new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
+            </div>
+          ))}
+          {danger.length > 5 && (
+            <button data-whale-report-chip onClick={() => setDangerExpanded(!dangerExpanded)}>
+              {dangerExpanded ? "收起" : `查看全部 ${danger.length} 条`}
+            </button>
+          )}
+        </>
       )}
 
       {(s.titles ?? []).length > 0 && (

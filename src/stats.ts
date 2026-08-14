@@ -40,6 +40,13 @@ export interface TokenTotals {
   reasoning: number;
 }
 
+export interface ModelUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  reasoning: number;
+}
+
 export interface ReportStats {
   period: Period;
   /** 覆盖的会话数（区间内有过事件的 session）。 */
@@ -70,6 +77,12 @@ export interface ReportStats {
   titles: string[];
   /** 区间内总事件数。 */
   totalEvents: number;
+  /** 按模型分组的 token 用量（对齐 DS 开放平台"用量"页）。 */
+  models: Record<string, ModelUsage>;
+  /** 30 分钟粒度的活跃直方图（48 格，比 24 小时更密集）。 */
+  halfHourHistogram: number[];
+  /** 按日事件数序列（趋势图用）。 */
+  dailySeries: { date: string; count: number }[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -109,6 +122,9 @@ export function emptyStats(period: Period): ReportStats {
     busiestDay: null,
     titles: [],
     totalEvents: 0,
+    models: {},
+    halfHourHistogram: new Array(48).fill(0) as number[],
+    dailySeries: [],
   };
 }
 
@@ -177,6 +193,7 @@ export function aggregate(
 ): ReportStats {
   const stats = emptyStats(period);
   const seenSessions = new Set<string>();
+  const currentModel = new Map<string, string>();
   const sessionIdsByEvent: string[] = [];
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
@@ -193,8 +210,10 @@ export function aggregate(
     if (event.time < period.from || event.time >= period.to) continue;
     stats.totalEvents += 1;
 
-    const hour = new Date(event.time).getHours();
+    const d = new Date(event.time);
+    const hour = d.getHours();
     stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + 1;
+    stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += 1;
 
     const day = new Date(event.time).toISOString().slice(0, 10);
     days.set(day, (days.get(day) ?? 0) + 1);
@@ -221,7 +240,20 @@ export function aggregate(
           stats.tokens.output += usage.output ?? 0;
           stats.tokens.cacheRead += usage.cacheRead ?? 0;
           stats.tokens.reasoning += usage.reasoning ?? 0;
+          const model = currentModel.get(sessionId) ?? "unknown";
+          const m = (stats.models[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          m.input += usage.input ?? 0;
+          m.output += usage.output ?? 0;
+          m.cacheRead += usage.cacheRead ?? 0;
+          m.reasoning += usage.reasoning ?? 0;
         }
+        break;
+      }
+      case "request/header": {
+        const config = (data?.header as Record<string, unknown> | undefined)?.config as
+          | Record<string, unknown>
+          | undefined;
+        if (typeof config?.model === "string") currentModel.set(sessionId, config.model);
         break;
       }
       case "tool/call": {
@@ -269,6 +301,7 @@ export function aggregate(
     if (busiest === null || count > busiest.events) busiest = { date, events: count };
   }
   stats.busiestDay = busiest;
+  stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
 
   return stats;
 }
@@ -321,6 +354,8 @@ export interface HourBucket {
   commands: number;
   /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP）。 */
   danger: { cmd: string; ms: number }[];
+  /** 该分桶内按模型的 token 用量。 */
+  modelUsage: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -348,6 +383,7 @@ function newBucket(h: number): HourBucket {
     toolErrors: 0,
     commands: 0,
     danger: [],
+    modelUsage: {},
   };
 }
 
@@ -366,6 +402,7 @@ export function bucketizeOwnEvents(
 ): { buckets: HourBucket[]; titles: string[]; lastSeq: number; lastMs: number } {
   const byHour = new Map<number, HourBucket>();
   const titles: string[] = [];
+  let currentModel = "unknown";
   let lastSeq = 0;
   let lastMs = 0;
   for (const event of events) {
@@ -399,7 +436,19 @@ export function bucketizeOwnEvents(
           bucket.output += usage.output ?? 0;
           bucket.cacheRead += usage.cacheRead ?? 0;
           bucket.reasoning += usage.reasoning ?? 0;
+          const m = (bucket.modelUsage[currentModel] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          m.input += usage.input ?? 0;
+          m.output += usage.output ?? 0;
+          m.cacheRead += usage.cacheRead ?? 0;
+          m.reasoning += usage.reasoning ?? 0;
         }
+        break;
+      }
+      case "request/header": {
+        const config = (data?.header as Record<string, unknown> | undefined)?.config as
+          | Record<string, unknown>
+          | undefined;
+        if (typeof config?.model === "string") currentModel = config.model;
         break;
       }
       case "tool/call": {
@@ -451,6 +500,7 @@ export function aggregateBuckets(
 ): ReportStats {
   const stats = emptyStats(period);
   const seenSessions = new Set<string>();
+  const currentModel = new Map<string, string>();
   const days = new Map<string, number>();
 
   for (const view of views) {
@@ -481,11 +531,20 @@ export function aggregateBuckets(
       }
       stats.toolErrors += bucket.toolErrors;
       stats.commands += bucket.commands;
+      for (const [model, usage] of Object.entries(bucket.modelUsage ?? {})) {
+        const m = (stats.models[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+        m.input += usage.input;
+        m.output += usage.output;
+        m.cacheRead += usage.cacheRead;
+        m.reasoning += usage.reasoning;
+      }
       for (const d of bucket.danger) {
         stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId });
       }
-      const hour = new Date(bucket.h).getHours();
+      const d = new Date(bucket.h);
+      const hour = d.getHours();
       stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + bucket.total;
+      stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += bucket.total;
       const day = new Date(bucket.h).toISOString().slice(0, 10);
       days.set(day, (days.get(day) ?? 0) + bucket.total);
     }
@@ -507,5 +566,6 @@ export function aggregateBuckets(
     if (busiest === null || count > busiest.events) busiest = { date, events: count };
   }
   stats.busiestDay = busiest;
+  stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   return stats;
 }

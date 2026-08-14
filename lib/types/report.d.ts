@@ -1,10 +1,7 @@
 /**
- * 报告文案层：把统计数字变成"想发朋友圈"的中文报告。
+ * 报告文案层：把统计数字变成干净、写实的 markdown 报告。
  *
- * 文案是产品的一半。规则：
- * - 数字永远先说，金句永远在后；
- * - 危险命令原样列出（数据新闻官的可信度来自不美化）；
- * - 每个指标配一个"鲸鱼视角"的解读，而不是干巴巴的表格。
+ * 文案规则：数字先说、事实直陈、不加装饰。
  */
 import { type ReportStats } from "./stats.js";
 export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";

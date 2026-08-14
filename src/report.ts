@@ -1,10 +1,7 @@
 /**
- * 报告文案层：把统计数字变成"想发朋友圈"的中文报告。
+ * 报告文案层：把统计数字变成干净、写实的 markdown 报告。
  *
- * 文案是产品的一半。规则：
- * - 数字永远先说，金句永远在后；
- * - 危险命令原样列出（数据新闻官的可信度来自不美化）；
- * - 每个指标配一个"鲸鱼视角"的解读，而不是干巴巴的表格。
+ * 文案规则：数字先说、事实直陈、不加装饰。
  */
 import {
   type ReportStats,
@@ -58,7 +55,7 @@ function hourBar(stats: ReportStats): string {
 
 function topTools(stats: ReportStats): string {
   const entries = Object.entries(stats.toolCalls).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  if (entries.length === 0) return "（这段时间没有调用任何工具）";
+  if (entries.length === 0) return "（没有调用任何工具）";
   return entries.map(([name, count]) => `- \`${name}\` × ${count}`).join("\n");
 }
 
@@ -75,79 +72,95 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
   const { from, to } = stats.period;
   const dateStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   const night = nightOwlIndex(stats);
+  const t = stats.tokens;
+  const totalTokens = t.input + t.output + t.cacheRead + t.reasoning;
 
   const lines: string[] = [];
   lines.push(`# 深迹 ${label}`);
   lines.push("");
   lines.push(`> ${dateStr(from)} ~ ${dateStr(to)} · 共 ${formatSpan(from, to)}`);
   lines.push("");
+  lines.push(
+    `> 总计：会话 ${stats.sessions} · 回合 ${stats.turns} · 工具调用 ${stats.toolCallsTotal} · 命令 ${stats.commands} · Token ${formatTokens(totalTokens)}`,
+  );
+  lines.push("");
 
-  // —— 干了多少活
-  lines.push("## ⚙️ 它干了多少活");
+  // —— 工作量
+  lines.push("## 工作量");
   lines.push("");
   lines.push(
-    `- 会话 **${stats.sessions}** 次（其中子代理 ${stats.subagentSessions} 次）、回合 **${stats.turns}**、步骤 **${stats.steps}**`,
+    `- 会话 **${stats.sessions}** 次（子代理 ${stats.subagentSessions} 次）、回合 **${stats.turns}**、步骤 **${stats.steps}**`,
   );
   lines.push(
     `- 用户消息 **${stats.userMessages}** 条，助手消息 **${stats.assistantMessages}** 条`,
   );
   lines.push(
-    `- 调用工具 **${stats.toolCallsTotal}** 次，失败 **${stats.toolErrors}** 次`,
+    `- 工具调用 **${stats.toolCallsTotal}** 次（失败 ${stats.toolErrors} 次）、bash 命令 **${stats.commands}** 条`,
   );
-  lines.push(`- 跑过 bash 命令 **${stats.commands}** 条`);
   lines.push("");
-  lines.push("**最常用的工具：**");
+  lines.push("**常用工具：**");
   lines.push(topTools(stats));
   lines.push("");
 
-  // —— 烧了多少 token
-  const t = stats.tokens;
-  lines.push("## 🔥 烧了多少 token");
+  // —— Token 消耗与模型用量
+  lines.push("## Token 消耗");
   lines.push("");
   lines.push(
     `- 输入 ${formatTokens(t.input)} · 输出 ${formatTokens(t.output)} · 缓存命中 ${formatTokens(t.cacheRead)} · 思考 ${formatTokens(t.reasoning)}`,
   );
-  lines.push(
-    `- 合计约 **${formatTokens(t.input + t.output + t.cacheRead + t.reasoning)}** token`,
-  );
+  lines.push(`- 合计约 **${formatTokens(totalTokens)}** token`);
   lines.push("");
+  const modelEntries = Object.entries(stats.models).sort(
+    (a, b) =>
+      b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning -
+      (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
+  );
+  if (modelEntries.length > 0) {
+    lines.push("## 模型用量");
+    lines.push("");
+    lines.push("| 模型 | 输入 | 输出 | 缓存命中 | 思考 |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    for (const [model, usage] of modelEntries.slice(0, 8)) {
+      lines.push(
+        `| ${model} | ${formatTokens(usage.input)} | ${formatTokens(usage.output)} | ${formatTokens(usage.cacheRead)} | ${formatTokens(usage.reasoning)} |`,
+      );
+    }
+    lines.push("");
+  }
 
-  // —— 作息
-  lines.push("## 🌙 作息画像");
+  // —— 活跃时段
+  lines.push("## 活跃时段");
   lines.push("");
   lines.push(hourBar(stats));
   lines.push("");
-  lines.push(`- 活跃天数 **${stats.activeDays}**，凌晨活跃度 **${night}%**`);
+  lines.push(`- 活跃天数 **${stats.activeDays}**，凌晨活跃度 **${night}%**（${nightLabel(night)}）`);
   if (stats.busiestDay) {
     lines.push(`- 最忙的一天：**${stats.busiestDay.date}**（${stats.busiestDay.events} 条事件）`);
   }
-  lines.push(`- 凌晨活跃度：**${nightLabel(night)}**`);
   lines.push("");
 
-  // —— 惊魂时刻
-  lines.push("## ⚠️ 惊魂时刻");
+  // —— 危险操作
+  lines.push("## 危险操作");
   lines.push("");
   if (stats.dangerousCommands.length === 0) {
     lines.push("无危险操作。");
   } else {
-    lines.push(
-      `一共 **${stats.dangerousCommands.length}** 次危险操作，需要你亲自过目：`,
-    );
+    lines.push(`共 **${stats.dangerousCommands.length}** 条：`);
     lines.push("");
-    for (const d of stats.dangerousCommands.slice(0, 10)) {
-      const short = d.command.replace(/\s+/g, " ").slice(0, 90);
+    for (const d of stats.dangerousCommands.slice(0, 5)) {
+      const short = d.command.replace(/\s+/g, " ").slice(0, 64);
       const when = new Date(d.time).toISOString().slice(0, 16).replace("T", " ");
       lines.push(`- \`${short}\` —— ${when}`);
     }
-    if (stats.dangerousCommands.length > 10) {
-      lines.push(`- ……还有 ${stats.dangerousCommands.length - 10} 条，见完整数据`);
+    if (stats.dangerousCommands.length > 5) {
+      lines.push(`- ……仅列前 5 条`);
     }
   }
   lines.push("");
 
-  // —— 标题即记忆
+  // —— 会话标题
   if (stats.titles.length > 0) {
-    lines.push("## 🧵 这段日子的会话标题");
+    lines.push("## 会话标题");
     lines.push("");
     for (const title of stats.titles.slice(0, 8)) {
       lines.push(`- ${title}`);
@@ -156,6 +169,6 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
   }
 
   lines.push("---");
-  lines.push(`*数据来自 ${stats.totalEvents} 条会话事件。深迹 DeepTrace · 只读，不改写任何历史。*`);
+  lines.push(`*基于 ${stats.totalEvents} 条会话事件 · 只读 · 深迹 DeepTrace*`);
   return lines.join("\n");
 }

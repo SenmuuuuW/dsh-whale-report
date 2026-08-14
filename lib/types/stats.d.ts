@@ -35,6 +35,12 @@ export interface TokenTotals {
     cacheRead: number;
     reasoning: number;
 }
+export interface ModelUsage {
+    input: number;
+    output: number;
+    cacheRead: number;
+    reasoning: number;
+}
 export interface ReportStats {
     period: Period;
     /** 覆盖的会话数（区间内有过事件的 session）。 */
@@ -72,6 +78,15 @@ export interface ReportStats {
     titles: string[];
     /** 区间内总事件数。 */
     totalEvents: number;
+    /** 按模型分组的 token 用量（对齐 DS 开放平台"用量"页）。 */
+    models: Record<string, ModelUsage>;
+    /** 30 分钟粒度的活跃直方图（48 格，比 24 小时更密集）。 */
+    halfHourHistogram: number[];
+    /** 按日事件数序列（趋势图用）。 */
+    dailySeries: {
+        date: string;
+        count: number;
+    }[];
 }
 /** 危险命令特征（正则，匹配 bash 命令字符串）。 */
 export declare const DANGEROUS_PATTERNS: {
@@ -115,6 +130,13 @@ export interface HourBucket {
         cmd: string;
         ms: number;
     }[];
+    /** 该分桶内按模型的 token 用量。 */
+    modelUsage: Record<string, {
+        input: number;
+        output: number;
+        cacheRead: number;
+        reasoning: number;
+    }>;
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
