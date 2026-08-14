@@ -6,6 +6,7 @@ import { z } from "zod";
 import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
 
 export type ReportId = string;
+export type SessionIndexKey = string;
 
 export const ReportRecordSchema = z.object({
   id: z.string().min(1),
@@ -24,10 +25,24 @@ export const ReportRecordSchema = z.object({
 
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
 
+export const SessionIndexSchema = z.object({
+  sessionId: z.string().min(1),
+  v: z.number().int(),
+  builtAt: z.number(),
+  lastSeq: z.number().int().min(0),
+  lastMs: z.number(),
+  /** HourBucket[]（结构由 stats.ts 定义，这里宽松存放）。 */
+  buckets: z.unknown(),
+  titles: z.array(z.string()),
+});
+
+export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
+
 export const whaleDomain = defineDomain({
   name: "whale",
   version: 1,
   tables: {
     reports: domainTable<ReportId, ReportRecord>(ReportRecordSchema),
+    session_index: domainTable<SessionIndexKey, SessionIndexRecord>(SessionIndexSchema),
   },
 });

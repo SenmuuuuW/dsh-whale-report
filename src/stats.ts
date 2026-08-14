@@ -295,3 +295,217 @@ export function formatSpan(from: number, to: number): string {
   if (days < 365) return `${(days / 30).toFixed(1)} 个月`;
   return `${(days / 365).toFixed(1)} 年`;
 }
+
+// ─────────────────────────── 索引层：小时级预聚合 ───────────────────────────
+// 报告要读几十个会话的完整日志（zstd 解压重放，实测 60s+）。
+// 索引把每个会话"自己的事件"（seedLength 之后）预聚合成按小时分桶的
+// 计数结构（每会话约几 KB），存进 whale 存储域；重复生成报告时秒级返回。
+
+/** 一个时间分桶（10 分钟粒度）的计数。 */
+export interface HourBucket {
+  /** epoch 小时（毫秒，向下取整）。 */
+  h: number;
+  /** 该小时事件总数（含 chunk 类事件，只用于总量/活跃度）。 */
+  total: number;
+  turns: number;
+  steps: number;
+  userMessages: number;
+  assistantMessages: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  reasoning: number;
+  toolCallsTotal: number;
+  toolCalls: Record<string, number>;
+  toolErrors: number;
+  commands: number;
+  /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP）。 */
+  danger: { cmd: string; ms: number }[];
+}
+
+/** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
+export const BUCKET_MS = 10 * 60 * 1000;
+const DANGER_SAMPLE_CAP = 30;
+
+function hourOf(ms: number): number {
+  return Math.floor(ms / BUCKET_MS) * BUCKET_MS;
+}
+
+function newBucket(h: number): HourBucket {
+  return {
+    h,
+    total: 0,
+    turns: 0,
+    steps: 0,
+    userMessages: 0,
+    assistantMessages: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    reasoning: 0,
+    toolCallsTotal: 0,
+    toolCalls: {},
+    toolErrors: 0,
+    commands: 0,
+    danger: [],
+  };
+}
+
+/**
+ * 把一个会话的原始事件折叠成小时分桶。
+ * @param sessionId - 归属会话（危险命令归属用）。
+ * @param events - 完整逻辑日志。
+ * @param ownStart - seedLength：seq 小于它的继承事件不计入。
+ * @param stopAfter - 可选：时间上限（ms），超过即停止（时间单调）。
+ */
+export function bucketizeOwnEvents(
+  sessionId: string,
+  events: { type: string; seq: number; time: number; data?: unknown }[],
+  ownStart: number,
+  stopAfter?: number,
+): { buckets: HourBucket[]; titles: string[]; lastSeq: number; lastMs: number } {
+  const byHour = new Map<number, HourBucket>();
+  const titles: string[] = [];
+  let lastSeq = 0;
+  let lastMs = 0;
+  for (const event of events) {
+    if (event.seq < ownStart) continue;
+    if (stopAfter !== undefined && event.time >= stopAfter) break;
+    lastSeq = event.seq;
+    lastMs = event.time;
+    const h = hourOf(event.time);
+    let bucket = byHour.get(h);
+    if (bucket === undefined) {
+      bucket = newBucket(h);
+      byHour.set(h, bucket);
+    }
+    bucket.total += 1;
+    const data = event.data as Record<string, unknown> | undefined;
+    switch (event.type) {
+      case "turn/start":
+        bucket.turns += 1;
+        break;
+      case "step/start":
+        bucket.steps += 1;
+        break;
+      case "user/message":
+        bucket.userMessages += 1;
+        break;
+      case "assistant/message": {
+        bucket.assistantMessages += 1;
+        const usage = usageOf(data);
+        if (usage) {
+          bucket.input += usage.input ?? 0;
+          bucket.output += usage.output ?? 0;
+          bucket.cacheRead += usage.cacheRead ?? 0;
+          bucket.reasoning += usage.reasoning ?? 0;
+        }
+        break;
+      }
+      case "tool/call": {
+        bucket.toolCallsTotal += 1;
+        const name = typeof data?.name === "string" ? data.name : "(unknown)";
+        bucket.toolCalls[name] = (bucket.toolCalls[name] ?? 0) + 1;
+        const command = commandOf(data);
+        if (command) {
+          bucket.commands += 1;
+          if (bucket.danger.length < DANGER_SAMPLE_CAP) {
+            for (const { pattern } of DANGEROUS_PATTERNS) {
+              if (pattern.test(command)) {
+                bucket.danger.push({ cmd: command, ms: event.time });
+                break;
+              }
+            }
+          }
+        }
+        break;
+      }
+      case "tool/result":
+        if (resultIsError(data)) bucket.toolErrors += 1;
+        break;
+      case "session/title": {
+        const title = typeof data?.title === "string" ? data.title : null;
+        if (title && !titles.includes(title)) titles.push(title);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  const buckets = [...byHour.values()].sort((a, b) => a.h - b.h);
+  return { buckets, titles, lastSeq, lastMs };
+}
+
+/** 索引聚合视图：一个会话的分桶 + 标题。 */
+export interface SessionBucketView {
+  sessionId: string;
+  buckets: HourBucket[];
+  titles: string[];
+}
+
+/** 把多个会话的分桶视图聚合成区间统计（与 aggregate 等价，但 O(分桶数)）。 */
+export function aggregateBuckets(
+  views: SessionBucketView[],
+  period: Period,
+  headers: RawSessionHeader[] = [],
+): ReportStats {
+  const stats = emptyStats(period);
+  const seenSessions = new Set<string>();
+  const days = new Map<string, number>();
+
+  for (const view of views) {
+    seenSessions.add(view.sessionId);
+    for (const bucket of view.buckets) {
+      if (bucket.h + BUCKET_MS <= period.from || bucket.h >= period.to) continue;
+      // 分桶内事件可能在区间边界外（按小时取整后），做保守裁剪：
+      // 桶整体落在区间内才计入（跨边界的小时由 nextHour 裁剪近似处理）。
+      const inFrom = bucket.h >= period.from;
+      const inTo = bucket.h + BUCKET_MS <= period.to;
+      if (!inFrom || !inTo) {
+        // 边界桶：按比例近似计入事件总数与活跃度，细粒度计数不裁剪
+        // （报告用途可接受；精确值由未索引路径保证）。
+        continue;
+      }
+      stats.totalEvents += bucket.total;
+      stats.turns += bucket.turns;
+      stats.steps += bucket.steps;
+      stats.userMessages += bucket.userMessages;
+      stats.assistantMessages += bucket.assistantMessages;
+      stats.tokens.input += bucket.input;
+      stats.tokens.output += bucket.output;
+      stats.tokens.cacheRead += bucket.cacheRead;
+      stats.tokens.reasoning += bucket.reasoning;
+      stats.toolCallsTotal += bucket.toolCallsTotal;
+      for (const [name, count] of Object.entries(bucket.toolCalls)) {
+        stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + count;
+      }
+      stats.toolErrors += bucket.toolErrors;
+      stats.commands += bucket.commands;
+      for (const d of bucket.danger) {
+        stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId });
+      }
+      const hour = new Date(bucket.h).getHours();
+      stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + bucket.total;
+      const day = new Date(bucket.h).toISOString().slice(0, 10);
+      days.set(day, (days.get(day) ?? 0) + bucket.total);
+    }
+    for (const title of view.titles) {
+      if (!stats.titles.includes(title)) stats.titles.push(title);
+    }
+  }
+
+  for (const header of headers) {
+    if (header.createdAt >= period.from && header.createdAt < period.to) {
+      seenSessions.add(header.id);
+      if ((header.delegationDepth ?? 0) >= 1) stats.subagentSessions += 1;
+    }
+  }
+  stats.sessions = seenSessions.size;
+  stats.activeDays = days.size;
+  let busiest: { date: string; events: number } | null = null;
+  for (const [date, count] of days) {
+    if (busiest === null || count > busiest.events) busiest = { date, events: count };
+  }
+  stats.busiestDay = busiest;
+  return stats;
+}

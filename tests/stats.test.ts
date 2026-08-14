@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, emptyStats, nightOwlIndex, formatTokens, formatSpan } from "../src/stats.js";
+import { aggregate, aggregateBuckets, bucketizeOwnEvents, emptyStats, nightOwlIndex, formatTokens, formatSpan } from "../src/stats.js";
 import { renderReport, presetRange, PRESET_LABELS } from "../src/report.js";
 import type { RawEvent, RawSessionHeader } from "../src/stats.js";
 
@@ -138,7 +138,7 @@ describe("报告文案", () => {
     expect(md).toContain("深迹 周报");
     expect(md).toContain("rm -rf");
     expect(md).toContain("1.2K");
-    expect(md).toContain("惊魂时刻");
+    expect(md).toContain("危险操作");
   });
 
   it("预设区间长度正确", () => {
@@ -158,5 +158,55 @@ describe("工具函数", () => {
     expect(formatTokens(2_500_000)).toBe("2.50M");
     expect(formatSpan(T0, T0 + 24 * H)).toBe("1 天");
     expect(formatSpan(T0, T0 + 60 * 24 * H)).toBe("2.0 个月");
+  });
+});
+
+describe("索引层：bucketizeOwnEvents + aggregateBuckets 与 aggregate 等价", () => {
+  it("同一批事件两条路径产出相同统计（事件对齐 10 分钟桶边界）", () => {
+    const base = new Date(2026, 7, 10, 0, 0, 0).getTime(); // 本地零点，整桶对齐
+    const events: RawEvent[] = [
+      ev("turn/start", base + 1),
+      ev("step/start", base + 2),
+      ev("user/message", base + 3),
+      ev("assistant/message", base + 4, { usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, reasoningTokens: 10 } }),
+      ev("tool/call", base + 5, { name: "bash", arguments: JSON.stringify({ command: "ls" }) }),
+      ev("tool/call", base + 6, { name: "bash", arguments: JSON.stringify({ command: "rm -rf /tmp/x" }) }),
+      ev("tool/result", base + 7, { message: { isError: true, content: [] } }),
+      ev("session/title", base + 8, { title: "测试会话" }),
+      ev("reasoning-chunks", base + 9, {}),
+      ev("turn/start", base + 3600_000),
+    ];
+    const period = { from: base - 60_000, to: base + 2 * 3600_000 };
+    const direct = aggregate(events, period, [{ id: "s1", createdAt: base }]);
+    const built = bucketizeOwnEvents("s1", events.map((e) => ({ ...e, seq: 0 })), 0);
+    const indexed = aggregateBuckets([{ sessionId: "s1", buckets: built.buckets, titles: built.titles }], period, [
+      { id: "s1", createdAt: base },
+    ]);
+
+    expect(indexed.totalEvents).toBe(direct.totalEvents);
+    expect(indexed.turns).toBe(direct.turns);
+    expect(indexed.userMessages).toBe(direct.userMessages);
+    expect(indexed.assistantMessages).toBe(direct.assistantMessages);
+    expect(indexed.tokens).toEqual(direct.tokens);
+    expect(indexed.toolCallsTotal).toBe(direct.toolCallsTotal);
+    expect(indexed.toolCalls.bash).toBe(direct.toolCalls.bash);
+    expect(indexed.toolErrors).toBe(direct.toolErrors);
+    expect(indexed.commands).toBe(direct.commands);
+    expect(indexed.dangerousCommands.length).toBe(direct.dangerousCommands.length);
+    expect(indexed.titles).toEqual(direct.titles);
+    expect(indexed.sessions).toBe(direct.sessions);
+  });
+
+  it("bucketizeOwnEvents 跳过继承种子事件（seq < ownStart）", () => {
+    const base = new Date(2026, 7, 10, 0, 0, 0).getTime();
+    const events = [
+      { type: "turn/start", seq: 0, time: base + 1, data: {} },
+      { type: "turn/start", seq: 1, time: base + 2, data: {} },
+      { type: "turn/start", seq: 2, time: base + 3, data: {} },
+    ];
+    const built = bucketizeOwnEvents("s1", events, 2); // 前两条是种子
+    const total = built.buckets.reduce((s, b) => s + b.turns, 0);
+    expect(total).toBe(1);
+    expect(built.lastSeq).toBe(2);
   });
 });

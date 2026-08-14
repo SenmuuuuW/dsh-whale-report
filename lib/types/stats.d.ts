@@ -92,4 +92,56 @@ export declare function nightOwlIndex(stats: ReportStats): number;
 export declare function formatTokens(n: number): string;
 /** 人类可读的时间跨度。 */
 export declare function formatSpan(from: number, to: number): string;
+/** 一个时间分桶（10 分钟粒度）的计数。 */
+export interface HourBucket {
+    /** epoch 小时（毫秒，向下取整）。 */
+    h: number;
+    /** 该小时事件总数（含 chunk 类事件，只用于总量/活跃度）。 */
+    total: number;
+    turns: number;
+    steps: number;
+    userMessages: number;
+    assistantMessages: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    reasoning: number;
+    toolCallsTotal: number;
+    toolCalls: Record<string, number>;
+    toolErrors: number;
+    commands: number;
+    /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP）。 */
+    danger: {
+        cmd: string;
+        ms: number;
+    }[];
+}
+/** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
+export declare const BUCKET_MS: number;
+/**
+ * 把一个会话的原始事件折叠成小时分桶。
+ * @param sessionId - 归属会话（危险命令归属用）。
+ * @param events - 完整逻辑日志。
+ * @param ownStart - seedLength：seq 小于它的继承事件不计入。
+ * @param stopAfter - 可选：时间上限（ms），超过即停止（时间单调）。
+ */
+export declare function bucketizeOwnEvents(sessionId: string, events: {
+    type: string;
+    seq: number;
+    time: number;
+    data?: unknown;
+}[], ownStart: number, stopAfter?: number): {
+    buckets: HourBucket[];
+    titles: string[];
+    lastSeq: number;
+    lastMs: number;
+};
+/** 索引聚合视图：一个会话的分桶 + 标题。 */
+export interface SessionBucketView {
+    sessionId: string;
+    buckets: HourBucket[];
+    titles: string[];
+}
+/** 把多个会话的分桶视图聚合成区间统计（与 aggregate 等价，但 O(分桶数)）。 */
+export declare function aggregateBuckets(views: SessionBucketView[], period: Period, headers?: RawSessionHeader[]): ReportStats;
 //# sourceMappingURL=stats.d.ts.map

@@ -15,7 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isTrustedApiRequest } from "./trust-fence.js";
 import { whaleDomain, type ReportRecord } from "./state.js";
-import { aggregate, type ReportStats } from "./stats.js";
+import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import type { ReportServices } from "./tools.js";
 
@@ -83,8 +83,7 @@ async function generateReport(
   if (range.to <= range.from) throw new Error("时间区间无效：to 必须晚于 from");
 
   const { collectEvents } = await import("./tools.js");
-  const { events, headers } = await collectEvents(svc, range);
-  const stats = aggregate(events, range, headers);
+  const stats = await collectEvents(svc, range);
   const markdown = renderReport(stats, preset);
 
   const record: ReportRecord = {

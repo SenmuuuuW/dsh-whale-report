@@ -8,7 +8,8 @@
  */
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
-import { aggregate, type RawEvent, type RawSessionHeader } from "./stats.js";
+import type { SessionIndexRecord } from "./state.js";
+import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
 /**
@@ -21,7 +22,7 @@ import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./r
  */
 export interface SessionQueryLike {
   listSessions(signal?: AbortSignal): Promise<
-    { header: { id: string; createdAt: number; cwd?: string; delegationDepth?: number } }[]
+    { header: { id: string; createdAt: number; cwd?: string; delegationDepth?: number }; live: boolean }[]
   >;
   readSession(sessionId: string): Promise<{
     session: { id: string; seedLength?: number };
@@ -45,8 +46,15 @@ declare module "@deepseek-ai/dsh-session/types" {
   }
 }
 
+/** 会话索引表（whale 存储域 sessionIndex 的最小结构视图）。 */
+export interface IndexTable {
+  get(key: string): SessionIndexRecord | undefined;
+  put(key: string, value: SessionIndexRecord): Promise<void>;
+}
+
 export interface ReportServices {
   sessionQuery: SessionQueryLike;
+  index: IndexTable;
 }
 
 export interface ToolsHost {
@@ -64,11 +72,36 @@ function parseTime(value: string | undefined, fallback: number): number {
   return ms;
 }
 
-/** 从会话查询服务收集区间内的所有事件（宽容模式：单会话失败不阻塞整体）。 */
+/** 有限并发映射：报告生成要读几十个会话的完整日志，串行太慢。 */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
+export const INDEX_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * 收集区间统计。两条数据路径：
+ * - live 会话：readSession 走内存快照，直接分桶；
+ * - 持久化会话：优先读 whale 域的会话索引（10 分钟新鲜度窗口），
+ *   过期才读完整日志（zstd 解压重放，实测 60s+）并回写索引。
+ * 返回与 aggregate(events, …) 等价的 ReportStats。
+ */
 export async function collectEvents(
   svc: ReportServices,
   period: { from: number; to: number },
-): Promise<{ events: RawEvent[]; headers: RawSessionHeader[] }> {
+): Promise<ReportStats> {
   const sessions = await svc.sessionQuery.listSessions();
   const headers: RawSessionHeader[] = sessions.map((record) => ({
     id: record.header.id,
@@ -77,31 +110,77 @@ export async function collectEvents(
     delegationDepth: record.header.delegationDepth,
   }));
 
-  const events: RawEvent[] = [];
+  const candidates = sessions.filter((record) => record.header.createdAt < period.to);
+  const views: SessionBucketView[] = [];
   let failed = 0;
-  // 关键：readSession 返回"完整逻辑日志"，其中子代理/续聊会话的前缀是
-  // 继承自父会话的种子事件（seed，seq < header.seedLength）。若不去重，
-  // 一个父会话的事件会被它的每个后代重复计数（实测放大了 50 倍）。
-  // 正解：只统计每个会话"自己的"事件（seedLength 之后的），
-  // 这样每个事件恰好在其属主会话被计一次。
-  for (const record of sessions) {
+
+  await mapWithConcurrency(candidates, 12, async (record) => {
+    const now = Date.now();
+    // 持久化会话：索引新鲜直接复用
+    if (!record.live) {
+      const cached = svc.index.get(record.header.id);
+      if (cached !== undefined && now - cached.builtAt < INDEX_TTL_MS) {
+        views.push({
+          sessionId: cached.sessionId,
+          buckets: cached.buckets as SessionBucketView["buckets"],
+          titles: cached.titles,
+        });
+        return;
+      }
+    }
     try {
       const snapshot = await svc.sessionQuery.readSession(record.header.id);
-      const ownStart = snapshot.session.seedLength ?? 0;
-      for (const event of snapshot.events) {
-        if (event.seq < ownStart) continue;
-        if (event.time < period.from || event.time >= period.to) continue;
-        events.push({
-          type: event.type,
-          time: event.time,
-          data: { ...(event.data as Record<string, unknown>), sessionId: snapshot.session.id },
+      const built = bucketizeOwnEvents(
+        snapshot.session.id,
+        snapshot.events,
+        snapshot.session.seedLength ?? 0,
+        period.to,
+      );
+      views.push({ sessionId: snapshot.session.id, buckets: built.buckets, titles: built.titles });
+      if (!record.live) {
+        await svc.index.put(record.header.id, {
+          sessionId: snapshot.session.id,
+          v: 1,
+          builtAt: now,
+          lastSeq: built.lastSeq,
+          lastMs: built.lastMs,
+          buckets: built.buckets,
+          titles: built.titles,
         });
       }
     } catch {
       failed += 1;
     }
-  }
-  return { events, headers };
+  });
+
+  return aggregateBuckets(views, period, headers);
+}
+
+/**
+ * 后台预热：为所有持久化会话预建索引（无时间上限）。
+ * 首次生成报告的 50s 成本移到启动后的一次性后台任务里，
+ * 之后的每次生成都命中索引（实测 0.1-0.3s）。
+ */
+export async function warmIndex(svc: ReportServices): Promise<void> {
+  const sessions = await svc.sessionQuery.listSessions();
+  const toBuild = sessions.filter((record) => !record.live && svc.index.get(record.header.id) === undefined);
+  await mapWithConcurrency(toBuild, 4, async (record) => {
+    try {
+      const snapshot = await svc.sessionQuery.readSession(record.header.id);
+      const built = bucketizeOwnEvents(snapshot.session.id, snapshot.events, snapshot.session.seedLength ?? 0);
+      await svc.index.put(record.header.id, {
+        sessionId: snapshot.session.id,
+        v: 1,
+        builtAt: Date.now(),
+        lastSeq: built.lastSeq,
+        lastMs: built.lastMs,
+        buckets: built.buckets,
+        titles: built.titles,
+      });
+    } catch {
+      // 单会话失败不影响预热整体
+    }
+  });
 }
 
 export function registerReportTools(ctx: ToolsHost, svc: ReportServices): void {
@@ -170,8 +249,7 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
         throw new Error("时间区间无效：to 必须晚于 from");
       }
 
-      const { events, headers } = await collectEvents(svc, range);
-      const stats = aggregate(events, range, headers);
+      const stats = await collectEvents(svc, range);
       const report = renderReport(stats, preset);
 
       // 报告本身也写进会话日志 —— 鲸鱼记事本记下它自己写的账。

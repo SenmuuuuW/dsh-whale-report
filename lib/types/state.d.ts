@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 export type ReportId = string;
+export type SessionIndexKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{
     id: z.ZodString;
     preset: z.ZodString;
@@ -17,6 +18,16 @@ export declare const ReportRecordSchema: z.ZodObject<{
     markdown: z.ZodString;
 }, z.core.$strip>;
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
+export declare const SessionIndexSchema: z.ZodObject<{
+    sessionId: z.ZodString;
+    v: z.ZodNumber;
+    builtAt: z.ZodNumber;
+    lastSeq: z.ZodNumber;
+    lastMs: z.ZodNumber;
+    buckets: z.ZodUnknown;
+    titles: z.ZodArray<z.ZodString>;
+}, z.core.$strip>;
+export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
 export declare const whaleDomain: {
     name: string;
     version: number;
@@ -32,6 +43,15 @@ export declare const whaleDomain: {
             totalEvents: number;
             stats: unknown;
             markdown: string;
+        }>;
+        session_index: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            sessionId: string;
+            v: number;
+            builtAt: number;
+            lastSeq: number;
+            lastMs: number;
+            buckets: unknown;
+            titles: string[];
         }>;
     };
 };

@@ -246,14 +246,14 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
       </div>
 
-      <div data-whale-report-h2>⚙️ 干了多少活</div>
+      <div data-whale-report-h2>工作量</div>
       <div data-whale-report-cards>
         <div data-whale-report-card><b>{s.sessions}</b><span>会话（子代理 {s.subagentSessions}）</span></div>
         <div data-whale-report-card><b>{s.turns}</b><span>回合</span></div>
         <div data-whale-report-card><b>{fmt(s.toolCallsTotal)}</b><span>工具调用（失败 {s.toolErrors}）</span></div>
         <div data-whale-report-card><b>{fmt(s.commands)}</b><span>bash 命令</span></div>
-        <div data-whale-report-card><b>{s.userMessages}</b><span>你的消息</span></div>
-        <div data-whale-report-card><b>{fmt(s.assistantMessages)}</b><span>它的回复</span></div>
+        <div data-whale-report-card><b>{s.userMessages}</b><span>用户消息</span></div>
+        <div data-whale-report-card><b>{fmt(s.assistantMessages)}</b><span>助手消息</span></div>
       </div>
       <div data-whale-report-h2>常用工具</div>
       {topTools.length === 0 ? (
@@ -266,22 +266,22 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         ))
       )}
 
-      <div data-whale-report-h2>🔥 烧了多少 token</div>
+      <div data-whale-report-h2>Token 消耗</div>
       <div data-whale-report-tokenline>
         输入 {fmt(s.tokens.input)} · 输出 {fmt(s.tokens.output)} · 缓存命中 {fmt(s.tokens.cacheRead)} · 思考 {fmt(s.tokens.reasoning)}
         <br />合计约 <b>{fmt(totalTokens)}</b> token
       </div>
 
-      <div data-whale-report-h2>🌙 作息画像（凌晨活跃 {night}%）</div>
+      <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
       <Heatmap histogram={s.hourHistogram ?? []} />
       <div data-whale-report-tokenline>
         活跃 {s.activeDays} 天
         {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
       </div>
 
-      <div data-whale-report-h2>⚠️ 惊魂时刻（{s.dangerousCommands?.length ?? 0}）</div>
+      <div data-whale-report-h2>危险操作（{s.dangerousCommands?.length ?? 0}）</div>
       {(s.dangerousCommands ?? []).length === 0 ? (
-        <div data-whale-report-tokenline>这段时间很平静 🎉</div>
+        <div data-whale-report-tokenline>无危险操作</div>
       ) : (
         s.dangerousCommands.slice(0, 10).map((d, i) => (
           <div key={i} data-whale-report-danger>
@@ -293,7 +293,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
 
       {(s.titles ?? []).length > 0 && (
         <>
-          <div data-whale-report-h2>🧵 会话标题</div>
+          <div data-whale-report-h2>会话标题</div>
           <ul data-whale-report-titles>
             {s.titles.slice(0, 8).map((t) => (
               <li key={t}>{t}</li>
@@ -303,7 +303,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       )}
 
       <div data-whale-report-tokenline style={{ marginTop: 16, fontSize: 11 }}>
-        数据来自 {s.totalEvents} 条会话事件 · 只读，不改写任何历史 · {dateStr(report.createdAt)} 生成
+        基于 {s.totalEvents} 条会话事件 · 只读 · 生成于 {dateStr(report.createdAt)}
       </div>
     </div>
   );
@@ -403,7 +403,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
 
         {tab === "history" && history === null && <div data-whale-report-loading>加载中…</div>}
         {tab === "history" && history !== null && history.length === 0 && (
-          <div data-whale-report-empty>还没有报告。去「新报告」生成第一份吧</div>
+          <div data-whale-report-empty>暂无报告</div>
         )}
         {tab === "history" && history !== null && history.length > 0 && (
           <div>

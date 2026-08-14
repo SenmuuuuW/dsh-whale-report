@@ -62,12 +62,12 @@ function topTools(stats: ReportStats): string {
   return entries.map(([name, count]) => `- \`${name}\` × ${count}`).join("\n");
 }
 
-/** 熬夜指数 → 人设评语。 */
-function nightOwlVerdict(index: number): string {
-  if (index >= 30) return "守夜鲸 🌙 —— 你和它都是夜行动物";
-  if (index >= 15) return "偶尔熬夜的鲸";
-  if (index >= 5) return "作息健康的鲸";
-  return "早睡早起的模范鲸 🌅";
+/** 熬夜指数 → 写实分级标签。 */
+function nightLabel(index: number): string {
+  if (index >= 30) return "高";
+  if (index >= 15) return "中";
+  if (index >= 5) return "低";
+  return "极低";
 }
 
 export function renderReport(stats: ReportStats, preset: ReportPreset): string {
@@ -89,7 +89,7 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
     `- 会话 **${stats.sessions}** 次（其中子代理 ${stats.subagentSessions} 次）、回合 **${stats.turns}**、步骤 **${stats.steps}**`,
   );
   lines.push(
-    `- 收到你的消息 **${stats.userMessages}** 条，回你 **${stats.assistantMessages}** 条`,
+    `- 用户消息 **${stats.userMessages}** 条，助手消息 **${stats.assistantMessages}** 条`,
   );
   lines.push(
     `- 调用工具 **${stats.toolCallsTotal}** 次，失败 **${stats.toolErrors}** 次`,
@@ -121,14 +121,14 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
   if (stats.busiestDay) {
     lines.push(`- 最忙的一天：**${stats.busiestDay.date}**（${stats.busiestDay.events} 条事件）`);
   }
-  lines.push(`- 人设：**${nightOwlVerdict(night)}**`);
+  lines.push(`- 凌晨活跃度：**${nightLabel(night)}**`);
   lines.push("");
 
   // —— 惊魂时刻
   lines.push("## ⚠️ 惊魂时刻");
   lines.push("");
   if (stats.dangerousCommands.length === 0) {
-    lines.push("这段时间很平静，没有危险操作。🎉");
+    lines.push("无危险操作。");
   } else {
     lines.push(
       `一共 **${stats.dangerousCommands.length}** 次危险操作，需要你亲自过目：`,

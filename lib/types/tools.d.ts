@@ -7,7 +7,8 @@
  * 引擎只读，不写回任何会话数据。
  */
 import { type ToolDefinition } from "@deepseek-ai/dsh-tools";
-import { type RawEvent, type RawSessionHeader } from "./stats.js";
+import type { SessionIndexRecord } from "./state.js";
+import { type ReportStats } from "./stats.js";
 /**
  * 结构化类型：只依赖 sessionQuery 的行为面，不依赖具体类名。
  *
@@ -24,6 +25,7 @@ export interface SessionQueryLike {
             cwd?: string;
             delegationDepth?: number;
         };
+        live: boolean;
     }[]>;
     readSession(sessionId: string): Promise<{
         session: {
@@ -52,21 +54,38 @@ declare module "@deepseek-ai/dsh-session/types" {
         "whale/report": WhaleReportEvent;
     }
 }
+/** 会话索引表（whale 存储域 sessionIndex 的最小结构视图）。 */
+export interface IndexTable {
+    get(key: string): SessionIndexRecord | undefined;
+    put(key: string, value: SessionIndexRecord): Promise<void>;
+}
 export interface ReportServices {
     sessionQuery: SessionQueryLike;
+    index: IndexTable;
 }
 export interface ToolsHost {
     tools: {
         register(definition: ToolDefinition): unknown;
     };
 }
-/** 从会话查询服务收集区间内的所有事件（宽容模式：单会话失败不阻塞整体）。 */
+/** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
+export declare const INDEX_TTL_MS: number;
+/**
+ * 收集区间统计。两条数据路径：
+ * - live 会话：readSession 走内存快照，直接分桶；
+ * - 持久化会话：优先读 whale 域的会话索引（10 分钟新鲜度窗口），
+ *   过期才读完整日志（zstd 解压重放，实测 60s+）并回写索引。
+ * 返回与 aggregate(events, …) 等价的 ReportStats。
+ */
 export declare function collectEvents(svc: ReportServices, period: {
     from: number;
     to: number;
-}): Promise<{
-    events: RawEvent[];
-    headers: RawSessionHeader[];
-}>;
+}): Promise<ReportStats>;
+/**
+ * 后台预热：为所有持久化会话预建索引（无时间上限）。
+ * 首次生成报告的 50s 成本移到启动后的一次性后台任务里，
+ * 之后的每次生成都命中索引（实测 0.1-0.3s）。
+ */
+export declare function warmIndex(svc: ReportServices): Promise<void>;
 export declare function registerReportTools(ctx: ToolsHost, svc: ReportServices): void;
 //# sourceMappingURL=tools.d.ts.map
