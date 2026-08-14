@@ -135,7 +135,7 @@ describe("报告文案", () => {
     ];
     const stats = aggregate(events, PERIOD);
     const md = renderReport(stats, "weekly");
-    expect(md).toContain("鲸鱼周报");
+    expect(md).toContain("深迹 周报");
     expect(md).toContain("rm -rf");
     expect(md).toContain("1.2K");
     expect(md).toContain("惊魂时刻");

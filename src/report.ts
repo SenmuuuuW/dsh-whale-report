@@ -77,7 +77,7 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
   const night = nightOwlIndex(stats);
 
   const lines: string[] = [];
-  lines.push(`# 🐋 鲸鱼${label}`);
+  lines.push(`# 深迹 ${label}`);
   lines.push("");
   lines.push(`> ${dateStr(from)} ~ ${dateStr(to)} · 共 ${formatSpan(from, to)}`);
   lines.push("");
@@ -156,6 +156,6 @@ export function renderReport(stats: ReportStats, preset: ReportPreset): string {
   }
 
   lines.push("---");
-  lines.push(`*数据来自 ${stats.totalEvents} 条会话事件。鲸鱼记事本 · 只读，不改写任何历史。*`);
+  lines.push(`*数据来自 ${stats.totalEvents} 条会话事件。深迹 DeepTrace · 只读，不改写任何历史。*`);
   return lines.join("\n");
 }

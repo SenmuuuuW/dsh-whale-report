@@ -112,7 +112,7 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
   return defineTool({
     name: "whale_report",
     description:
-      "Generate a whale report (鲸鱼日报/周报/月报/年报) from the user's session event history over any time range. " +
+      "Generate a DeepTrace report (深迹 日报/周报/月报/年报) from the user's session event history over any time range. " +
       "Presets: daily (last 1 day), weekly (7 days), monthly (30 days), yearly (365 days), or custom with explicit from/to dates. " +
       "The report is read-only and covers: activity volume, token burn, work-hours profile, dangerous commands, and session titles. " +
       "Call this when the user asks for a report of their agent usage ('给我一份周报', '这个月我干了啥', '年报'). " +
@@ -200,7 +200,7 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
     },
     presentCall: (args) => ({
       card: "generic",
-      title: `生成鲸鱼${PRESET_LABELS[(args as { preset: ReportPreset }).preset] ?? "报告"}`,
+      title: `生成深迹${PRESET_LABELS[(args as { preset: ReportPreset }).preset] ?? "报告"}`,
       kind: "other",
       rawInput: args,
     }),
