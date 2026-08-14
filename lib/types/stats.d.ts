@@ -59,12 +59,13 @@ export interface ReportStats {
     toolErrors: number;
     /** bash 命令总数。 */
     commands: number;
-    /** 危险命令列表（带分类标签）。 */
+    /** 危险命令列表（带分类标签与严重级）。 */
     dangerousCommands: {
         command: string;
         time: number;
         sessionId: string;
         label: string;
+        sev: DangerSeverity;
     }[];
     /** 24 小时直方图：凌晨 0 点到 23 点各有多少条事件。 */
     hourHistogram: number[];
@@ -93,11 +94,19 @@ export interface ReportStats {
         date: string;
         hours: number[];
     }[];
+    /** 重试风暴次数：同一命令连续重复 ≥3 次（洞察引擎用）。 */
+    retryBursts: number;
 }
-/** 危险命令特征（正则，匹配 bash 命令字符串）。 */
+/** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
+export type DangerSeverity = "red" | "amber";
+/**
+ * 危险命令特征（正则，匹配 bash 命令字符串）。红色规则排前面：
+ * 命中即按该规则分级，所以"删除根目录"必须先于泛化的"rm -rf 删除"。
+ */
 export declare const DANGEROUS_PATTERNS: {
     pattern: RegExp;
     label: string;
+    sev: DangerSeverity;
 }[];
 export declare function emptyStats(period: Period): ReportStats;
 /**
@@ -131,11 +140,12 @@ export interface HourBucket {
     toolCalls: Record<string, number>;
     toolErrors: number;
     commands: number;
-    /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签。 */
+    /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */
     danger: {
         cmd: string;
         ms: number;
         label: string;
+        sev: DangerSeverity;
     }[];
     /** 该分桶内按模型的 token 用量。 */
     modelUsage: Record<string, {
@@ -144,6 +154,8 @@ export interface HourBucket {
         cacheRead: number;
         reasoning: number;
     }>;
+    /** 该分桶内重试风暴（连续相同命令 ≥3 次）的次数。 */
+    retryBursts: number;
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;

@@ -14,7 +14,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { whaleDomain } from "./state.js";
-import type { ReportServices } from "./tools.js";
+import { type ReportServices } from "./tools.js";
 export interface WebServerLike {
     register(route: {
         kind: "prefix";

@@ -1,0 +1,39 @@
+/**
+ * 洞察引擎：确定性规则把统计变成"可行动的卡片"。
+ *
+ * 设计原则：
+ * 1. 不用 LLM —— 规则是纯函数，可测试、可复算、可对质；
+ * 2. 每条洞察 = 发生了什么（数据）→ 建议怎么做（行动）→ 量化参考（诚实估算）；
+ * 3. 阈值宁可保守：只有真实信号才触发，避免"狼来了"毁掉可信度。
+ */
+import type { ReportStats } from "./stats.js";
+import type { PeriodStatsRecord } from "./state.js";
+import type { CostBreakdown } from "./pricing.js";
+export type InsightLevel = "info" | "tip" | "warning" | "critical";
+export interface Insight {
+    id: string;
+    level: InsightLevel;
+    title: string;
+    detail: string;
+    action: string;
+    /** 量化收益（参考口径，明确标注估算）。 */
+    estimate?: string;
+}
+export interface InsightInput {
+    stats: ReportStats;
+    prev?: PeriodStatsRecord;
+    cost?: CostBreakdown;
+    budgetWeeklyCny?: number;
+}
+/** 缓存命中率：缓存命中占输入+命中的比例。 */
+export declare function cacheHitRate(stats: ReportStats): number;
+/** 凌晨（0-6 点）事件占比。 */
+export declare function nightRatio(stats: ReportStats): number;
+/** 费用涨跌（相对上一周期），百分比。prev 缺失时返回 null。 */
+export declare function costDeltaPct(input: InsightInput): number | null;
+export declare function computeInsights(input: InsightInput): Insight[];
+/** 周期 key：dy-YYYY-MM-DD / wk-YYYY-Www / mo-YYYY-MM / yr-YYYY（按"结束时刻"归属）。 */
+export declare function periodKey(preset: string, toMs: number): string;
+/** 上一周期 key（按 preset 回退一档）。 */
+export declare function previousPeriodKey(preset: string, toMs: number): string;
+//# sourceMappingURL=insights.d.ts.map

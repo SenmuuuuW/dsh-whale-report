@@ -14,12 +14,12 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isTrustedApiRequest } from "./trust-fence.js";
-import { whaleDomain, type ReportRecord } from "./state.js";
+import { whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js";
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
 import { computeCost } from "./pricing.js";
-import type { ReportServices } from "./tools.js";
+import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +33,10 @@ export interface WebServerLike {
 
 export interface ApiServices extends ReportServices {
   domain: Domain<typeof whaleDomain>;
+}
+
+function tableSettings(svc: ApiServices) {
+  return svc.domain.table("settings");
 }
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
@@ -84,10 +88,11 @@ async function generateReport(
       : presetRange(preset, now);
   if (range.to <= range.from) throw new Error("时间区间无效：to 必须晚于 from");
 
-  const { collectEvents } = await import("./tools.js");
-  const stats = await collectEvents(svc, range);
-  const cost = await computeCost(stats.models);
-  const markdown = renderReport(stats, preset, cost);
+  const gen = await generateReportData(svc, preset, range);
+  await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+  const stats = gen.stats;
+  const cost = gen.cost;
+  const markdown = renderReport(stats, preset, cost, gen.prev, gen.insights);
 
   const record: ReportRecord = {
     id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -101,6 +106,20 @@ async function generateReport(
     stats: stats as unknown,
     markdown,
     cost,
+    insights: gen.insights,
+    prev: gen.prev
+      ? {
+          key: gen.prev.key,
+          cost: gen.prev.cost,
+          sessions: gen.prev.sessions,
+          turns: gen.prev.turns,
+          tokens: gen.prev.tokens,
+          cacheHitRate: gen.prev.cacheHitRate,
+          nightRatio: gen.prev.nightRatio,
+          dangerCount: gen.prev.dangerCount,
+        }
+      : undefined,
+    budget: gen.budgetWeeklyCny,
   };
   await svc.domain.table("reports").put(record.id, record);
   return record;
@@ -165,6 +184,21 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 "content-length": Buffer.byteLength(html),
               });
               res.end(html);
+              return;
+            }
+            if (req.method === "GET" && method === "settings") {
+              const record = tableSettings(svc).get("user");
+              writeJson(res, 200, { ok: true, settings: record?.budgetWeeklyCny ?? null });
+              return;
+            }
+            if (req.method === "POST" && method === "settings") {
+              const payload = (await readJsonBody(req)) as { budgetWeeklyCny?: unknown };
+              const budget = typeof payload.budgetWeeklyCny === "number" && Number.isFinite(payload.budgetWeeklyCny)
+                ? Math.max(0, payload.budgetWeeklyCny)
+                : undefined;
+              const settings: SettingsRecord = { key: "user", budgetWeeklyCny: budget, updatedAt: Date.now() };
+              await tableSettings(svc).put("user", settings);
+              writeJson(res, 200, { ok: true, settings: settings.budgetWeeklyCny ?? null });
               return;
             }
             if (req.method === "POST") {

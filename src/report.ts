@@ -10,6 +10,8 @@ import {
   nightOwlIndex,
 } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
+import type { Insight } from "./insights.js";
+import type { PeriodStatsRecord } from "./state.js";
 
 export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
@@ -60,6 +62,10 @@ function topTools(stats: ReportStats): string {
   return entries.map(([name, count]) => `- \`${name}\` × ${count}`).join("\n");
 }
 
+function levelLabel(level: Insight["level"]): string {
+  return level === "critical" ? "严重" : level === "warning" ? "警告" : level === "tip" ? "提示" : "信息";
+}
+
 /** 熬夜指数 → 写实分级标签。 */
 function nightLabel(index: number): string {
   if (index >= 30) return "高";
@@ -68,13 +74,23 @@ function nightLabel(index: number): string {
   return "极低";
 }
 
-export function renderReport(stats: ReportStats, preset: ReportPreset, cost?: CostBreakdown): string {
+export function renderReport(
+  stats: ReportStats,
+  preset: ReportPreset,
+  cost?: CostBreakdown,
+  prev?: PeriodStatsRecord | null,
+  insights?: Insight[],
+): string {
   const label = PRESET_LABELS[preset];
   const { from, to } = stats.period;
   const dateStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   const night = nightOwlIndex(stats);
   const t = stats.tokens;
   const totalTokens = t.input + t.output + t.cacheRead + t.reasoning;
+  const totalCost = cost?.total ?? 0;
+  const deltaPct = prev !== undefined && prev !== null && prev.cost > 0
+    ? Math.round(((totalCost - prev.cost) / prev.cost) * 100)
+    : null;
 
   const lines: string[] = [];
   lines.push(`# 深迹 ${label}`);
@@ -84,7 +100,26 @@ export function renderReport(stats: ReportStats, preset: ReportPreset, cost?: Co
   lines.push(
     `> 总计：会话 ${stats.sessions} · 回合 ${stats.turns} · 工具调用 ${stats.toolCallsTotal} · 命令 ${stats.commands} · Token ${formatTokens(totalTokens)}`,
   );
+  if (prev !== undefined && prev !== null) {
+    lines.push(
+      `> 对比上一周期：费用 ${deltaPct === null ? "—" : `${deltaPct > 0 ? "▲" : "▼"} ${Math.abs(deltaPct)}%`} · 会话 ${
+        prev.sessions === 0 ? "—" : `${stats.sessions - prev.sessions > 0 ? "+" : ""}${stats.sessions - prev.sessions}`
+      } · 命中率 ${prev.cacheHitRate}% → ${Math.round((stats.tokens.cacheRead / Math.max(1, stats.tokens.input + stats.tokens.cacheRead)) * 1000) / 10}%`,
+    );
+  }
   lines.push("");
+
+  if (insights !== undefined && insights.length > 0) {
+    lines.push("## 洞察");
+    lines.push("");
+    for (const insight of insights.slice(0, 6)) {
+      lines.push(`- **[${levelLabel(insight.level)}] ${insight.title}**`);
+      lines.push(`  ${insight.detail}`);
+      lines.push(`  建议：${insight.action}`);
+      if (insight.estimate !== undefined) lines.push(`  ${insight.estimate}`);
+      lines.push("");
+    }
+  }
 
   // —— 工作量
   lines.push("## 工作量");

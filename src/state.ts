@@ -7,6 +7,8 @@ import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
 
 export type ReportId = string;
 export type SessionIndexKey = string;
+export type PeriodKey = string;
+export type SettingsKey = string;
 
 export const ReportRecordSchema = z.object({
   id: z.string().min(1),
@@ -23,6 +25,12 @@ export const ReportRecordSchema = z.object({
   markdown: z.string(),
   /** 费用拆解（CostBreakdown，由 pricing.ts 计算；旧记录可缺省）。 */
   cost: z.unknown().optional(),
+  /** 洞察卡片（Insight[]；旧记录可缺省）。 */
+  insights: z.unknown().optional(),
+  /** 上一周期对比摘要（用于展示涨跌；旧记录可缺省）。 */
+  prev: z.unknown().optional(),
+  /** 生成时的周预算（CNY；可缺省）。 */
+  budget: z.number().optional(),
 });
 
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
@@ -40,11 +48,47 @@ export const SessionIndexSchema = z.object({
 
 export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
 
+/** 周期基线（compact 统计，供"对比上周"与洞察引擎用）。 */
+export const PeriodStatsSchema = z.object({
+  key: z.string().min(1),
+  preset: z.string(),
+  from: z.number(),
+  to: z.number(),
+  createdAt: z.number(),
+  sessions: z.number(),
+  turns: z.number(),
+  toolCallsTotal: z.number(),
+  commands: z.number(),
+  toolErrors: z.number(),
+  totalEvents: z.number(),
+  tokens: z.object({ input: z.number(), output: z.number(), cacheRead: z.number(), reasoning: z.number() }),
+  cost: z.number(),
+  nightRatio: z.number(),
+  cacheHitRate: z.number(),
+  dangerCount: z.number(),
+  redDanger: z.number(),
+  retryBursts: z.number(),
+  activeDays: z.number(),
+});
+
+export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
+
+/** 用户设置（当前只有每周预算，CNY）。 */
+export const SettingsRecordSchema = z.object({
+  key: z.string().min(1),
+  budgetWeeklyCny: z.number().min(0).optional(),
+  updatedAt: z.number(),
+});
+
+export type SettingsRecord = z.infer<typeof SettingsRecordSchema>;
+
 export const whaleDomain = defineDomain({
   name: "whale",
   version: 1,
   tables: {
     reports: domainTable<ReportId, ReportRecord>(ReportRecordSchema),
     session_index: domainTable<SessionIndexKey, SessionIndexRecord>(SessionIndexSchema),
+    period_stats: domainTable<PeriodKey, PeriodStatsRecord>(PeriodStatsSchema),
+    settings: domainTable<SettingsKey, SettingsRecord>(SettingsRecordSchema),
   },
 });

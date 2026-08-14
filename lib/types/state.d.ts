@@ -5,6 +5,8 @@
 import { z } from "zod";
 export type ReportId = string;
 export type SessionIndexKey = string;
+export type PeriodKey = string;
+export type SettingsKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{
     id: z.ZodString;
     preset: z.ZodString;
@@ -17,6 +19,9 @@ export declare const ReportRecordSchema: z.ZodObject<{
     stats: z.ZodUnknown;
     markdown: z.ZodString;
     cost: z.ZodOptional<z.ZodUnknown>;
+    insights: z.ZodOptional<z.ZodUnknown>;
+    prev: z.ZodOptional<z.ZodUnknown>;
+    budget: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
 export declare const SessionIndexSchema: z.ZodObject<{
@@ -29,6 +34,41 @@ export declare const SessionIndexSchema: z.ZodObject<{
     titles: z.ZodArray<z.ZodString>;
 }, z.core.$strip>;
 export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
+/** 周期基线（compact 统计，供"对比上周"与洞察引擎用）。 */
+export declare const PeriodStatsSchema: z.ZodObject<{
+    key: z.ZodString;
+    preset: z.ZodString;
+    from: z.ZodNumber;
+    to: z.ZodNumber;
+    createdAt: z.ZodNumber;
+    sessions: z.ZodNumber;
+    turns: z.ZodNumber;
+    toolCallsTotal: z.ZodNumber;
+    commands: z.ZodNumber;
+    toolErrors: z.ZodNumber;
+    totalEvents: z.ZodNumber;
+    tokens: z.ZodObject<{
+        input: z.ZodNumber;
+        output: z.ZodNumber;
+        cacheRead: z.ZodNumber;
+        reasoning: z.ZodNumber;
+    }, z.core.$strip>;
+    cost: z.ZodNumber;
+    nightRatio: z.ZodNumber;
+    cacheHitRate: z.ZodNumber;
+    dangerCount: z.ZodNumber;
+    redDanger: z.ZodNumber;
+    retryBursts: z.ZodNumber;
+    activeDays: z.ZodNumber;
+}, z.core.$strip>;
+export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
+/** 用户设置（当前只有每周预算，CNY）。 */
+export declare const SettingsRecordSchema: z.ZodObject<{
+    key: z.ZodString;
+    budgetWeeklyCny: z.ZodOptional<z.ZodNumber>;
+    updatedAt: z.ZodNumber;
+}, z.core.$strip>;
+export type SettingsRecord = z.infer<typeof SettingsRecordSchema>;
 export declare const whaleDomain: {
     name: string;
     version: number;
@@ -45,6 +85,9 @@ export declare const whaleDomain: {
             stats: unknown;
             markdown: string;
             cost?: unknown;
+            insights?: unknown;
+            prev?: unknown;
+            budget?: number | undefined;
         }>;
         session_index: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
             sessionId: string;
@@ -54,6 +97,37 @@ export declare const whaleDomain: {
             lastMs: number;
             buckets: unknown;
             titles: string[];
+        }>;
+        period_stats: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            key: string;
+            preset: string;
+            from: number;
+            to: number;
+            createdAt: number;
+            sessions: number;
+            turns: number;
+            toolCallsTotal: number;
+            commands: number;
+            toolErrors: number;
+            totalEvents: number;
+            tokens: {
+                input: number;
+                output: number;
+                cacheRead: number;
+                reasoning: number;
+            };
+            cost: number;
+            nightRatio: number;
+            cacheHitRate: number;
+            dangerCount: number;
+            redDanger: number;
+            retryBursts: number;
+            activeDays: number;
+        }>;
+        settings: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            key: string;
+            updatedAt: number;
+            budgetWeeklyCny?: number | undefined;
         }>;
     };
 };

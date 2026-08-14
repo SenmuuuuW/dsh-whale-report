@@ -8,8 +8,9 @@
  */
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
-import type { SessionIndexRecord } from "./state.js";
-import { computeCost } from "./pricing.js";
+import type { SessionIndexRecord, PeriodStatsRecord, SettingsRecord } from "./state.js";
+import { computeCost, type CostBreakdown } from "./pricing.js";
+import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
@@ -56,6 +57,14 @@ export interface IndexTable {
 export interface ReportServices {
   sessionQuery: SessionQueryLike;
   index: IndexTable;
+  periodStats?: {
+    get(key: string): PeriodStatsRecord | undefined;
+    put(key: string, value: PeriodStatsRecord): Promise<void>;
+  };
+  settings?: {
+    get(key: string): SettingsRecord | undefined;
+    put(key: string, value: SettingsRecord): Promise<void>;
+  };
 }
 
 export interface ToolsHost {
@@ -92,7 +101,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 3;
+export const INDEX_VERSION = 6;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -186,6 +195,61 @@ export async function warmIndex(svc: ReportServices): Promise<void> {
   });
 }
 
+/** 一次完整生成：统计 + 费用 + 基线对比 + 洞察。工具与 API 共用同一管线。 */
+export interface ReportGeneration {
+  stats: ReturnType<typeof collectEvents> extends Promise<infer S> ? S : never;
+  cost: CostBreakdown;
+  key: string;
+  prev: PeriodStatsRecord | null;
+  insights: Insight[];
+  budgetWeeklyCny?: number;
+}
+
+export async function generateReportData(
+  svc: ReportServices,
+  preset: string,
+  range: { from: number; to: number },
+): Promise<ReportGeneration> {
+  const stats = await collectEvents(svc, range);
+  const cost = await computeCost(stats.models);
+  const key = periodKey(preset, range.to);
+  const prevKey = previousPeriodKey(preset, range.to);
+  const prev = svc.periodStats?.get(prevKey) ?? null;
+  const budgetWeeklyCny = svc.settings?.get("user")?.budgetWeeklyCny;
+  const insights = computeInsights({ stats, prev: prev ?? undefined, cost, budgetWeeklyCny });
+  return { stats, cost, key, prev, insights, budgetWeeklyCny };
+}
+
+export function toPeriodRecord(
+  key: string,
+  preset: string,
+  range: { from: number; to: number },
+  gen: ReportGeneration,
+): PeriodStatsRecord {
+  const s = gen.stats;
+  return {
+    key,
+    preset,
+    from: range.from,
+    to: range.to,
+    createdAt: Date.now(),
+    sessions: s.sessions,
+    turns: s.turns,
+    toolCallsTotal: s.toolCallsTotal,
+    commands: s.commands,
+    toolErrors: s.toolErrors,
+    totalEvents: s.totalEvents,
+    tokens: { ...s.tokens },
+    cost: gen.cost.total,
+    nightRatio: nightRatio(s),
+    cacheHitRate: cacheHitRate(s),
+    dangerCount: s.dangerousCommands.length,
+    redDanger: s.dangerousCommands.filter((d) => d.sev === "red").length,
+    retryBursts: s.retryBursts,
+    activeDays: s.activeDays,
+  };
+}
+
 export function registerReportTools(ctx: ToolsHost, svc: ReportServices): void {
   ctx.tools.register(whaleReportTool(svc));
 }
@@ -252,9 +316,11 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
         throw new Error("时间区间无效：to 必须晚于 from");
       }
 
-      const stats = await collectEvents(svc, range);
-      const cost = await computeCost(stats.models);
-      const report = renderReport(stats, preset, cost);
+      const gen = await generateReportData(svc, preset, range);
+      if (svc.periodStats !== undefined) {
+        await svc.periodStats.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+      }
+      const report = renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights);
 
       // 报告本身也写进会话日志 —— 鲸鱼记事本记下它自己写的账。
       // （读与写同源：下次报告会数到这一次。）
@@ -263,9 +329,9 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
           preset,
           from: range.from,
           to: range.to,
-          sessions: stats.sessions,
-          turns: stats.turns,
-          totalEvents: stats.totalEvents,
+          sessions: gen.stats.sessions,
+          turns: gen.stats.turns,
+          totalEvents: gen.stats.totalEvents,
         });
       }
 
@@ -274,11 +340,13 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
         label: PRESET_LABELS[preset],
         from: new Date(range.from).toISOString(),
         to: new Date(range.to).toISOString(),
-        sessions: stats.sessions,
-        turns: stats.turns,
-        totalEvents: stats.totalEvents,
+        sessions: gen.stats.sessions,
+        turns: gen.stats.turns,
+        totalEvents: gen.stats.totalEvents,
         report,
-        cost: { perModel: cost.perModel, total: cost.total, currency: cost.currency, source: cost.source },
+        cost: { perModel: gen.cost.perModel, total: gen.cost.total, currency: gen.cost.currency, source: gen.cost.source },
+        insights: gen.insights,
+        prevCost: gen.prev?.cost ?? null,
       };
     },
     presentCall: (args) => ({

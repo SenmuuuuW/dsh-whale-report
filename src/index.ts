@@ -35,6 +35,8 @@ export function apply(ctx: Context) {
     const services: ReportServices = {
       sessionQuery,
       index: domain.table("session_index"),
+      periodStats: domain.table("period_stats"),
+      settings: domain.table("settings"),
     };
     registerReportTools(ctx as unknown as ToolsHost, services);
 
@@ -43,7 +45,7 @@ export function apply(ctx: Context) {
       void warmIndex(services).catch(() => {});
     }, 3000);
 
-    const apiServices: ApiServices = { sessionQuery, domain, index: services.index };
+    const apiServices: ApiServices = { domain, ...services };
 
     // 两个历史服务名都试一次；只注册一遍（防止未来某快照同时提供两个名字）。
     // 关键：cordis 注入上下文是 Proxy，访问不存在的服务属性会直接抛异常

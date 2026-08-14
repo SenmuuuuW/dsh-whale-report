@@ -65,8 +65,8 @@ export interface ReportStats {
   toolErrors: number;
   /** bash 命令总数。 */
   commands: number;
-  /** 危险命令列表（带分类标签）。 */
-  dangerousCommands: { command: string; time: number; sessionId: string; label: string }[];
+  /** 危险命令列表（带分类标签与严重级）。 */
+  dangerousCommands: { command: string; time: number; sessionId: string; label: string; sev: DangerSeverity }[];
   /** 24 小时直方图：凌晨 0 点到 23 点各有多少条事件。 */
   hourHistogram: number[];
   /** 有事件的天数。 */
@@ -85,23 +85,32 @@ export interface ReportStats {
   dailySeries: { date: string; count: number }[];
   /** 按日 × 24 小时的事件矩阵（GitHub 贡献图风格的活动图）。 */
   dayHourSeries: { date: string; hours: number[] }[];
+  /** 重试风暴次数：同一命令连续重复 ≥3 次（洞察引擎用）。 */
+  retryBursts: number;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/** 危险命令特征（正则，匹配 bash 命令字符串）。 */
-export const DANGEROUS_PATTERNS: { pattern: RegExp; label: string }[] = [
-  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/, label: "rm -rf 删除" },
-  { pattern: /git\s+push\b[^\n]*--force/, label: "force push" },
-  { pattern: /git\s+reset\s+--hard/, label: "硬重置 git" },
-  { pattern: /DROP\s+(TABLE|DATABASE)/i, label: "删库" },
-  { pattern: /shutdown|reboot|halt\b/, label: "关机/重启" },
-  { pattern: /mkfs\./, label: "格式化磁盘" },
-  { pattern: /dd\s+if=.*of=\/dev\//, label: "dd 写设备" },
-  { pattern: /chmod\s+(-R\s+)?777/, label: "777 全开放" },
-  { pattern: /:\(\)\s*\{\s*:\|:\s*&\s*\};?\s*:/, label: "fork 炸弹" },
-  { pattern: /curl\s+\S+\s*\|\s*(ba)?sh/, label: "curl|sh 远程执行" },
+/** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
+export type DangerSeverity = "red" | "amber";
+
+/**
+ * 危险命令特征（正则，匹配 bash 命令字符串）。红色规则排前面：
+ * 命中即按该规则分级，所以"删除根目录"必须先于泛化的"rm -rf 删除"。
+ */
+export const DANGEROUS_PATTERNS: { pattern: RegExp; label: string; sev: DangerSeverity }[] = [
+  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\s+(?:\/(?:\s|$)|~\/?(?:\s|$))/, label: "删除根目录/家目录", sev: "red" },
+  { pattern: /DROP\s+(TABLE|DATABASE)/i, label: "删库", sev: "red" },
+  { pattern: /^(?:sudo\s+)?(?:shutdown|reboot|halt)\b/, label: "关机/重启", sev: "red" },
+  { pattern: /mkfs\./, label: "格式化磁盘", sev: "red" },
+  { pattern: /dd\s+if=.*of=\/dev\//, label: "dd 写设备", sev: "red" },
+  { pattern: /:\(\)\s*\{\s*:\|:\s*&\s*\};?\s*:/, label: "fork 炸弹", sev: "red" },
+  { pattern: /rm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/, label: "rm -rf 删除", sev: "amber" },
+  { pattern: /git\s+push\b[^\n]*--force/, label: "force push", sev: "amber" },
+  { pattern: /git\s+reset\s+--hard/, label: "硬重置 git", sev: "amber" },
+  { pattern: /chmod\s+(-R\s+)?777/, label: "777 全开放", sev: "amber" },
+  { pattern: /curl\s+\S+\s*\|\s*(ba)?sh/, label: "curl|sh 远程执行", sev: "amber" },
 ];
 
 export function emptyStats(period: Period): ReportStats {
@@ -128,6 +137,7 @@ export function emptyStats(period: Period): ReportStats {
     halfHourHistogram: new Array(48).fill(0) as number[],
     dailySeries: [],
     dayHourSeries: [],
+    retryBursts: 0,
   };
 }
 
@@ -198,6 +208,8 @@ export function aggregate(
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
   const dayHourMap = new Map<string, number[]>();
+  const lastCommand = new Map<string, string>();
+  const commandStreak = new Map<string, number>();
   const sessionIdsByEvent: string[] = [];
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
@@ -273,9 +285,20 @@ export function aggregate(
         const command = commandOf(data);
         if (command) {
           stats.commands += 1;
-          for (const { pattern, label } of DANGEROUS_PATTERNS) {
-            if (pattern.test(command)) {
-              stats.dangerousCommands.push({ command, time: event.time, sessionId, label });
+          // 只对命令首行做危险匹配：heredoc 正文里的字样不算真实操作。
+          const firstLine = command.split("\n", 1)[0];
+          const prev = lastCommand.get(sessionId);
+          if (prev === firstLine) {
+            const streak = (commandStreak.get(sessionId) ?? 1) + 1;
+            commandStreak.set(sessionId, streak);
+            if (streak === 3) stats.retryBursts += 1;
+          } else {
+            lastCommand.set(sessionId, firstLine);
+            commandStreak.set(sessionId, 1);
+          }
+          for (const { pattern, label, sev } of DANGEROUS_PATTERNS) {
+            if (pattern.test(firstLine)) {
+              stats.dangerousCommands.push({ command: firstLine, time: event.time, sessionId, label, sev });
               break;
             }
           }
@@ -363,10 +386,12 @@ export interface HourBucket {
   toolCalls: Record<string, number>;
   toolErrors: number;
   commands: number;
-  /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签。 */
-  danger: { cmd: string; ms: number; label: string }[];
+  /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */
+  danger: { cmd: string; ms: number; label: string; sev: DangerSeverity }[];
   /** 该分桶内按模型的 token 用量。 */
   modelUsage: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
+  /** 该分桶内重试风暴（连续相同命令 ≥3 次）的次数。 */
+  retryBursts: number;
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -395,6 +420,7 @@ function newBucket(h: number): HourBucket {
     commands: 0,
     danger: [],
     modelUsage: {},
+    retryBursts: 0,
   };
 }
 
@@ -416,6 +442,8 @@ export function bucketizeOwnEvents(
   let currentModel = "unknown";
   let lastSeq = 0;
   let lastMs = 0;
+  let lastCommand = "";
+  let commandStreak = 0;
   for (const event of events) {
     if (event.seq < ownStart) continue;
     if (stopAfter !== undefined && event.time >= stopAfter) break;
@@ -469,10 +497,18 @@ export function bucketizeOwnEvents(
         const command = commandOf(data);
         if (command) {
           bucket.commands += 1;
+          const firstLine = command.split("\n", 1)[0];
+          if (lastCommand === firstLine) {
+            commandStreak += 1;
+            if (commandStreak === 3) bucket.retryBursts += 1;
+          } else {
+            lastCommand = firstLine;
+            commandStreak = 1;
+          }
           if (bucket.danger.length < DANGER_SAMPLE_CAP) {
-            for (const { pattern, label } of DANGEROUS_PATTERNS) {
-              if (pattern.test(command)) {
-                bucket.danger.push({ cmd: command, ms: event.time, label });
+            for (const { pattern, label, sev } of DANGEROUS_PATTERNS) {
+              if (pattern.test(firstLine)) {
+                bucket.danger.push({ cmd: firstLine, ms: event.time, label, sev });
                 break;
               }
             }
@@ -513,6 +549,8 @@ export function aggregateBuckets(
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
   const dayHourMap = new Map<string, number[]>();
+  const lastCommand = new Map<string, string>();
+  const commandStreak = new Map<string, number>();
   const days = new Map<string, number>();
 
   for (const view of views) {
@@ -543,6 +581,7 @@ export function aggregateBuckets(
       }
       stats.toolErrors += bucket.toolErrors;
       stats.commands += bucket.commands;
+      stats.retryBursts += bucket.retryBursts ?? 0;
       for (const [model, usage] of Object.entries(bucket.modelUsage ?? {})) {
         const m = (stats.models[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
         m.input += usage.input;
@@ -551,7 +590,7 @@ export function aggregateBuckets(
         m.reasoning += usage.reasoning;
       }
       for (const d of bucket.danger) {
-        stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId, label: d.label });
+        stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId, label: d.label, sev: d.sev });
       }
       const d = new Date(bucket.h);
       const hour = d.getHours();

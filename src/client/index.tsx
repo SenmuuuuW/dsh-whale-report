@@ -177,6 +177,27 @@ const CSS = `
 [data-whale-report-sumitem] b { font-size: 20px; font-weight: 800; color: #111827; }
 [data-whale-report-sumitem] span { font-size: 11.5px; color: #6b7280; }
 
+[data-whale-report-budgetedit] { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 12px; color: #374151; }
+[data-whale-report-budgetedit] input { width: 90px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; font-size: 12.5px; color: #111827; }
+[data-whale-report-budgetedit] input:focus { outline: none; border-color: #4d6bfe; }
+[data-whale-report-herodelta] { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; font-size: 12px; }
+[data-whale-report-herodelta] .muted { opacity: .8; }
+[data-whale-report-budget] { margin-top: 10px; }
+[data-whale-report-budgetbar] { height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; margin-bottom: 5px; }
+[data-whale-report-budgetbar] i { display: block; height: 100%; }
+[data-whale-report-budget] span { font-size: 11px; opacity: .9; }
+[data-whale-report-insights] { display: flex; flex-direction: column; gap: 8px; }
+[data-whale-report-insight] { border: 1px solid; border-radius: 10px; padding: 10px 12px; }
+[data-whale-report-insighthead] { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+[data-whale-report-insighticon] { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 800; flex-shrink: 0; }
+[data-whale-report-insighthead] b { font-size: 12.5px; color: #111827; }
+[data-whale-report-insightdetail] { font-size: 12px; color: #374151; line-height: 1.7; }
+[data-whale-report-insightaction] { font-size: 12px; color: #4d6bfe; margin-top: 4px; line-height: 1.6; }
+[data-whale-report-insightestimate] { font-size: 11px; color: #6b7280; margin-top: 4px; }
+[data-whale-report-danger][data-sev="red"] { background: #fef2f2; border-color: #dc2626; color: #b91c1c; }
+[data-whale-report-danger][data-sev="amber"] { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
+[data-whale-report-danger][data-sev="amber"] em { color: #b45309; }
+
 /* Tab 形态 */
 [data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 14px 16px 24px; color: #111827; background: #f6f7fb; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #fff; }
@@ -219,10 +240,32 @@ interface ReportMeta {
   totalEvents: number;
 }
 
+interface InsightJson {
+  id: string;
+  level: "info" | "tip" | "warning" | "critical";
+  title: string;
+  detail: string;
+  action: string;
+  estimate?: string;
+}
+
+interface PrevSummary {
+  key: string;
+  cost: number;
+  sessions: number;
+  turns: number;
+  cacheHitRate: number;
+  nightRatio: number;
+  dangerCount: number;
+}
+
 interface ReportFull extends ReportMeta {
   stats: StatsJson;
   markdown: string;
   cost?: { perModel: Record<string, number>; total: number; currency: string; source: string };
+  insights?: InsightJson[];
+  prev?: PrevSummary;
+  budget?: number;
 }
 
 interface StatsJson {
@@ -238,7 +281,7 @@ interface StatsJson {
   toolCallsTotal: number;
   toolErrors: number;
   commands: number;
-  dangerousCommands: { command: string; time: number; sessionId: string; label: string }[];
+  dangerousCommands: { command: string; time: number; sessionId: string; label: string; sev: "red" | "amber" }[];
   hourHistogram: number[];
   activeDays: number;
   busiestDay: { date: string; events: number } | null;
@@ -520,6 +563,38 @@ function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: Repo
   );
 }
 
+const INSIGHT_META: Record<InsightJson["level"], { color: string; icon: string }> = {
+  info: { color: "#4d6bfe", icon: "ℹ" },
+  tip: { color: "#16a34a", icon: "✓" },
+  warning: { color: "#d97706", icon: "!" },
+  critical: { color: "#dc2626", icon: "×" },
+};
+
+function InsightsSection({ insights }: { insights: InsightJson[] }): ReactNode {
+  if (insights.length === 0) return null;
+  return (
+    <div data-whale-report-card>
+      <div data-whale-report-h2>洞察</div>
+      <div data-whale-report-insights>
+        {insights.map((insight) => {
+          const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.info;
+          return (
+            <div key={insight.id} data-whale-report-insight style={{ borderColor: `${meta.color}55` }}>
+              <div data-whale-report-insighthead>
+                <span data-whale-report-insighticon style={{ background: meta.color }}>{meta.icon}</span>
+                <b>{insight.title}</b>
+              </div>
+              <div data-whale-report-insightdetail>{insight.detail}</div>
+              <div data-whale-report-insightaction>建议：{insight.action}</div>
+              {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** 危险操作自动总结（规则生成，不用 LLM）。 */
 function dangerSummary(danger: StatsJson["dangerousCommands"]): string {
   if (danger.length === 0) return "";
@@ -542,7 +617,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
   const [dangerExpanded, setDangerExpanded] = useState(false);
   const [samplesShown, setSamplesShown] = useState(false);
-  const danger = (s.dangerousCommands ?? []).map((d) => ({ ...d, label: d.label ?? "未分类" }));
+  const danger = (s.dangerousCommands ?? []).map((d) => ({ ...d, label: d.label ?? "未分类", sev: d.sev ?? "amber" }));
   const shownDanger = dangerExpanded ? danger.slice(0, 30) : danger.slice(0, 3);
   const summary = dangerSummary(danger);
 
@@ -551,6 +626,12 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
     window.open(url, "_blank");
   };
 
+  const delta = report.prev !== undefined && report.prev.cost > 0 && typeof report.cost?.total === "number"
+    ? Math.round(((report.cost.total - report.prev.cost) / report.prev.cost) * 100)
+    : null;
+  const budgetUsed = typeof report.budget === "number" && report.budget > 0 && typeof report.cost?.total === "number"
+    ? Math.min(1, report.cost.total / report.budget)
+    : null;
   return (
     <div>
       <div data-whale-report-actions>
@@ -571,7 +652,29 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
             <div><b>¥{report.cost.total.toFixed(2)}</b><span>预估费用</span></div>
           )}
         </div>
+        {delta !== null && (
+          <div data-whale-report-herodelta>
+            <span>较上周期费用</span>
+            <b style={{ color: delta > 0 ? "#fca5a5" : "#86efac" }}>
+              {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%
+            </b>
+            <span className="muted">（¥{report.prev!.cost.toFixed(2)} → ¥{report.cost!.total.toFixed(2)}）</span>
+          </div>
+        )}
+        {budgetUsed !== null && (
+          <div data-whale-report-budget>
+            <div data-whale-report-budgetbar>
+              <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#86efac" }} />
+            </div>
+            <span>
+              周预算 ¥{report.budget!.toFixed(2)} · 已用 {(budgetUsed * 100).toFixed(0)}%
+              {budgetUsed >= 1 ? "（已超支）" : ""}
+            </span>
+          </div>
+        )}
       </div>
+
+      <InsightsSection insights={report.insights ?? []} />
 
       <div data-whale-report-card>
         <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
@@ -683,6 +786,7 @@ interface ContentState {
   error: string | null;
   current: ReportFull | null;
   history: ReportMeta[] | null;
+  budgetInput: string;
 }
 
 class WhaleContent extends Component<Record<string, never>, ContentState> {
@@ -695,7 +799,39 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     error: null,
     current: null,
     history: null,
+    budgetInput: "",
   };
+
+  componentDidMount(): void {
+    void (async () => {
+      try {
+        const response = await fetch("/whale/api/settings");
+        const body = (await response.json()) as { ok: boolean; settings?: number | null };
+        if (response.ok && body.ok && typeof body.settings === "number") {
+          this.setState({ budgetInput: String(body.settings) });
+        }
+      } catch {
+        /* 预算加载失败不影响使用 */
+      }
+    })();
+  }
+
+  async saveBudget(): Promise<void> {
+    const value = Number(this.state.budgetInput);
+    const budget = Number.isFinite(value) && value > 0 ? value : undefined;
+    try {
+      const response = await fetch("/whale/api/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ budgetWeeklyCny: budget }),
+      });
+      const body = (await response.json()) as { ok: boolean; error?: { message?: string } };
+      if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "保存失败");
+      this.setState({ error: null });
+    } catch (error) {
+      this.setState({ error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   async loadHistory(): Promise<void> {
     try {
@@ -819,6 +955,20 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
                   </button>
                 </div>
                 {loading && <div data-whale-report-loading>正在生成报告…</div>}
+                <div data-whale-report-budgetedit>
+                  <span>每周预算（¥，可选）：</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="如 50"
+                    value={this.state.budgetInput}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ budgetInput: e.target.value })}
+                  />
+                  <button data-whale-report-btn data-ghost="true" onClick={() => void this.saveBudget()}>
+                    保存
+                  </button>
+                </div>
               </>
             )}
             {current !== null && <ReportView report={current} onDelete={(id) => void this.deleteReport(id)} />}

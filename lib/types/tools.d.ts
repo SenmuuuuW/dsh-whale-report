@@ -7,7 +7,9 @@
  * 引擎只读，不写回任何会话数据。
  */
 import { type ToolDefinition } from "@deepseek-ai/dsh-tools";
-import type { SessionIndexRecord } from "./state.js";
+import type { SessionIndexRecord, PeriodStatsRecord, SettingsRecord } from "./state.js";
+import { type CostBreakdown } from "./pricing.js";
+import { type Insight } from "./insights.js";
 import { type ReportStats } from "./stats.js";
 /**
  * 结构化类型：只依赖 sessionQuery 的行为面，不依赖具体类名。
@@ -62,6 +64,14 @@ export interface IndexTable {
 export interface ReportServices {
     sessionQuery: SessionQueryLike;
     index: IndexTable;
+    periodStats?: {
+        get(key: string): PeriodStatsRecord | undefined;
+        put(key: string, value: PeriodStatsRecord): Promise<void>;
+    };
+    settings?: {
+        get(key: string): SettingsRecord | undefined;
+        put(key: string, value: SettingsRecord): Promise<void>;
+    };
 }
 export interface ToolsHost {
     tools: {
@@ -71,7 +81,7 @@ export interface ToolsHost {
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export declare const INDEX_TTL_MS: number;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export declare const INDEX_VERSION = 3;
+export declare const INDEX_VERSION = 6;
 /**
  * 收集区间统计。两条数据路径：
  * - live 会话：readSession 走内存快照，直接分桶；
@@ -89,5 +99,22 @@ export declare function collectEvents(svc: ReportServices, period: {
  * 之后的每次生成都命中索引（实测 0.1-0.3s）。
  */
 export declare function warmIndex(svc: ReportServices): Promise<void>;
+/** 一次完整生成：统计 + 费用 + 基线对比 + 洞察。工具与 API 共用同一管线。 */
+export interface ReportGeneration {
+    stats: ReturnType<typeof collectEvents> extends Promise<infer S> ? S : never;
+    cost: CostBreakdown;
+    key: string;
+    prev: PeriodStatsRecord | null;
+    insights: Insight[];
+    budgetWeeklyCny?: number;
+}
+export declare function generateReportData(svc: ReportServices, preset: string, range: {
+    from: number;
+    to: number;
+}): Promise<ReportGeneration>;
+export declare function toPeriodRecord(key: string, preset: string, range: {
+    from: number;
+    to: number;
+}, gen: ReportGeneration): PeriodStatsRecord;
 export declare function registerReportTools(ctx: ToolsHost, svc: ReportServices): void;
 //# sourceMappingURL=tools.d.ts.map

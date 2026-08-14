@@ -234,3 +234,72 @@ describe("DeepSeek 计费（pricing）", () => {
     expect(BUILTIN_PRICES.pro.inputPerMillion).toBeGreaterThan(0);
   });
 });
+
+describe("洞察引擎", () => {
+  const base = new Date(2026, 7, 10, 0, 0, 0).getTime();
+
+  function makeStats(partial: Partial<ReturnType<typeof aggregate>> = {}): ReturnType<typeof aggregate> {
+    const events = [
+      ev("turn/start", base),
+      ev("user/message", base),
+      ev("assistant/message", base, { usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 800, reasoningTokens: 10 } }),
+      ev("tool/call", base, { name: "bash", arguments: JSON.stringify({ command: "ls" }) }),
+    ];
+    return aggregate(events, { from: base - 1000, to: base + 3600000 }, [{ id: "s1", createdAt: base }]);
+  }
+
+  it("重试风暴规则：≥3 次触发", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const stats = makeStats();
+    stats.retryBursts = 4;
+    const insights = computeInsights({ stats });
+    expect(insights.some((i) => i.id === "retry-storm")).toBe(true);
+  });
+
+  it("深夜消耗规则：凌晨占比高且费用达标才触发", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const stats = makeStats();
+    stats.hourHistogram = new Array(24).fill(0);
+    stats.hourHistogram[2] = 50;
+    stats.hourHistogram[14] = 50;
+    stats.totalEvents = 100;
+    const insights = computeInsights({ stats, cost: { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 } });
+    expect(insights.some((i) => i.id === "night-cost")).toBe(true);
+  });
+
+  it("预算规则：超支触发 critical", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const stats = makeStats();
+    const insights = computeInsights({ stats, budgetWeeklyCny: 8, cost: { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 } });
+    expect(insights.some((i) => i.id === "budget-over")).toBe(true);
+    const near = computeInsights({ stats, budgetWeeklyCny: 11, cost: { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 } });
+    expect(near.some((i) => i.id === "budget-near")).toBe(true);
+  });
+
+  it("周期 key：周按 ISO 周、月按 YYYY-MM", async () => {
+    const { periodKey, previousPeriodKey } = await import("../src/insights.js");
+    const to = Date.parse("2026-08-14T12:00:00Z"); // 周五
+    expect(periodKey("weekly", to)).toBe("wk-2026-W33");
+    expect(periodKey("monthly", to)).toBe("mo-2026-08");
+    expect(previousPeriodKey("weekly", to)).toBe("wk-2026-W32");
+    expect(previousPeriodKey("monthly", to)).toBe("mo-2026-07");
+  });
+
+  it("危险操作分级：红色规则优先", async () => {
+    const { DANGEROUS_PATTERNS } = await import("../src/stats.js");
+    const red = DANGEROUS_PATTERNS.find((p) => p.label === "删除根目录/家目录");
+    expect(red?.sev).toBe("red");
+    expect(red!.pattern.test("rm -rf /tmp/x")).toBe(false);
+    expect(red!.pattern.test("rm -rf ~/backups")).toBe(false);
+    expect(red!.pattern.test("rm -rf / && echo done")).toBe(true);
+    expect(red!.pattern.test("rm -rf ~/.dsh/profiles/node_modules")).toBe(false);
+    const shutdown = DANGEROUS_PATTERNS.find((p) => p.label === "关机/重启");
+    expect(shutdown!.pattern.test("sed -n '1,60p' $SRC/process-shutdown.ts")).toBe(false);
+    expect(shutdown!.pattern.test("shutdown -h now")).toBe(true);
+    expect(shutdown!.pattern.test("sudo reboot")).toBe(true);
+    expect(red!.pattern.test("rm -rf ~/ && echo done")).toBe(true);
+    const amber = DANGEROUS_PATTERNS.find((p) => p.label === "rm -rf 删除");
+    expect(amber?.sev).toBe("amber");
+    expect(amber!.pattern.test("rm -rf /tmp/x")).toBe(true);
+  });
+});
