@@ -26,5 +26,5 @@ export interface ApiServices extends ReportServices {
     domain: Domain<typeof whaleDomain>;
 }
 /** 注册 /whale/api 路由（经 ctx.effect 挂载，卸载自动摘除）。 */
-export declare function registerApiRoutes(ctx: Context, svc: ApiServices): void;
+export declare function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiServices): void;
 //# sourceMappingURL=api.d.ts.map

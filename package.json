@@ -36,6 +36,11 @@
       "platform": "web"
     }
   },
+  "dshClient": {
+    "inject": [],
+    "platform": "web",
+    "immediately": true
+  },
   "dependencies": {
     "zod": "^4.0.0"
   },

@@ -104,11 +104,10 @@ async function generateReport(
 }
 
 /** 注册 /whale/api 路由（经 ctx.effect 挂载，卸载自动摘除）。 */
-export function registerApiRoutes(ctx: Context, svc: ApiServices): void {
-  const webServer = (ctx as Context & { webServer: WebServerLike }).webServer;
+export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiServices): void {
   ctx.effect(
     () =>
-      webServer.register({
+      server.register({
         kind: "prefix",
         path: "/whale/api",
         handler: async (req, res) => {
