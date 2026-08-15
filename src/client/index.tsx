@@ -55,10 +55,10 @@ const CSS = `
   margin-bottom: -1px;
 }
 [data-whale-report-tab][data-active="true"] { color: #4d6bfe; border-bottom-color: #4d6bfe; }
-[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 12px; background: #f4f5f9; }
+[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 10px 16px 20px; background: #f4f5f9; }
 [data-whale-report-chips] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 [data-whale-report-chip] {
-  padding: 8px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 500; cursor: pointer;
+  padding: 5px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer;
   background: #fff; color: #374151; border: 1px solid #d1d5db;
 }
 [data-whale-report-chip]:hover { border-color: #4d6bfe; color: #4d6bfe; }
@@ -79,13 +79,27 @@ const CSS = `
 [data-whale-report-btn][data-ghost="true"]:hover { border-color: #9ca3af; }
 
 /* ── 品牌区 ── */
-[data-whale-report-brand] { padding: 8px 2px 10px; }
-[data-whale-report-brandname] { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: .01em; }
-[data-whale-report-brandname] span { color: #4d6bfe; font-weight: 700; font-size: 16px; }
-[data-whale-report-brandtag] { font-size: 12.5px; color: #64748b; margin-top: 2px; }
-[data-whale-report-brandactions] { position: absolute; right: 18px; margin-top: -34px; }
-[data-whale-report-link] { background: none; border: none; color: #64748b; font-size: 13px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
-[data-whale-report-link]:hover { background: #eef2ff; color: #4d6bfe; }
+[data-whale-report-brand] { padding: 2px 2px 8px; }
+[data-whale-report-brandname] { font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: .01em; line-height: 1.1; }
+[data-whale-report-brandname] span { color: #4d6bfe; font-weight: 700; font-size: 17px; }
+[data-whale-report-brandtag] { font-size: 12px; color: #a3aab8; margin-top: 3px; }
+[data-whale-report-brandactions] { position: absolute; right: 18px; margin-top: -30px; }
+[data-whale-report-link] { background: none; border: none; color: #64748b; font-size: 12.5px; cursor: pointer; padding: 5px 10px; border-radius: 7px; border: 1px solid #e5e7eb; background: #fff; }
+[data-whale-report-link]:hover { border-color: #4d6bfe; color: #4d6bfe; }
+
+/* ── toast ── */
+[data-whale-report-toast] {
+  position: fixed; top: 14px; right: 14px; z-index: 2147483001;
+  background: #fff; border: 1px solid #fecaca; border-left: 4px solid #dc2626;
+  color: #b91c1c; padding: 9px 14px; border-radius: 10px; font-size: 13px;
+  box-shadow: 0 6px 18px rgba(15,23,42,.10); max-width: 300px;
+}
+
+/* ── 加载骨架 ── */
+[data-whale-report-skeleton] { display: flex; flex-direction: column; gap: 8px; }
+[data-whale-report-sk-hero] { height: 120px; border-radius: 14px; background: linear-gradient(90deg, #eef0f5 25%, #f7f8fb 50%, #eef0f5 75%); background-size: 200% 100%; animation: dshsk 1.2s infinite; }
+[data-whale-report-sk-line] { height: 14px; border-radius: 6px; background: linear-gradient(90deg, #eef0f5 25%, #f7f8fb 50%, #eef0f5 75%); background-size: 200% 100%; animation: dshsk 1.2s infinite; }
+@keyframes dshsk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 /* ── 仪表盘 hero ── */
 [data-whale-report-hero] {
@@ -242,7 +256,7 @@ const CSS = `
 [data-whale-report-budgetedit] input:focus { outline: none; border-color: #4d6bfe; }
 
 /* Tab 形态 */
-[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 12px; color: #111827; background: #f4f5f9; }
+[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 10px 16px 20px; color: #111827; background: #f4f5f9; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #fff; }
 
 @media print {
@@ -867,6 +881,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
 // ─────────────────────────── 核心内容组件（抽屉与 Tab 共用） ───────────────────────────
 
 interface ContentState {
+  toast: string | null;
   view: "dashboard" | "report" | "history";
   preset: (typeof PRESETS)[number]["key"];
   from: string;
@@ -913,6 +928,7 @@ function insightPreview(insight: InsightJson, s: StatsJson): string | null {
 
 class WhaleContent extends Component<Record<string, never>, ContentState> {
   state: ContentState = {
+    toast: null,
     view: "dashboard",
     preset: "weekly",
     from: dateStr(Date.now() - 7 * 86400000),
@@ -929,6 +945,13 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   componentDidMount(): void {
     void this.loadDashboard();
     void this.loadBudget();
+  }
+
+  setToast(message: string): void {
+    this.setState({ toast: message });
+    window.setTimeout(() => {
+      this.setState((prev) => (prev.toast === message ? { ...prev, toast: null } : prev));
+    }, 4000);
   }
 
   async loadBudget(): Promise<void> {
@@ -955,8 +978,9 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       const body = (await response.json()) as { ok: boolean; error?: { message?: string } };
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "保存失败");
       this.setState({ error: null, showBudgetEdit: false });
+      this.setToast("预算已保存");
     } catch (error) {
-      this.setState({ error: error instanceof Error ? error.message : String(error) });
+      this.setToast(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -977,16 +1001,17 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
       this.setState({ dashboard: body.report, current: body.report, loading: false, view: "dashboard" });
     } catch (error) {
-      this.setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      this.setState({ loading: false });
+      this.setToast(error instanceof Error ? error.message : String(error));
     }
   }
 
   async loadHistory(): Promise<void> {
     try {
       const body = await api<{ reports: ReportMeta[] }>("list");
-      this.setState({ history: body.reports, error: null });
+      this.setState({ history: body.reports });
     } catch (error) {
-      this.setState({ error: error instanceof Error ? error.message : String(error) });
+      this.setToast(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -998,7 +1023,8 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       if (!response.ok || json.ok === false) throw new Error("报告不存在");
       this.setState({ current: json.report, loading: false, view: "report" });
     } catch (error) {
-      this.setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      this.setState({ loading: false });
+      this.setToast(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1007,7 +1033,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       await api<{ ok: boolean }>("delete", { id });
       this.setState({ current: null, dashboard: null, history: null, view: "dashboard" });
     } catch (error) {
-      this.setState({ error: error instanceof Error ? error.message : String(error) });
+      this.setToast(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1034,13 +1060,15 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
           </button>
         </div>
 
-        {error !== null && <div data-whale-report-danger>出错了：{error}</div>}
+        {this.state.toast !== null && (
+          <div data-whale-report-toast>{this.state.toast}</div>
+        )}
 
         {view === "dashboard" && (
           <Dashboard
             state={this.state}
             onPreset={(p) => {
-              this.setState({ preset: p, dashboard: null });
+              this.setState({ preset: p });
               void this.loadDashboard();
             }}
             onCustom={(from, to) => {
@@ -1129,7 +1157,11 @@ function Dashboard(props: {
         <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
         <div data-whale-report-brandtag>Your Agent, in numbers.</div>
         <div data-whale-report-brandactions>
-          <button data-whale-report-link onClick={onBudgetToggle}>预算</button>
+          <button data-whale-report-link onClick={onBudgetToggle}>
+            {typeof cost === "number" && typeof report?.budget === "number" && report.budget > 0
+              ? `¥${cost.toFixed(2)} / ¥${report.budget.toFixed(2)}`
+              : "设置预算"}
+          </button>
         </div>
       </div>
 
@@ -1155,7 +1187,17 @@ function Dashboard(props: {
         </div>
       )}
 
-      {loading && report === null && <div data-whale-report-loading>生成中…</div>}
+      {loading && report === null && (
+        <div data-whale-report-skeleton>
+          <div data-whale-report-sk-hero />
+          <div data-whale-report-sk-line />
+          <div data-whale-report-sk-line />
+          <div data-whale-report-sk-line />
+        </div>
+      )}
+      {!loading && report === null && (
+        <div data-whale-report-loading>暂无数据，点击上方周期生成</div>
+      )}
 
       {report !== null && s !== undefined && (
         <>
