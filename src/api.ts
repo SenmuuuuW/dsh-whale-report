@@ -21,6 +21,9 @@ const SUMMARY_FRESHNESS_MS = 5 * 60 * 1000;
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { periodKey } from "./insights.js";
 import { computeCost } from "./pricing.js";
 import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
@@ -123,6 +126,51 @@ async function generateReport(
   };
   await svc.domain.table("reports").put(record.id, record);
   return record;
+}
+
+const ASSET_ALLOWLIST = [
+  "whale-happy", "whale-angry", "whale-sleepy", "whale-dazed", "whale-hero",
+];
+const ASSET_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "whale");
+const MIME: Record<string, string> = { ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp", ".jpg": "image/jpeg" };
+
+/** 鲸鱼娘素材路由：白名单文件名，防路径穿越。 */
+function registerAssetRoutes(ctx: Context, server: WebServerLike): void {
+  ctx.effect(
+    () =>
+      server.register({
+        kind: "prefix",
+        path: "/whale/assets",
+        handler: async (req, res) => {
+          if (!isTrustedApiRequest({ headers: req.headers })) {
+            res.writeHead(403);
+            res.end("forbidden");
+            return;
+          }
+          const pathname = new URL(req.url ?? "/", "http://dsh.internal").pathname;
+          const name = pathname.replace(/^\/whale\/assets\//, "").replace(/\.[a-z]+$/, "");
+          if (!ASSET_ALLOWLIST.includes(name)) {
+            res.writeHead(404);
+            res.end("not found");
+            return;
+          }
+          for (const ext of [".png", ".svg", ".webp", ".jpg"]) {
+            const file = join(ASSET_DIR, name + ext);
+            if (existsSync(file)) {
+              res.writeHead(200, {
+                "content-type": MIME[ext] ?? "application/octet-stream",
+                "cache-control": "public, max-age=3600",
+              });
+              res.end(readFileSync(file));
+              return;
+            }
+          }
+          res.writeHead(404);
+          res.end("not found");
+        },
+      }),
+    "dsh-whale-report: /whale/assets routes",
+  );
 }
 
 /** 注册 /whale/api 路由（经 ctx.effect 挂载，卸载自动摘除）。 */

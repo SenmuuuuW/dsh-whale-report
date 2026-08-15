@@ -22,6 +22,7 @@
   },
   "files": [
     "lib/index.js",
+    "assets",
     "lib/*.js",
     "lib/*.js.map",
     "lib/types/**/*.d.ts",

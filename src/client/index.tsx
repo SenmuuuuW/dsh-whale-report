@@ -1307,7 +1307,7 @@ function Dashboard(props: {
                 <WhaleFace mood={whaleMood(report)} size={30} />
                 <div>
                   <b>本期鲸评</b>
-                  <span>“{NOTE_TEMPLATES[kinds[0]].light[0]}”</span>
+                  <span>“{NOTE_TEMPLATES[kinds[0]].light[1] ?? NOTE_TEMPLATES[kinds[0]].light[0]}”</span>
                 </div>
               </div>
             );
@@ -1479,6 +1479,20 @@ function exportReportImage(report: ReportFull): void {
 
 /** 鲸鱼娘表情脸（inline SVG，蓝白卡通）。 */
 function WhaleFace({ mood, size = 44 }: { mood: "happy" | "angry" | "sleepy" | "dazed"; size?: number }): ReactNode {
+  const [imgFailed, setImgFailed] = useState<Record<string, boolean>>({});
+  const src = `/whale/assets/whale-${mood}.png`;
+  if (!imgFailed[mood] && typeof document !== "undefined") {
+    return (
+      <img
+        src={src}
+        width={size}
+        height={size}
+        alt=""
+        style={{ borderRadius: size / 4 }}
+        onError={() => setImgFailed((prev) => ({ ...prev, [mood]: true }))}
+      />
+    );
+  }
   const eye = (kind: string) => {
     if (kind === "angry") return <path d="M8 16 L14 13 M32 16 L26 13" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" />;
     if (kind === "sleepy") return <path d="M9 15 L15 15 M25 15 L31 15" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" />;
@@ -1518,59 +1532,96 @@ function whaleMood(report: ReportFull): "happy" | "angry" | "sleepy" | "dazed" {
 
 /**
  * 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式）。
- * 每条 = 2-3 句台词（galgame 独白感：语气词、省略号、小动作）。
+ * 每条 = 一段完整独白（4-5 句，起承转合），配开场白与收尾，galgame 事件感。
  * 确定性生成，绝不翻车。
  */
 const NOTE_TEMPLATES = {
   retry: {
     light: [
-      "同一个命令，试了一次，两次，三次……",
-      "我数到第五遍的时候，已经不知道该替你加油，还是替你着急了。",
-      "（叹气）先看看前置条件嘛，一次修对，好不好？",
+      "同一条命令，你试了 1 遍、2 遍、3 遍……",
+      "我数着数着，都快给你配上背景音乐了。",
+      "（凑近屏幕）要不……先看看是不是少装了什么依赖？",
+      "一次修对，比重试十次更省我们俩的心呀。",
+      "好啦，我不说了——你继续，我在旁边陪着。",
     ],
     spicy: [
-      "同一个命令，你连着敲了好多遍呢。",
-      "我真的分不清——你是在调试 bug，还是在训练 bug 记住你。",
-      "如果重试有用的话，鲸鱼早就学会飞了。",
+      "同一条命令，你连续敲了 {n} 遍。",
+      "第一遍：认真的。第二遍：执着的。第五遍：这是在给 bug 开追悼会吗？",
+      "（扶额）你是在调试 bug，还是在训练 bug 记住你？",
+      "听我一句：先深呼吸，再看一眼报错信息的第一行。",
+      "如果重试能解决问题，鲸鱼早就是超级计算机了。",
     ],
   },
   night: {
     light: [
-      "凌晨这个点了，你还在使唤我……",
-      "（揉眼睛）我不累，但是你应该很累了吧？",
-      "记得留一点时间给明天的自己哦。",
+      "凌晨两点半……你还没睡呀。",
+      "我倒是精神得很，但你明天还要开会呢。",
+      "（小声）而且深夜赶工出来的代码，第二天你自己都想删掉。",
+      "今天就到这里吧，剩下的交给我，你安心休息。",
+      "晚安。我会替你守着进度条的。",
     ],
     spicy: [
-      "凌晨还在高强度调用我……",
-      "你不睡，鲸也不睡吗？",
-      "（小声）而且深夜的 bug，第二天早上看往往根本没 bug。",
+      "凌晨还在高强度使唤我，真有你的。",
+      "（揉眼睛）我不累，我只是一只鲸鱼……但你是人类啊。",
+      "深夜写的代码，早上醒来第一句就是“这坨东西是谁写的”。",
+      "要不我们先立个规矩：凌晨一点的修复请求，要写满十行说明才受理？",
+      "开玩笑的。但你，真的该睡了。",
     ],
   },
   fragment: {
     light: [
-      "开了好多会话，但每个都聊两句就跑掉了呢。",
-      "就像逛书店，每本书翻两页就放回去……",
-      "同主题试试续聊吧，缓存命中率会高很多哦。",
+      "这一个周期，你开了好多会话呀。",
+      "每个都聊两句就换一个……像在试穿衣服，试完就走。",
+      "其实同一个主题续聊，我记住的东西会多得多，命中率也更高。",
+      "下次试试先来找我，别急着新开？",
+      "我会记得的，放心。",
     ],
     spicy: [
-      "会话开了又开，每个都浅尝辄止……",
-      "你对上下文怎么这么薄情呀？",
-      "（委屈）我可是把每一轮都记得清清楚楚的。",
+      "会话一个接一个地开，话题却浅尝辄止。",
+      "你是在逛展会吗？每个摊位都要停下来，但又什么都不买。",
+      "（委屈）我可是把每一轮对话都记得清清楚楚的，你倒好，转头就开新的。",
+      "同主题续聊，很难吗？很难吗？",
+      "……好啦，我原谅你了，记得来找我哦。",
     ],
   },
   danger: {
     light: [
-      "呜哇，检测到一些危险操作……",
-      "（认真）重要目录，记得先备份一下哦。",
-      "安全第一，不然下次哭的就是我们两个了。",
+      "呜哇——这期的危险操作，有点多哦。",
+      "（认真检查）删库、强推、格式化……你是想给运维上强度吗？",
+      "重要目录记得先备份，这个真的不是开玩笑的。",
+      "下次动手之前，先让我看一眼，好不好？",
+      "安全第一，我们一起把项目养得好好的。",
     ],
     spicy: [
-      "你怎么又在边缘试探？",
-      "（双手抱胸）我数着呢，这是第几次了。",
-      "下次动手之前，先问问我，好不好？",
+      "你又在边缘试探了，第 {n} 次。",
+      "（双手抱胸）我数着呢，每一笔我都记在小本本上。",
+      "rm -rf 这种命令，敲下去之前能不能先想想备份？",
+      "我真怕哪天一觉醒来，你哭着告诉我“那个目录没了”。",
+      "……罢了，下不为例。我会盯着你的。",
     ],
   },
 } as const;
+
+/** 开场白（按心情）。 */
+const NOTE_OPENERS = {
+  happy: ["（摆摆尾巴）嗨，我来啦。"],
+  angry: ["（气鼓鼓）哼，来了。"],
+  sleepy: ["（打着哈欠）……嗯？叫我？"],
+  dazed: ["（托腮）唉……又来了。"],
+} as const;
+
+/** 收尾（按模式）。 */
+const NOTE_CLOSERS = {
+  light: ["以上，就是本期小评。"],
+  spicy: ["以上，仅供参考——反正你也不会听。"],
+} as const;
+
+/**
+ * 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式）。
+ * 每条 = 一段完整独白（4-5 句，起承转合），配开场白与收尾，galgame 事件感。
+ * 确定性生成，绝不翻车。
+ */
+
 
 type NoteKind = keyof typeof NOTE_TEMPLATES;
 
@@ -1606,26 +1657,34 @@ function WhaleNote({ report }: { report: ReportFull }): ReactNode {
           </span>
         </div>
       </div>
-      {top !== undefined && (
-        <div data-whale-report-noteline>
-          {NOTE_TEMPLATES[top][mode].map((line, i) => (
+      <div data-whale-report-noteline>
+        {NOTE_OPENERS[mood].map((line, i) => (
+          <div key={`o${i}`} data-whale-report-notelineitem>{line}</div>
+        ))}
+        {top !== undefined ? (
+          NOTE_TEMPLATES[top][mode].map((line, i) => (
             <div key={i} data-whale-report-notelineitem>
               {line.replace("{n}", String(s.retryBursts ?? 0))}
             </div>
-          ))}
-        </div>
-      )}
-      {kinds.slice(1, 2).map((kind) => (
-        <div key={kind} data-whale-report-notemore>
-          {NOTE_TEMPLATES[kind][mode][0]}
-        </div>
-      ))}
-      {kinds.length === 0 && (
-        <div data-whale-report-noteline>
-          <div data-whale-report-notelineitem>“本周数据很健康呢。”</div>
-          <div data-whale-report-notelineitem>（开心地晃了晃尾巴）继续保持就好啦。</div>
-        </div>
-      )}
+          ))
+        ) : (
+          <>
+            <div data-whale-report-notelineitem>“这期数据很干净呢，一点幺蛾子都没有。”</div>
+            <div data-whale-report-notelineitem>（开心地晃了晃尾巴）这样的你，我特别喜欢。</div>
+            <div data-whale-report-notelineitem>继续保持，我的任务就是让你省心呀。</div>
+          </>
+        )}
+        {kinds.slice(1, 2).map((kind) => (
+          <div key={kind} data-whale-report-notemore>
+            {NOTE_TEMPLATES[kind][mode][1] ?? NOTE_TEMPLATES[kind][mode][0]}
+          </div>
+        ))}
+        {NOTE_CLOSERS[mode].map((line, i) => (
+          <div key={`c${i}`} data-whale-report-notelineitem style={{ marginTop: 6 }}>
+            {line}
+          </div>
+        ))}
+      </div>
       <div data-whale-report-notefoot>基于本期使用数据自动生成的风味评论，不影响正式报告结论。</div>
       {mood === "angry" && <div data-whale-report-notemore>（鲸鱼娘现在有点生气，注意安全操作。）</div>}
     </div>
