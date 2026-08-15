@@ -9,7 +9,14 @@ import { type Insight } from "./insights.js";
 import type { PeriodStatsRecord } from "./state.js";
 export type ReportPreset = "daily" | "24h" | "weekly" | "monthly" | "yearly" | "custom";
 export declare const PRESET_LABELS: Record<ReportPreset, string>;
-/** 预设区间 → [from, to) 毫秒。 */
+/**
+ * 预设区间。周/月/年 = 自然周期（与 period key 同语义，统计口径干净）：
+ *   日报 = 今天 0:00 → 现在
+ *   24h  = 滚动过去 24 小时
+ *   周报 = 本自然周（周一 0:00）→ 现在
+ *   月报 = 本自然月 1 日 0:00 → 现在
+ *   年报 = 本自然年 1 月 1 日 0:00 → 现在
+ */
 export declare function presetRange(preset: ReportPreset, now: number): {
     from: number;
     to: number;

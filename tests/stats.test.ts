@@ -141,16 +141,24 @@ describe("报告文案", () => {
     expect(md).toContain("危险操作");
   });
 
-  it("预设区间：日报=今天自然日 0 点起，24h=滚动窗口", () => {
-    const now = new Date(2026, 7, 10, 15, 30, 0).getTime(); // 本地 8/10 15:30
+  it("预设区间：日报=今天、24h=滚动、周/月/年=自然周期", () => {
+    const now = new Date(2026, 7, 10, 15, 30, 0).getTime(); // 本地 8/10 15:30（周一）
     const localMidnight = new Date(2026, 7, 10).getTime();
     expect(presetRange("daily", now).from).toBe(localMidnight);
-    expect(presetRange("daily", now).to).toBe(now);
     expect(presetRange("24h", now).from).toBe(now - 24 * H);
-    expect(presetRange("weekly", now).from).toBe(now - 7 * 24 * H);
-    expect(presetRange("monthly", now).from).toBe(now - 30 * 24 * H);
-    expect(presetRange("yearly", now).from).toBe(now - 365 * 24 * H);
+    // 自然周：8/10 是周一 → 周起点 = 当天 0:00
+    expect(presetRange("weekly", now).from).toBe(localMidnight);
+    // 自然月：8/1 0:00
+    expect(presetRange("monthly", now).from).toBe(new Date(2026, 7, 1).getTime());
+    // 自然年：1/1 0:00
+    expect(presetRange("yearly", now).from).toBe(new Date(2026, 0, 1).getTime());
     expect(() => presetRange("custom", now)).toThrow();
+  });
+
+  it("自然周跨周一：周日落在本周起点", () => {
+    const sunday = new Date(2026, 7, 9, 20, 0, 0).getTime(); // 本地 8/9 周日 20:00
+    // 上周一 8/3 0:00
+    expect(presetRange("weekly", sunday).from).toBe(new Date(2026, 7, 3).getTime());
   });
 });
 
@@ -279,11 +287,16 @@ describe("洞察引擎", () => {
     expect(near.some((i) => i.id === "budget-near")).toBe(true);
   });
 
-  it("周期 key：周按 ISO 周、月按 YYYY-MM", async () => {
+  it("周期 key：day-/24h-/wk-/mo-/yr- 前缀互不冲突，24h 无上一周期", async () => {
     const { periodKey, previousPeriodKey } = await import("../src/insights.js");
     const to = Date.parse("2026-08-14T12:00:00Z"); // 周五
+    expect(periodKey("daily", to)).toBe("day-2026-08-14");
+    expect(periodKey("24h", to)).toBe("24h-2026-08-14");
     expect(periodKey("weekly", to)).toBe("wk-2026-W33");
     expect(periodKey("monthly", to)).toBe("mo-2026-08");
+    expect(periodKey("yearly", to)).toBe("yr-2026");
+    expect(previousPeriodKey("daily", to)).toBe("day-2026-08-13");
+    expect(previousPeriodKey("24h", to)).toBeNull();
     expect(previousPeriodKey("weekly", to)).toBe("wk-2026-W32");
     expect(previousPeriodKey("monthly", to)).toBe("mo-2026-07");
   });
@@ -318,7 +331,7 @@ describe("维护加固：边界与不误报", () => {
     expect(previousPeriodKey("monthly", Date.parse("2026-01-15T12:00:00Z"))).toBe("mo-2025-12");
     expect(periodKey("yearly", Date.parse("2026-12-31T23:59:00Z"))).toBe("yr-2026");
     expect(previousPeriodKey("yearly", Date.parse("2026-01-01T00:00:00Z"))).toBe("yr-2025");
-    expect(previousPeriodKey("daily", Date.parse("2026-08-01T00:00:00Z"))).toBe("dy-2026-07-31");
+    expect(previousPeriodKey("daily", Date.parse("2026-08-01T00:00:00Z"))).toBe("day-2026-07-31");
   });
 
   it("预算边界：预算为 0 或未设置不触发护栏", async () => {
@@ -337,6 +350,20 @@ describe("维护加固：边界与不误报", () => {
     const stats = aggregate([ev("turn/start", base)], { from: base - 1000, to: base + 3600000 });
     const insights = computeInsights({ stats, budgetWeeklyCny: 50, cost: { perModel: {}, total: 0.5, currency: "CNY", source: "builtin" as const, fetchedAt: 0 } });
     expect(insights.length).toBe(0);
+  });
+});
+
+describe("自事件排除（深迹不污染自己的统计）", () => {
+  it("whale/report 事件不计入统计", () => {
+    const base = new Date(2026, 7, 10).getTime();
+    const events = [
+      ev("turn/start", base),
+      { type: "whale/report", time: base + 500, data: { preset: "weekly" } },
+      { type: "whale/report", time: base + 600, data: { preset: "daily" } },
+    ];
+    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
+    expect(stats.totalEvents).toBe(1);
+    expect(stats.turns).toBe(1);
   });
 });
 

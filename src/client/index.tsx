@@ -959,8 +959,10 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     showBudgetEdit: false,
   };
 
+  requestSeq = 0;
+
   componentDidMount(): void {
-    void this.loadDashboard();
+    void this.loadDashboard(this.state.preset);
     void this.loadBudget();
   }
 
@@ -1001,14 +1003,15 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     }
   }
 
-  /** 仪表盘：当前周期数据（有则复用，无则生成）。 */
-  async loadDashboard(): Promise<void> {
+  /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。 */
+  async loadDashboard(preset: ContentState["preset"]): Promise<void> {
+    const seq = ++this.requestSeq;
     this.setState({ loading: true, error: null });
     try {
       const payload =
-        this.state.preset === "custom"
+        preset === "custom"
           ? { preset: "custom", from: this.state.from, to: this.state.to }
-          : { preset: this.state.preset };
+          : { preset };
       const response = await fetch("/whale/api/summary", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1016,8 +1019,11 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       });
       const body = (await response.json()) as { ok: boolean; report: ReportFull; error?: { message?: string } };
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
+      // 只应用最新一次请求的结果（快速切换周期时旧响应不得覆盖新响应）。
+      if (seq !== this.requestSeq) return;
       this.setState({ dashboard: body.report, current: body.report, loading: false, view: "dashboard" });
     } catch (error) {
+      if (seq !== this.requestSeq) return;
       this.setState({ loading: false });
       this.setToast(error instanceof Error ? error.message : String(error));
     }
@@ -1086,11 +1092,11 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
             state={this.state}
             onPreset={(p) => {
               this.setState({ preset: p });
-              void this.loadDashboard();
+              void this.loadDashboard(p);
             }}
             onCustom={(from, to) => {
               this.setState({ from, to });
-              void this.loadDashboard();
+              void this.loadDashboard("custom");
             }}
             onOpenReport={() => this.setState({ view: "report" })}
             onBudgetToggle={() => this.setState({ showBudgetEdit: !this.state.showBudgetEdit })}

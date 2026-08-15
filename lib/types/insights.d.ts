@@ -33,9 +33,17 @@ export declare function nightRatio(stats: ReportStats): number;
 export declare function costDeltaPct(input: InsightInput): number | null;
 export declare function computeInsights(input: InsightInput): Insight[];
 /** 周期 key：dy-YYYY-MM-DD / wk-YYYY-Www / mo-YYYY-MM / yr-YYYY（按"结束时刻"归属）。 */
+/**
+ * 周期 key（自然周期语义，前缀互不冲突）：
+ *   day-YYYY-MM-DD  日报（自然日）
+ *   24h-YYYY-MM-DD  滚动 24 小时（只存自身基线，不做"上一周期"对比）
+ *   wk-YYYY-Www     周报（ISO 周）
+ *   mo-YYYY-MM      月报
+ *   yr-YYYY         年报
+ */
 export declare function periodKey(preset: string, toMs: number): string;
-/** 上一周期 key（按 preset 回退一档）。 */
-export declare function previousPeriodKey(preset: string, toMs: number): string;
+/** 上一周期 key。24h 为滚动窗口，没有干净的自然"上一周期"→ 返回 null（不对比）。 */
+export declare function previousPeriodKey(preset: string, toMs: number): string | null;
 /** 按工具调用数归族排序（面板与 markdown 共用）。 */
 export declare function toolFamilies(toolCalls: Record<string, number>): {
     family: string;

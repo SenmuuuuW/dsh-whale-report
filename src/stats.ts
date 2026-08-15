@@ -261,6 +261,8 @@ export function aggregate(
 
   for (const event of events) {
     if (event.time < period.from || event.time >= period.to) continue;
+    // 排除插件自生事件（whale/report 等）：深迹用得越多，越不能影响自己的统计。
+    if (event.type.startsWith("whale/")) continue;
     stats.totalEvents += 1;
 
     const d = new Date(event.time);
@@ -542,6 +544,7 @@ export function bucketizeOwnEvents(
   for (const event of events) {
     if (event.seq < ownStart) continue;
     if (stopAfter !== undefined && event.time >= stopAfter) break;
+    if (event.type.startsWith("whale/")) continue;
     lastSeq = event.seq;
     lastMs = event.time;
     const h = hourOf(event.time);

@@ -81,7 +81,7 @@ export interface ToolsHost {
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export declare const INDEX_TTL_MS: number;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export declare const INDEX_VERSION = 8;
+export declare const INDEX_VERSION = 9;
 /**
  * 收集区间统计。两条数据路径：
  * - live 会话：readSession 走内存快照，直接分桶；

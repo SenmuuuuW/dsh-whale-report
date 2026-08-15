@@ -15,6 +15,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isTrustedApiRequest } from "./trust-fence.js";
 import { REPORT_SEM, whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js";
+
+/** summary 概览新鲜度：同周期报告超过此窗口即重新计算（原地更新，不删历史）。 */
+const SUMMARY_FRESHNESS_MS = 5 * 60 * 1000;
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
@@ -225,8 +228,8 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 return;
               }
               const key = periodKey(preset, range.to);
-              // 复用条件：周期匹配 + 含 cost 的新版记录（旧版缺字段，直接重建）+
-              // 取最新一条。
+              // 复用条件：周期匹配 + 语义版本匹配 + 含 cost + 在新鲜度窗口内
+              // （超过 5 分钟视为过期：本周进行中，新会话要能反映出来）。
               let found: ReportRecord | undefined;
               for (const [, record] of table.entries()) {
                 if (
@@ -239,7 +242,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   found = record;
                 }
               }
-              if (found !== undefined) {
+              if (found !== undefined && now - found.createdAt < SUMMARY_FRESHNESS_MS) {
                 writeJson(res, 200, { ok: true, fresh: false, report: found });
                 return;
               }
@@ -247,7 +250,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
               const record: ReportRecord = {
                 sem: REPORT_SEM,
-                id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                id: found !== undefined ? found.id : `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
                 preset,
                 from: range.from,
                 to: range.to,
