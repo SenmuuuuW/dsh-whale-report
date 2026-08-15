@@ -35,6 +35,23 @@ export interface TokenTotals {
     cacheRead: number;
     reasoning: number;
 }
+/** 会话级钻取明细（按费用排序，最多保留若干条）。 */
+export interface SessionDetail {
+    sessionId: string;
+    title: string;
+    firstTime: number;
+    lastTime: number;
+    events: number;
+    commands: number;
+    toolCalls: number;
+    retryBursts: number;
+    dangerCount: number;
+    redDanger: number;
+    /** 该会话内按模型的 token 用量。 */
+    modelTokens: Record<string, ModelUsage>;
+    /** 折算费用（CNY；生成管线填充）。 */
+    cost: number;
+}
 export interface ModelUsage {
     input: number;
     output: number;
@@ -102,13 +119,17 @@ export interface ReportStats {
         count: number;
         time: number;
         error?: string;
+        sessionId: string;
     }[];
     /** 疑似密钥/令牌命中（只存标签与时间，不存原文）。 */
     secretHits: {
         label: string;
         time: number;
         source: "user" | "tool";
+        sessionId: string;
     }[];
+    /** 会话级钻取明细（按费用排序，生成管线填充 cost）。 */
+    sessionsDetail: SessionDetail[];
 }
 /** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
 export declare const SECRET_PATTERNS: {
@@ -180,12 +201,14 @@ export interface HourBucket {
         count: number;
         time: number;
         error?: string;
+        sessionId: string;
     }[];
     /** 疑似密钥命中（只存标签与时间）。 */
     secretHits: {
         label: string;
         time: number;
         source: "user" | "tool";
+        sessionId: string;
     }[];
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */

@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord, SettingsRecord } from "./state.js";
-import { computeCost, type CostBreakdown } from "./pricing.js";
+import { computeCost, getPrices, modelCost, modelTier, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
@@ -101,7 +101,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 9;
+export const INDEX_VERSION = 10;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -212,6 +212,17 @@ export async function generateReportData(
 ): Promise<ReportGeneration> {
   const stats = await collectEvents(svc, range);
   const cost = await computeCost(stats.models);
+  // 会话钻取：按会话的按模型 token 折算费用，排序取前 20。
+  const { prices } = await getPrices();
+  for (const detail of stats.sessionsDetail) {
+    let total = 0;
+    for (const [model, usage] of Object.entries(detail.modelTokens)) {
+      total += modelCost(usage, prices[modelTier(model)]);
+    }
+    detail.cost = total;
+  }
+  stats.sessionsDetail.sort((a, b) => b.cost - a.cost);
+  stats.sessionsDetail = stats.sessionsDetail.slice(0, 20);
   const key = periodKey(preset, range.to);
   const prevKey = previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;

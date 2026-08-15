@@ -150,6 +150,18 @@ const CSS = `
 }
 [data-whale-report-feedmore]:hover { border-color: #4d6bfe; background: #eef2ff; }
 
+/* ── 会话钻取 ── */
+[data-whale-report-sessionrow] { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+[data-whale-report-sessionrow]:hover { background: #f8fafc; border-radius: 6px; }
+[data-whale-report-sessionmain] { flex: 1; min-width: 0; }
+[data-whale-report-sessionmain] b { font-size: 13px; font-weight: 600; color: #0f172a; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-whale-report-sessionmain] span { display: flex; gap: 5px; margin-top: 3px; }
+[data-whale-report-badge-red] { font-style: normal; font-size: 10.5px; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 999px; padding: 1px 7px; }
+[data-whale-report-badge-amber] { font-style: normal; font-size: 10.5px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; }
+[data-whale-report-badge-gray] { font-style: normal; font-size: 10.5px; background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; border-radius: 999px; padding: 1px 7px; }
+[data-whale-report-sessioncost] { font-size: 13.5px; font-weight: 700; color: #4d6bfe; font-variant-numeric: tabular-nums; }
+[data-whale-report-sessiondetail] { padding: 8px 4px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
 /* ── 完整报告按钮 ── */
 [data-whale-report-fullbtn] { width: 100%; margin: 4px 0 12px; padding: 11px; font-size: 14px; }
 
@@ -367,8 +379,21 @@ interface StatsJson {
   dailySeries: { date: string; count: number }[];
   dayHourSeries: { date: string; hours: number[] }[];
   retryBursts?: number;
-  burstSamples?: { cmd: string; count: number; time: number; error?: string }[];
-  secretHits?: { label: string; time: number; source: string }[];
+  burstSamples?: { cmd: string; count: number; time: number; error?: string; sessionId?: string }[];
+  secretHits?: { label: string; time: number; source: string; sessionId?: string }[];
+  sessionsDetail?: {
+    sessionId: string;
+    title: string;
+    firstTime: number;
+    lastTime: number;
+    events: number;
+    commands: number;
+    toolCalls: number;
+    retryBursts: number;
+    dangerCount: number;
+    redDanger: number;
+    cost: number;
+  }[];
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
@@ -911,6 +936,10 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         );
       })()}
 
+      {(s.sessionsDetail ?? []).length > 0 && (
+        <SessionDrilldown sessions={s.sessionsDetail ?? []} />
+      )}
+
       {(s.titles ?? []).length > 0 && (
         <div data-whale-report-card>
           <div data-whale-report-h2>会话标题</div>
@@ -1333,11 +1362,63 @@ function Dashboard(props: {
             </>
           )}
 
+          {(s.sessionsDetail ?? []).length > 0 && (
+            <>
+              <div data-whale-report-h2>会话钻取</div>
+              <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} />
+            </>
+          )}
+
           <button data-whale-report-btn data-whale-report-fullbtn onClick={onOpenReport}>
             生成完整报告 →
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+/** 会话钻取卡：按费用排序，点击展开详情，复制 Session ID。 */
+function SessionDrilldown({ sessions }: { sessions: NonNullable<StatsJson["sessionsDetail"]> }): ReactNode {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = (id: string): void => {
+    void navigator.clipboard.writeText(id);
+    setCopied(id);
+    window.setTimeout(() => setCopied(null), 1500);
+  };
+  return (
+    <div data-whale-report-card>
+      <div data-whale-report-h2>会话钻取（{sessions.length}）</div>
+      {sessions.slice(0, 8).map((s) => {
+        const open = openId === s.sessionId;
+        return (
+          <div key={s.sessionId}>
+            <div data-whale-report-sessionrow onClick={() => setOpenId(open ? null : s.sessionId)}>
+              <div data-whale-report-sessionmain>
+                <b>{s.title || "（未命名会话）"}</b>
+                <span>
+                  {s.redDanger > 0 && <em data-whale-report-badge-red>{s.redDanger} 致命</em>}
+                  {s.retryBursts > 0 && <em data-whale-report-badge-amber>{s.retryBursts} 重试</em>}
+                  {s.toolCalls > 0 && <em data-whale-report-badge-gray>{s.toolCalls} 工具</em>}
+                </span>
+              </div>
+              <div data-whale-report-sessioncost>¥{s.cost.toFixed(2)}</div>
+            </div>
+            {open && (
+              <div data-whale-report-sessiondetail>
+                <div data-whale-report-tokenline>
+                  {new Date(s.firstTime).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} ~{" "}
+                  {new Date(s.lastTime).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {s.events} 事件 · {s.commands} 命令
+                </div>
+                <button data-whale-report-btn data-ghost="true" onClick={() => copy(s.sessionId)}>
+                  {copied === s.sessionId ? "已复制" : "复制 Session ID"}
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

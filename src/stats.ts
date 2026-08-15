@@ -40,6 +40,24 @@ export interface TokenTotals {
   reasoning: number;
 }
 
+/** 会话级钻取明细（按费用排序，最多保留若干条）。 */
+export interface SessionDetail {
+  sessionId: string;
+  title: string;
+  firstTime: number;
+  lastTime: number;
+  events: number;
+  commands: number;
+  toolCalls: number;
+  retryBursts: number;
+  dangerCount: number;
+  redDanger: number;
+  /** 该会话内按模型的 token 用量。 */
+  modelTokens: Record<string, ModelUsage>;
+  /** 折算费用（CNY；生成管线填充）。 */
+  cost: number;
+}
+
 export interface ModelUsage {
   input: number;
   output: number;
@@ -88,9 +106,11 @@ export interface ReportStats {
   /** 重试风暴次数：同一命令连续重复 ≥3 次（洞察引擎用）。 */
   retryBursts: number;
   /** 重试风暴样本（只读诊断用）：命令首行 + 次数 + 最近一次错误摘要。 */
-  burstSamples: { cmd: string; count: number; time: number; error?: string }[];
+  burstSamples: { cmd: string; count: number; time: number; error?: string; sessionId: string }[];
   /** 疑似密钥/令牌命中（只存标签与时间，不存原文）。 */
-  secretHits: { label: string; time: number; source: "user" | "tool" }[];
+  secretHits: { label: string; time: number; source: "user" | "tool"; sessionId: string }[];
+  /** 会话级钻取明细（按费用排序，生成管线填充 cost）。 */
+  sessionsDetail: SessionDetail[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -173,6 +193,7 @@ export function emptyStats(period: Period): ReportStats {
     retryBursts: 0,
     burstSamples: [],
     secretHits: [],
+    sessionsDetail: [],
   };
 }
 
@@ -247,6 +268,27 @@ export function aggregate(
   const commandStreak = new Map<string, number>();
   const burstStart = new Map<string, number>();
   const lastError = new Map<string, string | undefined>();
+  const sessionAgg = new Map<string, {
+    firstTime: number;
+    lastTime: number;
+    events: number;
+    commands: number;
+    toolCalls: number;
+    retryBursts: number;
+    dangerCount: number;
+    redDanger: number;
+    modelTokens: Record<string, ModelUsage>;
+    title: string;
+  }>();
+  const sessionTitle = new Map<string, string>();
+  const aggOf = (sid: string, time: number) => {
+    let a = sessionAgg.get(sid);
+    if (a === undefined) {
+      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      sessionAgg.set(sid, a);
+    }
+    return a;
+  };
   const sessionIdsByEvent: string[] = [];
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
@@ -282,6 +324,10 @@ export function aggregate(
     const data = event.data as Record<string, unknown> | undefined;
     const sessionId = (data?.sessionId as string) ?? lastHeader?.id ?? "unknown";
     seenSessions.add(sessionId);
+    const agg = aggOf(sessionId, event.time);
+    agg.events += 1;
+    agg.firstTime = Math.min(agg.firstTime, event.time);
+    agg.lastTime = Math.max(agg.lastTime, event.time);
 
     switch (event.type) {
       case "turn/start":
@@ -295,7 +341,7 @@ export function aggregate(
         for (const text of textOfUserMessage(data)) {
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(text)) {
-              stats.secretHits.push({ label, time: event.time, source: "user" });
+              stats.secretHits.push({ label, time: event.time, source: "user", sessionId });
               break;
             }
           }
@@ -316,6 +362,11 @@ export function aggregate(
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
+          const sm = (aggOf(sessionId, event.time).modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          sm.input += usage.input ?? 0;
+          sm.output += usage.output ?? 0;
+          sm.cacheRead += usage.cacheRead ?? 0;
+          sm.reasoning += usage.reasoning ?? 0;
         }
         break;
       }
@@ -328,11 +379,13 @@ export function aggregate(
       }
       case "tool/call": {
         stats.toolCallsTotal += 1;
+        aggOf(sessionId, event.time).toolCalls += 1;
         const name = typeof data?.name === "string" ? data.name : "(unknown)";
         stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + 1;
         const command = commandOf(data);
         if (command) {
           stats.commands += 1;
+          aggOf(sessionId, event.time).commands += 1;
           // 只对命令首行做危险匹配：heredoc 正文里的字样不算真实操作。
           const firstLine = command.split("\n", 1)[0];
           const matchText = stripQuotes(firstLine);
@@ -342,12 +395,14 @@ export function aggregate(
             commandStreak.set(sessionId, streak);
             if (streak === 3) {
               stats.retryBursts += 1;
+              aggOf(sessionId, event.time).retryBursts += 1;
               if (stats.burstSamples.length < 10) {
                 stats.burstSamples.push({
                   cmd: firstLine.slice(0, 80),
                   count: streak,
                   time: burstStart.get(sessionId) ?? event.time,
                   error: lastError.get(sessionId),
+                  sessionId,
                 });
               }
             } else if (streak > 3) {
@@ -361,13 +416,15 @@ export function aggregate(
           }
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(firstLine)) {
-              stats.secretHits.push({ label, time: event.time, source: "tool" });
+              stats.secretHits.push({ label, time: event.time, source: "tool", sessionId });
               break;
             }
           }
           for (const { pattern, label, sev } of DANGEROUS_PATTERNS) {
             if (pattern.test(matchText)) {
               stats.dangerousCommands.push({ command: firstLine, time: event.time, sessionId, label, sev });
+              aggOf(sessionId, event.time).dangerCount += 1;
+              if (sev === "red") aggOf(sessionId, event.time).redDanger += 1;
               break;
             }
           }
@@ -400,6 +457,7 @@ export function aggregate(
       case "session/title": {
         const title = typeof data?.title === "string" ? data.title : null;
         if (title && !stats.titles.includes(title)) stats.titles.push(title);
+        if (typeof title === "string" && sessionTitle.get(sessionId) === undefined) sessionTitle.set(sessionId, title);
         break;
       }
       default:
@@ -425,6 +483,22 @@ export function aggregate(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  for (const [sid, a] of sessionAgg) {
+    stats.sessionsDetail.push({
+      sessionId: sid,
+      title: sessionTitle.get(sid) ?? "",
+      firstTime: a.firstTime,
+      lastTime: a.lastTime,
+      events: a.events,
+      commands: a.commands,
+      toolCalls: a.toolCalls,
+      retryBursts: a.retryBursts,
+      dangerCount: a.dangerCount,
+      redDanger: a.redDanger,
+      modelTokens: a.modelTokens,
+      cost: 0,
+    });
+  }
 
   return stats;
 }
@@ -482,9 +556,9 @@ export interface HourBucket {
   /** 该分桶内重试风暴（连续相同命令 ≥3 次）的次数。 */
   retryBursts: number;
   /** 重试风暴样本（会话级，上限 5）。 */
-  burstSamples: { cmd: string; count: number; time: number; error?: string }[];
+  burstSamples: { cmd: string; count: number; time: number; error?: string; sessionId: string }[];
   /** 疑似密钥命中（只存标签与时间）。 */
-  secretHits: { label: string; time: number; source: "user" | "tool" }[];
+  secretHits: { label: string; time: number; source: "user" | "tool"; sessionId: string }[];
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -567,7 +641,7 @@ export function bucketizeOwnEvents(
         for (const text of textOfUserMessage(data)) {
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(text)) {
-              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "user" });
+              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "user", sessionId });
               break;
             }
           }
@@ -611,7 +685,7 @@ export function bucketizeOwnEvents(
             if (commandStreak === 3) {
               bucket.retryBursts += 1;
               if (bucket.burstSamples.length < 5) {
-                bucket.burstSamples.push({ cmd: firstLine.slice(0, 80), count: commandStreak, time: burstStart, error: lastError });
+                bucket.burstSamples.push({ cmd: firstLine.slice(0, 80), count: commandStreak, time: burstStart, error: lastError, sessionId });
               }
             } else if (commandStreak > 3) {
               const sample = bucket.burstSamples[bucket.burstSamples.length - 1];
@@ -624,7 +698,7 @@ export function bucketizeOwnEvents(
           }
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(firstLine)) {
-              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "tool" });
+              if (bucket.secretHits.length < 5) bucket.secretHits.push({ label, time: event.time, source: "tool", sessionId });
               break;
             }
           }
@@ -695,11 +769,53 @@ export function aggregateBuckets(
   const commandStreak = new Map<string, number>();
   const burstStart = new Map<string, number>();
   const lastError = new Map<string, string | undefined>();
+  const sessionAgg = new Map<string, {
+    firstTime: number;
+    lastTime: number;
+    events: number;
+    commands: number;
+    toolCalls: number;
+    retryBursts: number;
+    dangerCount: number;
+    redDanger: number;
+    modelTokens: Record<string, ModelUsage>;
+    title: string;
+  }>();
+  const sessionTitle = new Map<string, string>();
+  const aggOf = (sid: string, time: number) => {
+    let a = sessionAgg.get(sid);
+    if (a === undefined) {
+      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      sessionAgg.set(sid, a);
+    }
+    return a;
+  };
   const days = new Map<string, number>();
 
   for (const view of views) {
     seenSessions.add(view.sessionId);
+    let agg = sessionAgg.get(view.sessionId);
+    if (agg === undefined) {
+      agg = { firstTime: Infinity, lastTime: 0, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      sessionAgg.set(view.sessionId, agg);
+    }
     for (const bucket of view.buckets) {
+      const aggCur = agg!;
+      aggCur.events += bucket.total;
+      aggCur.commands += bucket.commands;
+      aggCur.toolCalls += bucket.toolCallsTotal;
+      aggCur.retryBursts += bucket.retryBursts ?? 0;
+      aggCur.dangerCount += (bucket.danger ?? []).filter((d) => d.sev === "red").length + (bucket.danger ?? []).filter((d) => d.sev === "amber").length;
+      aggCur.redDanger += (bucket.danger ?? []).filter((d) => d.sev === "red").length;
+      aggCur.firstTime = Math.min(aggCur.firstTime, bucket.h);
+      aggCur.lastTime = Math.max(aggCur.lastTime, bucket.h + BUCKET_MS);
+      for (const [model, usage] of Object.entries(bucket.modelUsage ?? {})) {
+        const m = (aggCur.modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+        m.input += usage.input;
+        m.output += usage.output;
+        m.cacheRead += usage.cacheRead;
+        m.reasoning += usage.reasoning;
+      }
       if (bucket.h + BUCKET_MS <= period.from || bucket.h >= period.to) continue;
       // 分桶内事件可能在区间边界外（按小时取整后），做保守裁剪：
       // 桶整体落在区间内才计入（跨边界的小时由 nextHour 裁剪近似处理）。
@@ -775,5 +891,22 @@ export function aggregateBuckets(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  for (const [sid, a] of sessionAgg) {
+    const view = views.find((v) => v.sessionId === sid);
+    stats.sessionsDetail.push({
+      sessionId: sid,
+      title: view?.titles[0] ?? "",
+      firstTime: a.firstTime === Infinity ? 0 : a.firstTime,
+      lastTime: a.lastTime,
+      events: a.events,
+      commands: a.commands,
+      toolCalls: a.toolCalls,
+      retryBursts: a.retryBursts,
+      dangerCount: a.dangerCount,
+      redDanger: a.redDanger,
+      modelTokens: a.modelTokens,
+      cost: 0,
+    });
+  }
   return stats;
 }
