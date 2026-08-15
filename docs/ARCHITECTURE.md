@@ -103,7 +103,9 @@
 ## 7. 导出
 
 - **PDF**：把面板报告克隆到 body 顶层后 `window.print()`（`@media print` 只显示报告、A4 分页），与面板逐像素一致、数据同源。`/whale/api/html` 独立页路由保留（备用分享页）。
-- **PNG**：`exportReportImage` canvas 按面板同款视觉完整绘制（报告头 / 鲸评 / Findings / 活跃+Token / 模型与工具 / 风险扫描（危险+重试诊断+密钥扫描）/ 会话轨迹 / 会话索引 / 页脚）；数据口径与面板同源（cacheRate/night/delta/鲸评规则同一函数）；高度由 `budgetExportHeight` 随内容预算 + 绘制后按实际高度裁剪，任何周期不裁切；活跃区最多最近 7 天，超限标注 LAST 7 DAYS。
+- **PNG 主报告**（`exportReportImage(report, "main")`）：canvas 按面板同款视觉绘制报告头 / 鲸评 / Findings / 活跃+Token / 模型与工具 / 风险扫描（危险+重试诊断+密钥扫描）/ 页脚，**不含会话轨迹与会话索引**；数据口径与面板同源（cacheRate/night/delta/鲸评规则同一函数）；高度由 `budgetExportHeight` 随内容预算 + 绘制后按实际高度裁剪，任何周期不裁切；活跃区最多最近 7 天，超限标注 LAST 7 DAYS。
+- **PNG 会话轨迹**（`exportReportImage(report, "trace")`）：独立导出，仅含会话轨迹（06）+ 会话索引（07），追查专用。
+- **素材**：鲸鱼娘表情与页面形象在导出中加载真实 `/whale/assets` 素材（png 优先、svg 回退、缺图才手绘兜底），与面板显示一致。
 - **重试诊断**：仅存在于导出（PDF 与 PNG 均含错误摘要样本），面板不展示。
 
 ## 8. 兼容性策略（DSH preview 期生存术）

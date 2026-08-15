@@ -64,7 +64,7 @@ describe("budgetExportHeight", () => {
     expect(h40).toBe(h7);
   });
 
-  it("内容越多高度越高：洞察 / 会话 / 危险操作 / 会话索引", () => {
+  it("内容越多高度越高：洞察 / 危险操作（main 模式）", () => {
     const base = budgetExportHeight(makeReport(7, "weekly"));
     const withInsights = budgetExportHeight(
       makeReport(7, "weekly", {
@@ -73,26 +73,6 @@ describe("budgetExportHeight", () => {
           { id: "night-cost", level: "tip", title: "t", detail: "d", action: "a" },
           { id: "danger-red", level: "critical", title: "t", detail: "d", action: "a" },
         ],
-      }),
-    );
-    const withSessions = budgetExportHeight(
-      makeReport(7, "weekly", {
-        stats: {
-          ...makeStats(7),
-          sessionsDetail: Array.from({ length: 12 }, (_, i) => ({
-            title: `会话${i}`,
-            cost: 1,
-            sessionId: `s${i}`,
-            redDanger: 0,
-            retryBursts: 0,
-            toolCalls: 3,
-            modelTokens: {},
-            firstTime: 0,
-            lastTime: 1000,
-            events: 5,
-            commands: 2,
-          })),
-        },
       }),
     );
     const withDanger = budgetExportHeight(
@@ -109,13 +89,71 @@ describe("budgetExportHeight", () => {
         },
       }),
     );
-    const withTitles = budgetExportHeight(
-      makeReport(7, "weekly", { stats: { ...makeStats(7), titles: Array.from({ length: 15 }, (_, i) => `会话标题${i}`) } }),
-    );
     expect(withInsights).toBeGreaterThan(base);
-    expect(withSessions).toBeGreaterThan(base);
     expect(withDanger).toBeGreaterThan(base);
-    expect(withTitles).toBeGreaterThan(base);
+  });
+
+  it("main 模式不含会话轨迹/索引：其数量不影响高度", () => {
+    const noSessions = budgetExportHeight(
+      makeReport(7, "weekly", { stats: { ...makeStats(7), sessionsDetail: [], titles: [] } }),
+    );
+    const manySessions = budgetExportHeight(
+      makeReport(7, "weekly", {
+        stats: {
+          ...makeStats(7),
+          sessionsDetail: Array.from({ length: 20 }, (_, i) => ({
+            title: `会话${i}`,
+            cost: 1,
+            sessionId: `s${i}`,
+            redDanger: 0,
+            retryBursts: 0,
+            toolCalls: 3,
+            modelTokens: {},
+            firstTime: 0,
+            lastTime: 1000,
+            events: 5,
+            commands: 2,
+          })),
+          titles: Array.from({ length: 30 }, (_, i) => `会话标题${i}`),
+        },
+      }),
+    );
+    expect(manySessions).toBe(noSessions);
+  });
+
+  it("trace 模式只随会话轨迹/索引增长，且不含主报告内容", () => {
+    const t0 = budgetExportHeight(makeReport(7, "weekly", { stats: { ...makeStats(7), sessionsDetail: [], titles: [] } }), "trace");
+    const tMany = budgetExportHeight(
+      makeReport(7, "weekly", {
+        stats: {
+          ...makeStats(7),
+          sessionsDetail: Array.from({ length: 20 }, (_, i) => ({
+            title: `会话${i}`,
+            cost: 1,
+            sessionId: `s${i}`,
+            redDanger: 0,
+            retryBursts: 0,
+            toolCalls: 3,
+            modelTokens: {},
+            firstTime: 0,
+            lastTime: 1000,
+            events: 5,
+            commands: 2,
+          })),
+          titles: Array.from({ length: 30 }, (_, i) => `会话标题${i}`),
+        },
+      }),
+      "trace",
+    );
+    expect(tMany).toBeGreaterThan(t0);
+    // trace 不随主报告内容增长（洞察/模型数量不影响）
+    const tWithInsights = budgetExportHeight(
+      makeReport(7, "weekly", {
+        insights: [{ id: "secret-hit", level: "critical", title: "t", detail: "d", action: "a" }],
+      }),
+      "trace",
+    );
+    expect(tWithInsights).toBe(budgetExportHeight(makeReport(7, "weekly"), "trace"));
   });
 
   it("高度受画布上限约束（≤32000）", () => {

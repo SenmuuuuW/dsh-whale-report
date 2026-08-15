@@ -1294,7 +1294,37 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           </div>
           <div data-whale-report-actions>
             <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
-            <button data-whale-report-btn data-ghost="true" onClick={() => exportReportImage(report)}>图片</button>
+            <button
+              data-whale-report-btn
+              data-ghost="true"
+              onClick={() => {
+                void exportReportImage(report, "main").catch((err: unknown) => {
+                  window.alert(`导出图片失败：${err instanceof Error ? err.message : String(err)}`);
+                });
+              }}
+            >
+              图片
+            </button>
+            <button
+              data-whale-report-btn
+              data-ghost="true"
+              onClick={() => {
+                void exportReportImage(report, "trace").catch((err: unknown) => {
+                  window.alert(`导出会话轨迹失败：${err instanceof Error ? err.message : String(err)}`);
+                });
+              }}
+            >
+              会话轨迹
+            </button>
+            <button
+              data-whale-report-btn
+              data-ghost="true"
+              onClick={() => {
+                window.open(`/whale/api/html?id=${encodeURIComponent(report.id)}`, "_blank");
+              }}
+            >
+              HTML
+            </button>
             <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
           </div>
         </div>
@@ -1868,10 +1898,23 @@ function Dashboard(props: {
  * - 高度：budgetExportHeight 随内容精确增长 + 绘制完成后按实际高度裁剪，任何周期都不裁切。
  */
 
+/** 导出模式：main = 主报告（不含会话轨迹/索引）；trace = 单独导出会话轨迹+会话索引。 */
+export type ExportSections = "main" | "trace";
+
 /** 导出预算：逻辑高度（px）。与绘制使用同一组数据与行高常量，随内容单调增长。 */
-export function budgetExportHeight(report: ReportFull): number {
+export function budgetExportHeight(report: ReportFull, sections: ExportSections = "main"): number {
   const s = report.stats;
   const P = 28;
+  const sessions = s.sessionsDetail ?? [];
+  const titles = s.titles ?? [];
+  if (sections === "trace") {
+    // 独立会话轨迹页：头（标题/日期/统计）+ 06 会话轨迹 + 07 会话索引 + 页脚
+    let h = P * 2 + 12 + 24 + 30 + 16 + 16 + 44 + 2 * 32 + 14;
+    h += 18 + 26 + 12 + sessions.length * 44 + 12; // 06 会话轨迹
+    h += 18 + 26 + 12 + titles.length * 19 + 12; // 07 会话索引
+    h += 26; // 页脚
+    return Math.min(Math.ceil(h * 1.12) + 140, 32000);
+  }
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
   const hist = s.dayHourSeries ?? [];
   const cellW = (W - P * 2 - 30) / 24;
@@ -1880,11 +1923,9 @@ export function budgetExportHeight(report: ReportFull): number {
   const noteLines = triggerNotes(s).length > 0 ? NOTE_TEMPLATES[triggerNotes(s)[0]].light.length : 1;
   const danger = s.dangerousCommands ?? [];
   const bursts = (s.burstSamples ?? []).slice(0, 8);
-  const sessions = s.sessionsDetail ?? [];
   const modelEntries = Object.entries(s.models ?? {});
   const toolEntries = Object.entries(s.toolCalls ?? {}).slice(0, 10);
   const families = toolFamilies(s.toolCalls ?? {});
-  const titles = s.titles ?? [];
   const statLines = 2;
   let h = P * 2 + 12 + 26 + 34 + 18 + 16 + 44 + statLines * 32 + 14; // 报告头（含 6 统计 2 行）
   h += 10 + 58 + noteLines * 21 + 14 + 10; // 鲸评卡
@@ -1892,8 +1933,6 @@ export function budgetExportHeight(report: ReportFull): number {
   h += 18 + 26 + 12 + 16 + (activityRows > 0 ? activityRows * (cellW + 3) + 6 : 0) + 18 + 26 + 16 + 12; // 03 活跃 + TokenBar
   h += 18 + 26 + 12 + modelEntries.length * 26 + families.length * 18 + 18 + toolEntries.length * 19 + 12; // 04 模型与工具
   h += 18 + 26 + 12 + danger.length * 21 + 18 + (bursts.length > 0 ? bursts.length * 19 : 18) + 18 + 12; // 05 风险
-  h += 18 + 26 + 12 + sessions.length * 44 + 12; // 06 会话轨迹
-  h += 18 + 26 + 12 + titles.length * 19 + 12; // 07 会话索引
   h += 26; // 页脚
   return Math.min(Math.ceil(h * 1.12) + 140, 32000);
 }
@@ -1995,8 +2034,24 @@ function drawWhaleFace(ctx: CanvasRenderingContext2D, x: number, y: number, size
   ctx.lineWidth = 1;
 }
 
-/** 长图导出：与面板报告同视觉、同数据口径的完整 canvas 绘制。 */
-export function exportReportImage(report: ReportFull): void {
+/** 加载同源素材（与面板 WhaleFace 相同策略：png 优先，svg 回退）。 */
+function loadAssetImage(...names: string[]): Promise<HTMLImageElement | null> {
+  const tryLoad = (src: string): Promise<HTMLImageElement | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  return names.reduce(
+    (chain, name) => chain.then((found) => (found !== null ? found : tryLoad(`/whale/assets/${name}`))),
+    Promise.resolve<HTMLImageElement | null>(null),
+  );
+}
+
+/** 长图导出：main = 主报告（报告头/鲸评/Findings/活跃/模型工具/风险，不含会话轨迹与索引）；
+ *  trace = 单独导出会话轨迹 + 会话索引。鲸鱼娘与报告面板一致（真实素材，png→svg 回退，缺图才手绘）。 */
+export async function exportReportImage(report: ReportFull, sections: ExportSections = "main"): Promise<void> {
   const s = report.stats;
   const scale = 2;
   const P = 28;
@@ -2028,9 +2083,12 @@ export function exportReportImage(report: ReportFull): void {
   const toolEntries = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const families = toolFamilies(s.toolCalls ?? {});
   const titles = s.titles ?? [];
+  // 鲸鱼娘真实素材（png 优先，svg 回退；与面板显示一致）
+  const faceImg = await loadAssetImage(`whale-${mood}.png`, `whale-${mood}.svg`);
+  const heroImg = sections === "main" ? await loadAssetImage("whale-hero.png", "whale-hero.svg") : null;
   const presetLabel = PRESETS.find((p) => p.key === report.preset)?.label ?? "报告";
 
-  const height = budgetExportHeight(report);
+  const height = budgetExportHeight(report, sections);
   const canvas = document.createElement("canvas");
   canvas.width = W * scale;
   canvas.height = height * scale;
@@ -2082,7 +2140,12 @@ export function exportReportImage(report: ReportFull): void {
   let y = P;
 
   // ── 报告头 ──
+  const headTop = y;
   paint(`${traceCode(report.preset, report.to)} · AGENT RESEARCH REPORT`, 10, C.faint, "mono", 400);
+  if (sections === "main" && heroImg !== null) {
+    // 与面板报告头一致：右上角 whale-hero 素材
+    ctx.drawImage(heroImg, W - P - 96, headTop - 2, 96, 96);
+  }
   paint(`深迹 ${presetLabel}`, 26, C.ink, "sans", 700);
   paint(`${dateStr(report.from)} — ${dateStr(report.to)} · CONTEXT ONLINE`, 11, C.muted, "sans", 400);
   y += 6;
@@ -2112,27 +2175,30 @@ export function exportReportImage(report: ReportFull): void {
     ["Token burn", fmt(totalTokens)],
     ["Cache hit", `${cacheRate(s)}%`],
   ];
-  const colW = (W - P * 2) / 3;
-  statItems.forEach((item, i) => {
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const x = P + col * colW;
-    const yy = y + row * 32;
-    ctx.font = `700 16px ${EXPORT_SANS}`;
-    ctx.fillStyle = C.ink;
-    ctx.fillText(item[1], x, yy + 16);
-    ctx.font = `400 9px ${EXPORT_MONO}`;
-    ctx.fillStyle = C.faint;
-    ctx.fillText(item[0].toUpperCase(), x, yy + 30);
-    if (col > 0) {
-      ctx.strokeStyle = C.line;
-      ctx.beginPath();
-      ctx.moveTo(x - 10, yy);
-      ctx.lineTo(x - 10, yy + 30);
-      ctx.stroke();
-    }
-  });
-  y += 2 * 32 + 8;
+  const drawStatGrid = (): void => {
+    const colW = (W - P * 2) / 3;
+    statItems.forEach((item, i) => {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const x = P + col * colW;
+      const yy = y + row * 32;
+      ctx.font = `700 16px ${EXPORT_SANS}`;
+      ctx.fillStyle = C.ink;
+      ctx.fillText(item[1], x, yy + 16);
+      ctx.font = `400 9px ${EXPORT_MONO}`;
+      ctx.fillStyle = C.faint;
+      ctx.fillText(item[0].toUpperCase(), x, yy + 30);
+      if (col > 0) {
+        ctx.strokeStyle = C.line;
+        ctx.beginPath();
+        ctx.moveTo(x - 10, yy);
+        ctx.lineTo(x - 10, yy + 30);
+        ctx.stroke();
+      }
+    });
+    y += 2 * 32 + 8;
+  };
+  drawStatGrid();
 
   // ── 鲸评卡 ──
   y += 6;
@@ -2142,7 +2208,11 @@ export function exportReportImage(report: ReportFull): void {
   ctx.fillRect(P, noteTop, W - P * 2, noteH);
   ctx.strokeStyle = C.line;
   ctx.strokeRect(P, noteTop, W - P * 2, noteH);
-  drawWhaleFace(ctx, P + 12, noteTop + 14, 44, mood);
+  if (faceImg !== null) {
+    ctx.drawImage(faceImg, P + 12, noteTop + 14, 44, 44);
+  } else {
+    drawWhaleFace(ctx, P + 12, noteTop + 14, 44, mood);
+  }
   ctx.font = `700 10px ${EXPORT_MONO}`;
   ctx.fillStyle = C.blue;
   ctx.fillText("WHALE NOTE / OBSERVER", P + 66, noteTop + 30);
@@ -2157,6 +2227,7 @@ export function exportReportImage(report: ReportFull): void {
   paint("基于本期使用数据自动生成的风味评论，不影响正式报告结论。", 9, C.faint, "sans", 400);
   y = noteTop + noteH + 10;
 
+  if (sections === "main") {
   // ── 02 Findings ──
   sectionHead("02", "本期发现", "FINDINGS / INVESTIGATION LOG");
   if (insights.length === 0) {
@@ -2329,6 +2400,15 @@ export function exportReportImage(report: ReportFull): void {
     y += 18;
   }
 
+  } else {
+  // ── 独立会话轨迹导出：只画轨迹 + 索引 ──
+  paint(`${traceCode(report.preset, report.to)} · SESSION TRACE EXPORT`, 10, C.faint, "mono", 400);
+  paint(`深迹 · 会话轨迹`, 24, C.ink, "sans", 700);
+  paint(`${dateStr(report.from)} — ${dateStr(report.to)} · ${sessions.length} TARGETS`, 11, C.muted, "sans", 400);
+  y += 6;
+  hline(y, true);
+  y += 14;
+  drawStatGrid();
   // ── 06 会话轨迹 ──
   sectionHead("06", "会话轨迹", `TRACE LOG / ${sessions.length} TARGETS`);
   for (let i = 0; i < sessions.length; i++) {
@@ -2384,6 +2464,8 @@ export function exportReportImage(report: ReportFull): void {
   });
   if (titles.length === 0) {
     paint("无会话标题索引。", 10, C.muted, "sans", 400);
+  }
+
   }
 
   // ── 页脚 ──

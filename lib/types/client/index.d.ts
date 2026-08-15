@@ -131,10 +131,13 @@ interface StatsJson {
  * - 数据口径与面板同源（cacheRate/night/delta/费用占比/鲸评规则全部复用同一函数）；
  * - 高度：budgetExportHeight 随内容精确增长 + 绘制完成后按实际高度裁剪，任何周期都不裁切。
  */
+/** 导出模式：main = 主报告（不含会话轨迹/索引）；trace = 单独导出会话轨迹+会话索引。 */
+export type ExportSections = "main" | "trace";
 /** 导出预算：逻辑高度（px）。与绘制使用同一组数据与行高常量，随内容单调增长。 */
-export declare function budgetExportHeight(report: ReportFull): number;
-/** 长图导出：与面板报告同视觉、同数据口径的完整 canvas 绘制。 */
-export declare function exportReportImage(report: ReportFull): void;
+export declare function budgetExportHeight(report: ReportFull, sections?: ExportSections): number;
+/** 长图导出：main = 主报告（报告头/鲸评/Findings/活跃/模型工具/风险，不含会话轨迹与索引）；
+ *  trace = 单独导出会话轨迹 + 会话索引。鲸鱼娘与报告面板一致（真实素材，png→svg 回退，缺图才手绘）。 */
+export declare function exportReportImage(report: ReportFull, sections?: ExportSections): Promise<void>;
 /** 客户端 cordis 上下文的最小结构化视图（type-only，不引入运行时依赖）。 */
 interface ClientContext {
     effect(execute: () => () => void): unknown;
