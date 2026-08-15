@@ -246,6 +246,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               const gen = await generateReportData(svc, preset, range);
               await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
               const record: ReportRecord = {
+                sem: REPORT_SEM,
                 id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
                 preset,
                 from: range.from,
