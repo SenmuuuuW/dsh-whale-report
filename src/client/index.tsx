@@ -95,6 +95,18 @@ const CSS = `
   box-shadow: 0 6px 18px rgba(15,23,42,.10); max-width: 300px;
 }
 
+/* ── 切换周期加载条 ── */
+[data-whale-report-loadingbar] { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 12px; color: #6b7280; }
+[data-whale-report-loadingbar] i {
+  flex: 1; height: 2px; border-radius: 1px; background: #e5e7eb; overflow: hidden; position: relative;
+}
+[data-whale-report-loadingbar] i::after {
+  content: ""; position: absolute; inset: 0; width: 40%;
+  background: #4d6bfe; border-radius: 1px;
+  animation: dshload 1s ease-in-out infinite;
+}
+@keyframes dshload { 0% { left: -40%; } 100% { left: 100%; } }
+
 /* ── 加载骨架 ── */
 [data-whale-report-skeleton] { display: flex; flex-direction: column; gap: 8px; }
 [data-whale-report-sk-hero] { height: 120px; border-radius: 14px; background: linear-gradient(90deg, #eef0f5 25%, #f7f8fb 50%, #eef0f5 75%); background-size: 200% 100%; animation: dshsk 1.2s infinite; }
@@ -196,8 +208,8 @@ const CSS = `
 /* 活动方块 */
 [data-whale-report-weekrow] { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
 [data-whale-report-weekrowlabel] { width: 36px; flex-shrink: 0; font-size: 10.5px; color: #9ca3af; text-align: right; }
-[data-whale-report-squares] { display: grid; grid-auto-rows: auto; gap: 3px; flex: 1; min-width: 0; }
-[data-whale-report-squares] i { aspect-ratio: 1; border-radius: 3px; display: block; width: 100%; }
+[data-whale-report-squares] { display: flex; gap: 3px; flex: 1; min-width: 0; }
+[data-whale-report-squares] i { flex: 1 1 0; min-width: 0; aspect-ratio: 1; border-radius: 3px; display: block; }
 [data-whale-report-legend] { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #9ca3af; margin-top: 7px; }
 [data-whale-report-legend] i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; }
 [data-whale-report-gridempty] { font-size: 13px; color: #6b7280; padding: 6px 0; }
@@ -1210,6 +1222,13 @@ function Dashboard(props: {
         <div data-whale-report-inputs>
           <input type="date" value={from} onChange={(e) => onCustom(e.target.value, to)} />
           <input type="date" value={to} onChange={(e) => onCustom(from, e.target.value)} />
+        </div>
+      )}
+
+      {loading && (
+        <div data-whale-report-loadingbar>
+          <i />
+          <span>更新中…</span>
         </div>
       )}
 
