@@ -1046,6 +1046,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   };
 
   requestSeq = 0;
+  customDebounce: number | undefined;
 
   componentDidMount(): void {
     void this.loadDashboard(this.state.preset);
@@ -1151,7 +1152,11 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
             }}
             onCustom={(from, to) => {
               this.setState({ from, to });
-              void this.loadDashboard("custom");
+              if (this.customDebounce !== undefined) window.clearTimeout(this.customDebounce);
+              this.customDebounce = window.setTimeout(() => {
+                this.customDebounce = undefined;
+                void this.loadDashboard("custom");
+              }, 400);
             }}
             onOpenReport={() => this.setState({ view: "report" })}
           />
