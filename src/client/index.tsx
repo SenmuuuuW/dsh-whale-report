@@ -150,6 +150,35 @@ const CSS = `
 }
 [data-whale-report-feedmore]:hover { border-color: #4d6bfe; background: #eef2ff; }
 
+/* ── 本期鲸评 ── */
+[data-whale-report-note] { border-left: 3px solid #4d6bfe; }
+[data-whale-report-notehead] { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+[data-whale-report-notetitle] { display: flex; align-items: center; gap: 8px; flex: 1; }
+[data-whale-report-notetitle] b { font-size: 14px; color: #0f172a; }
+[data-whale-report-noteopts] { display: flex; gap: 2px; background: #eef2ff; border-radius: 999px; padding: 2px; }
+[data-whale-report-noteopts] button { border: none; background: none; font-size: 11px; color: #64748b; padding: 2px 9px; border-radius: 999px; cursor: pointer; }
+[data-whale-report-noteopts] button[data-active="true"] { background: #4d6bfe; color: #fff; }
+[data-whale-report-noteline] { font-size: 13.5px; color: #334155; line-height: 1.8; padding: 4px 2px; }
+[data-whale-report-notemore] { font-size: 12px; color: #64748b; line-height: 1.7; padding: 2px 2px; }
+[data-whale-report-notefoot] { font-size: 11px; color: #9ca3af; margin-top: 8px; padding-top: 7px; border-top: 1px dashed #e5e7eb; }
+[data-whale-report-note-short] {
+  display: flex; align-items: center; gap: 9px; cursor: pointer;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
+  padding: 9px 12px; margin-bottom: 12px;
+}
+[data-whale-report-note-short]:hover { border-color: #4d6bfe; }
+[data-whale-report-note-short] b { font-size: 12.5px; color: #0f172a; display: block; }
+[data-whale-report-note-short] span { font-size: 12.5px; color: #3730a3; }
+
+/* ── 深海装饰：卡片角落小气泡 ── */
+[data-whale-report-card] { position: relative; }
+[data-whale-report-card]::after {
+  content: ""; position: absolute; right: 10px; top: 10px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: rgba(77,107,254,.10);
+  pointer-events: none;
+}
+
 /* ── 修复建议 ── */
 [data-whale-report-fix] {
   margin-top: 7px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0;
@@ -834,6 +863,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       )}
 
       <InsightsSection insights={report.insights ?? []} />
+      <WhaleNote report={report} />
 
       <div data-whale-report-card>
         <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
@@ -1348,7 +1378,7 @@ function Dashboard(props: {
 
           {insights.length > 0 && (
             <>
-              <div data-whale-report-h2>值得注意</div>
+              <div data-whale-report-h2><WhaleFace mood={whaleMood(report)} size={16} />值得注意</div>
               <InsightFeed insights={insights.slice(0, 3)} stats={s} />
               {insights.length > 3 && (
                 <button data-whale-report-feedmore onClick={onOpenReport}>
@@ -1358,7 +1388,21 @@ function Dashboard(props: {
             </>
           )}
 
-          <div data-whale-report-h2>活跃</div>
+          {(() => {
+            const kinds = triggerNotes(report);
+            if (kinds.length === 0) return null;
+            return (
+              <div data-whale-report-note-short onClick={onOpenReport}>
+                <WhaleFace mood={whaleMood(report)} size={30} />
+                <div>
+                  <b>本期鲸评</b>
+                  <span>“{NOTE_TEMPLATES[kinds[0]].light}”</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div data-whale-report-h2><SonarIcon />活跃</div>
           <div data-whale-report-card>
             <ActivityStrip report={report} />
           </div>
@@ -1520,6 +1564,136 @@ function exportReportImage(report: ReportFull): void {
   a.click();
 }
 
+// ─────────────────────────── 鲸鱼娘：表情 + 本期鲸评 ───────────────────────────
+
+/** 鲸鱼娘表情脸（inline SVG，蓝白卡通）。 */
+function WhaleFace({ mood, size = 44 }: { mood: "happy" | "angry" | "sleepy" | "dazed"; size?: number }): ReactNode {
+  const eye = (kind: string) => {
+    if (kind === "angry") return <path d="M8 16 L14 13 M32 16 L26 13" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" />;
+    if (kind === "sleepy") return <path d="M9 15 L15 15 M25 15 L31 15" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" />;
+    if (kind === "dazed") return <><circle cx="12" cy="15" r="1.6" fill="#0f172a" /><circle cx="28" cy="15" r="1.6" fill="#0f172a" /></>;
+    return <><circle cx="12" cy="15" r="2.6" fill="#0f172a" /><circle cx="28" cy="15" r="2.6" fill="#0f172a" /></>;
+  };
+  const mouth = (kind: string) => {
+    if (kind === "happy") return <path d="M12 21 Q20 27 28 21" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" fill="none" />;
+    if (kind === "angry") return <path d="M13 23 L27 23" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" />;
+    if (kind === "sleepy") return <circle cx="20" cy="22" r="1.8" fill="#0f172a" />;
+    return <path d="M13 22 Q20 20 27 22" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" fill="none" />;
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
+      <path d="M20 4 C9 4 4 12 4 20 C4 30 11 36 20 36 C29 36 36 30 36 20 C36 12 31 4 20 4 Z" fill="#4d6bfe" />
+      <path d="M20 4 C9 4 4 12 4 20 C4 30 11 36 20 36 Z" fill="#5b78ff" />
+      <ellipse cx="20" cy="26" rx="8" ry="5" fill="#dbe4ff" />
+      {eye(mood)}
+      {mouth(mood)}
+      <circle cx="9" cy="19" r="2" fill="#ffb4c8" opacity=".9" />
+      <circle cx="31" cy="19" r="2" fill="#ffb4c8" opacity=".9" />
+      {mood === "sleepy" && <text x="31" y="10" fontSize="7" fill="#64748b">z</text>}
+    </svg>
+  );
+}
+
+/** 由数据驱动的心情：超支/致命操作→生气；深夜→困；重试→无语；默认→呆萌。 */
+function whaleMood(report: ReportFull): "happy" | "angry" | "sleepy" | "dazed" {
+  const s = report.stats;
+  const redDanger = (s.dangerousCommands ?? []).some((d) => d.sev === "red");
+  const overBudget = typeof report.cost?.total === "number" && typeof report.budget === "number" && report.budget > 0 && report.cost.total >= report.budget;
+  if (redDanger || overBudget) return "angry";
+  const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
+  if (night >= 25) return "sleepy";
+  if ((s.retryBursts ?? 0) >= 5) return "dazed";
+  return "happy";
+}
+
+/** 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式），确定性不翻车。 */
+const NOTE_TEMPLATES = {
+  retry: {
+    light: "同一个命令试了好多次，先看看前置条件是不是没满足哦。",
+    spicy: "同一个命令试了这么多次……你是在调试 bug，还是在训练 bug 记住你？",
+  },
+  night: {
+    light: "凌晨还在高强度工作，记得给自己放个假。",
+    spicy: "凌晨还在高强度调用我，你不睡，鲸也不睡吗？",
+  },
+  budget: {
+    light: "预算快见底了，注意控制长任务。",
+    spicy: "这周预算已经快见底了。你是在写项目，还是在燃烧钱包？",
+  },
+  fragment: {
+    light: "会话开得有点多，同主题试试续聊，命中率会更好。",
+    spicy: "开了好多会话，但每个都聊两句就跑掉……你对上下文怎么这么薄情呀？",
+  },
+  danger: {
+    light: "检测到一些危险操作，记得重要目录先备份。",
+    spicy: "你怎么又在边缘试探？",
+  },
+} as const;
+
+type NoteKind = keyof typeof NOTE_TEMPLATES;
+
+/** 规则触发：返回命中的吐槽项（按优先级排序）。 */
+function triggerNotes(report: ReportFull): NoteKind[] {
+  const s = report.stats;
+  const hits: { kind: NoteKind; weight: number }[] = [];
+  if ((s.dangerousCommands ?? []).some((d) => d.sev === "red")) hits.push({ kind: "danger", weight: 0 });
+  else if (s.dangerousCommands.length > 0) hits.push({ kind: "danger", weight: 1 });
+  if (typeof report.cost?.total === "number" && typeof report.budget === "number" && report.budget > 0) {
+    const ratio = report.cost.total / report.budget;
+    if (ratio >= 1) hits.push({ kind: "budget", weight: 0 });
+    else if (ratio >= 0.8) hits.push({ kind: "budget", weight: 2 });
+  }
+  if ((s.retryBursts ?? 0) >= 3) hits.push({ kind: "retry", weight: 2 });
+  const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
+  if (night >= 15) hits.push({ kind: "night", weight: 3 });
+  if (s.sessions >= 5 && s.sessions > 0 && s.turns / s.sessions < 2) hits.push({ kind: "fragment", weight: 4 });
+  return hits.sort((a, b) => a.weight - b.weight).map((h) => h.kind);
+}
+
+/** 本期鲸评卡片（完整版，两种模式可切换）。 */
+function WhaleNote({ report }: { report: ReportFull }): ReactNode {
+  const [mode, setMode] = useState<"light" | "spicy">("light");
+  const kinds = triggerNotes(report);
+  const mood = whaleMood(report);
+  const top = kinds[0];
+  return (
+    <div data-whale-report-card data-whale-report-note>
+      <div data-whale-report-notehead>
+        <WhaleFace mood={mood} size={40} />
+        <div data-whale-report-notetitle>
+          <b>本期鲸评</b>
+          <span data-whale-report-noteopts>
+            <button data-active={mode === "light"} onClick={() => setMode("light")}>轻</button>
+            <button data-active={mode === "spicy"} onClick={() => setMode("spicy")}>毒舌</button>
+          </span>
+        </div>
+      </div>
+      {top !== undefined && (
+        <div data-whale-report-noteline>“{NOTE_TEMPLATES[top][mode]}”</div>
+      )}
+      {kinds.slice(1, 3).map((kind) => (
+        <div key={kind} data-whale-report-notemore>· {NOTE_TEMPLATES[kind][mode]}</div>
+      ))}
+      {kinds.length === 0 && (
+        <div data-whale-report-noteline>“本周数据很健康，继续保持就好啦。”</div>
+      )}
+      <div data-whale-report-notefoot>基于本期使用数据自动生成的风味评论，不影响正式报告结论。</div>
+      {mood === "angry" && <div data-whale-report-notemore>（鲸鱼娘现在有点生气，注意安全操作。）</div>}
+    </div>
+  );
+}
+
+/** 声呐图标（会话钻取/活跃 的分区装饰）。 */
+function SonarIcon({ size = 14 }: { size?: number }): ReactNode {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="8" cy="8" r="6.4" stroke="#4d6bfe" strokeWidth="1.4" opacity=".85" />
+      <circle cx="8" cy="8" r="3.4" stroke="#4d6bfe" strokeWidth="1.2" opacity=".6" />
+      <path d="M8 8 L12.5 5.5" stroke="#4d6bfe" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** 会话钻取卡：按费用排序，点击展开详情，复制 Session ID。 */
 function SessionDrilldown({ sessions }: { sessions: NonNullable<StatsJson["sessionsDetail"]> }): ReactNode {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -1531,7 +1705,7 @@ function SessionDrilldown({ sessions }: { sessions: NonNullable<StatsJson["sessi
   };
   return (
     <div data-whale-report-card>
-      <div data-whale-report-h2>会话钻取（{sessions.length}）</div>
+      <div data-whale-report-h2><SonarIcon />会话钻取（{sessions.length}）</div>
       {sessions.slice(0, 8).map((s) => {
         const open = openId === s.sessionId;
         return (
