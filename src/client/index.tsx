@@ -737,16 +737,18 @@ const CSS = `
   }
 }
 
+/* 打印 = 面板报告（克隆到 body 顶层后 window.print）：
+ * body 其它直接子级全部隐藏（不占位、无空白页），报告独占 A4。 */
 @media print {
-  body * { visibility: hidden; }
-  [data-whale-report-drawer], [data-whale-report-drawer] * { visibility: visible; }
-  [data-whale-report-drawer] {
-    position: absolute; left: 0; top: 0; width: 100%; height: auto;
-    box-shadow: none; border: none; background: #fff; color: #111;
+  @page { size: A4; margin: 10mm 8mm; }
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  body > *:not([data-whale-report-print-root]) { display: none !important; }
+  [data-whale-report-print-root] {
+    display: block !important; width: auto !important; margin: 0 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  [data-whale-report-fab], [data-whale-report-close], [data-whale-report-tabs],
-  [data-whale-report-chips], [data-whale-report-inputs], [data-whale-report-actions] { display: none !important; }
-  [data-whale-report-card] { box-shadow: none; break-inside: avoid; }
+  [data-whale-report-card], [data-whale-report-section],
+  [data-whale-report-reportsection], [data-whale-report-note] { break-inside: avoid; }
 }
 `;
 
@@ -1258,9 +1260,18 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const shownDanger = dangerExpanded ? danger.slice(0, 30) : danger.slice(0, 3);
   const summary = dangerSummary(danger);
 
+  // 导出 PDF = 打印面板报告本身：把当前报告克隆到 body 顶层（打印 CSS 只显示它），
+  // 浏览器打印对话框 → 另存为 PDF。与面板逐像素一致，数据同源。
   const exportPdf = (): void => {
-    const url = `/whale/api/html?id=${encodeURIComponent(report.id)}`;
-    window.open(url, "_blank");
+    const source = document.querySelector<HTMLElement>("[data-whale-report-report]");
+    if (source === null) return;
+    const clone = prepareExportClone(source);
+    const host = document.createElement("div");
+    host.setAttribute("data-whale-report-print-root", "");
+    host.appendChild(clone);
+    document.body.appendChild(host);
+    window.print();
+    host.remove();
   };
 
   const delta = report.prev !== undefined && report.prev.cost > 0 && typeof report.cost?.total === "number"
@@ -1850,135 +1861,553 @@ function Dashboard(props: {
   );
 }
 
-/** 长图导出：canvas 绘制报告为 PNG（零依赖）。 */
+/**
+ * 长图导出：canvas 按面板报告同款视觉逐块绘制完整内容（零依赖、无 canvas 污染问题）。
+ * - 内容与报告一致：报告头/鲸评/Findings/活跃+Token/模型与工具/风险扫描/会话轨迹/会话索引/页脚；
+ * - 数据口径与面板同源（cacheRate/night/delta/费用占比/鲸评规则全部复用同一函数）；
+ * - 高度：budgetExportHeight 随内容精确增长 + 绘制完成后按实际高度裁剪，任何周期都不裁切。
+ */
+
+/** 导出预算：逻辑高度（px）。与绘制使用同一组数据与行高常量，随内容单调增长。 */
+export function budgetExportHeight(report: ReportFull): number {
+  const s = report.stats;
+  const P = 28;
+  const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
+  const hist = s.dayHourSeries ?? [];
+  const cellW = (W - P * 2 - 30) / 24;
+  const activityRows = Math.min(hist.length, 7);
+  const insights = (report.insights ?? []).filter((i) => i.level !== "info");
+  const noteLines = triggerNotes(s).length > 0 ? NOTE_TEMPLATES[triggerNotes(s)[0]].light.length : 1;
+  const danger = s.dangerousCommands ?? [];
+  const bursts = (s.burstSamples ?? []).slice(0, 8);
+  const sessions = s.sessionsDetail ?? [];
+  const modelEntries = Object.entries(s.models ?? {});
+  const toolEntries = Object.entries(s.toolCalls ?? {}).slice(0, 10);
+  const families = toolFamilies(s.toolCalls ?? {});
+  const titles = s.titles ?? [];
+  const statLines = 2;
+  let h = P * 2 + 12 + 26 + 34 + 18 + 16 + 44 + statLines * 32 + 14; // 报告头（含 6 统计 2 行）
+  h += 10 + 58 + noteLines * 21 + 14 + 10; // 鲸评卡
+  h += 18 + 26 + 12 + (insights.length === 0 ? 18 : insights.length * 84) + 10; // 02 Findings
+  h += 18 + 26 + 12 + 16 + (activityRows > 0 ? activityRows * (cellW + 3) + 6 : 0) + 18 + 26 + 16 + 12; // 03 活跃 + TokenBar
+  h += 18 + 26 + 12 + modelEntries.length * 26 + families.length * 18 + 18 + toolEntries.length * 19 + 12; // 04 模型与工具
+  h += 18 + 26 + 12 + danger.length * 21 + 18 + (bursts.length > 0 ? bursts.length * 19 : 18) + 18 + 12; // 05 风险
+  h += 18 + 26 + 12 + sessions.length * 44 + 12; // 06 会话轨迹
+  h += 18 + 26 + 12 + titles.length * 19 + 12; // 07 会话索引
+  h += 26; // 页脚
+  return Math.min(Math.ceil(h * 1.12) + 140, 32000);
+}
+
+type ModelUsageLike = { input: number; output: number; cacheRead: number; reasoning: number };
+const W = 720;
+
+/** 短时间格式（与面板会话详情一致）。 */
+function timeStr(ms: number): string {
+  return new Date(ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+const EXPORT_SANS = `"PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif`;
+const EXPORT_MONO = `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+const C = {
+  paper: "#f5f8f9",
+  ink: "#0b1733",
+  inkSoft: "#33445f",
+  muted: "#6e7c8f",
+  faint: "#94a2b3",
+  line: "#d9e3e8",
+  lineStrong: "#b9c9d3",
+  blue: "#4d6bfe",
+  cyan: "#36b9d1",
+  red: "#c83a48",
+  amber: "#b87519",
+  safe: "#31765a",
+  white: "#ffffff",
+};
+
+/** 导出/打印共用的报告克隆（打印路径用）：移除操作按钮、绝对化图片路径、注入 DeepTrace 样式。 */
+function prepareExportClone(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.setAttribute("data-whale-report", ""); // 继承 DeepTrace 变量与字体
+  clone.style.backgroundColor = "var(--dt-paper)"; // 与抽屉底色一致
+  clone.querySelectorAll("[data-whale-report-actions]").forEach((el) => el.remove());
+  // 打印页面内相对 URL 无法解析？打印走真实页面（body 顶层），相对路径仍可用，这里仅兜底转绝对。
+  clone.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src");
+    if (src !== null && src.startsWith("/")) {
+      img.setAttribute("src", new URL(src, window.location.href).href);
+    }
+  });
+  const style = document.createElement("style");
+  style.setAttribute("data-export", "");
+  style.textContent = CSS;
+  clone.prepend(style);
+  return clone;
+}
+
+/** 手绘鲸鱼脸（与 WhaleFace SVG 同款蓝白卡通，按 mood 换眼睛嘴巴）。 */
+function drawWhaleFace(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, mood: string): void {
+  const r = size / 2;
+  const cx = x + r;
+  const cy = y + r;
+  ctx.fillStyle = C.blue;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#5b78ff";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#dbe4ff";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.3, r * 0.4, r * 0.25, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = C.ink;
+  const eyeY = cy - r * 0.22;
+  if (mood === "angry") {
+    ctx.strokeStyle = C.ink;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.3, eyeY - r * 0.18); ctx.lineTo(cx - r * 0.02, eyeY + r * 0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + r * 0.3, eyeY - r * 0.18); ctx.lineTo(cx + r * 0.02, eyeY + r * 0.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.28, cy + r * 0.34); ctx.lineTo(cx + r * 0.28, cy + r * 0.34); ctx.stroke();
+  } else if (mood === "sleepy") {
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.3, eyeY); ctx.lineTo(cx - r * 0.02, eyeY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + r * 0.02, eyeY); ctx.lineTo(cx + r * 0.3, eyeY); ctx.stroke();
+    ctx.fillStyle = C.ink;
+    ctx.beginPath(); ctx.arc(cx, cy + r * 0.34, r * 0.09, 0, Math.PI * 2); ctx.fill();
+  } else if (mood === "dazed") {
+    ctx.fillStyle = C.ink;
+    ctx.beginPath(); ctx.arc(cx - r * 0.2, eyeY, r * 0.08, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + r * 0.2, eyeY, r * 0.08, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.2, cy + r * 0.36); ctx.quadraticCurveTo(cx, cy + r * 0.28, cx + r * 0.2, cy + r * 0.36); ctx.stroke();
+  } else {
+    ctx.fillStyle = C.ink;
+    ctx.beginPath(); ctx.arc(cx - r * 0.2, eyeY, r * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + r * 0.2, eyeY, r * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.2, cy + r * 0.24); ctx.quadraticCurveTo(cx, cy + r * 0.42, cx + r * 0.2, cy + r * 0.24); ctx.stroke();
+  }
+  ctx.fillStyle = "#ffb4c8";
+  ctx.beginPath(); ctx.arc(cx - r * 0.45, cy + r * 0.1, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + r * 0.45, cy + r * 0.1, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "transparent";
+  ctx.lineWidth = 1;
+}
+
+/** 长图导出：与面板报告同视觉、同数据口径的完整 canvas 绘制。 */
 export function exportReportImage(report: ReportFull): void {
   const s = report.stats;
   const scale = 2;
-  const W = 720;
-  const padding = 28;
+  const P = 28;
   const rowH = (font: number) => Math.round(font * 1.5);
-  // 先粗算高度：行数 × 行高 + 固定块
-  const section = (title: string) => 34;
+  const maxText = W - P * 2;
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
-  const costText = typeof report.cost?.total === "number" ? `¥${report.cost.total.toFixed(2)}` : "—";
-  const sessions = s.sessionsDetail ?? [];
-  const modelEntries = Object.entries(s.models ?? {});
+  const cost = typeof report.cost?.total === "number" ? report.cost.total : null;
+  const costText = cost !== null ? `¥${cost.toFixed(2)}` : "—";
+  const delta = report.prev !== undefined && report.prev.cost > 0 && cost !== null
+    ? Math.round(((cost - report.prev.cost) / report.prev.cost) * 100)
+    : null;
+  const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
+  const insights = (report.insights ?? []).filter((i) => i.level !== "info");
+  const mood = whaleMood(s);
+  const kinds = triggerNotes(s);
+  const noteLines = kinds.length > 0 ? NOTE_TEMPLATES[kinds[0]].light : ["这期数据很干净呢，一点幺蛾子都没有。"];
   const hist = s.dayHourSeries ?? [];
-  const cellW = (W - padding * 2 - 30) / 24;
-  // 活跃区：只画最近 7 天；行数与下方绘制循环完全一致（同一浮点累加序列），
-  // 避免画布高度按固定 4 行估算导致 weekly/custom 底部被裁切。
+  const cellW = (W - P * 2 - 30) / 24;
   const activityRows = Math.min(hist.length, 7);
-  let activityH = 0;
-  for (let i = 0; i < activityRows; i++) activityH += cellW + 3;
-  if (hist.length > 0) activityH += 6; // 循环后的行间距（hist 非空时才绘制格子）
-  let height = padding * 2 + rowH(26) + rowH(13) + 24;
-  height += 40 + rowH(40) + rowH(13); // hero
-  height += section("活跃") + activityH;
-  height += section("模型") + modelEntries.length * 34;
-  height += section("会话钻取") + Math.min(sessions.length, 5) * 34;
-  height += section("危险操作") + Math.min(s.dangerousCommands.length, 5) * 30;
-  height += 60;
+  const danger = (s.dangerousCommands ?? []).map((d) => ({ ...d, sev: d.sev ?? "amber" }));
+  const bursts = (s.burstSamples ?? []).slice(0, 8);
+  const secretHits = s.secretHits ?? [];
+  const secretCounts = new Map<string, number>();
+  for (const hit of secretHits) secretCounts.set(hit.label, (secretCounts.get(hit.label) ?? 0) + 1);
+  const sessions = s.sessionsDetail ?? [];
+  const resolvedTotal = cost !== null && cost > 0 ? cost : sessions.reduce((sum, sd) => sum + sd.cost, 0);
+  const tot = (u: ModelUsageLike) => u.input + u.output + u.cacheRead + u.reasoning;
+  const modelEntries = Object.entries(s.models ?? {}).sort((a, b) => tot(b[1]) - tot(a[1]));
+  const toolEntries = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const families = toolFamilies(s.toolCalls ?? {});
+  const titles = s.titles ?? [];
+  const presetLabel = PRESETS.find((p) => p.key === report.preset)?.label ?? "报告";
+
+  const height = budgetExportHeight(report);
   const canvas = document.createElement("canvas");
   canvas.width = W * scale;
   canvas.height = height * scale;
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
   ctx.scale(scale, scale);
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = C.white;
   ctx.fillRect(0, 0, W, height);
-  const navy = "#0f172a";
-  const blue = "#4d6bfe";
-  const gray = "#64748b";
-  const line = "#e5e7eb";
-  let y = padding;
 
-  // 长文本截断：超出画布宽度时加省略号（中文长标题防溢出）。
   const ellipsis = (raw: string, maxWidth: number, size: number): string => {
     if (ctx.measureText(raw).width <= maxWidth) return raw;
     let t = raw;
     while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
     return t + "…";
   };
-  const maxText = W - padding * 2;
-  const title = (text: string, size: number, color: string, dy = 0): void => {
+  const paint = (text: string, size: number, color: string, font: "sans" | "mono", weight: number, maxW = maxText): void => {
     ctx.fillStyle = color;
-    ctx.font = `700 ${size}px "PingFang SC", sans-serif`;
-    ctx.fillText(ellipsis(text, maxText, size), padding, y + size + dy);
+    ctx.font = `${weight} ${size}px ${font === "mono" ? EXPORT_MONO : EXPORT_SANS}`;
+    ctx.fillText(ellipsis(text, maxW, size), P, y + size);
     y += rowH(size);
   };
-  const text = (text: string, size: number, color: string): void => {
+  const right = (text: string, size: number, color: string, font: "sans" | "mono"): void => {
     ctx.fillStyle = color;
-    ctx.font = `400 ${size}px "PingFang SC", sans-serif`;
-    ctx.fillText(ellipsis(text, maxText, size), padding, y + size);
-    y += rowH(size);
-  };
-  const sep = (): void => {
-    y += 8;
-    ctx.strokeStyle = line;
-    ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(W - padding, y);
-    ctx.stroke();
-    y += 14;
-  };
-  const scanCell = (level: number): string => {
-    const boosted = Math.pow(Math.min(1, Math.max(0, level)), 0.4);
-    return `rgba(77,107,254,${(0.18 + boosted * 0.82).toFixed(2)})`;
-  };
-
-  title("深迹 DeepTrace", 24, navy);
-  text("Your Agent, in numbers. · 只读数据报告", 12, gray);
-  sep();
-  title(HERO_LABEL[report.preset] ?? "Agent 消耗", 13, navy, 2);
-  title(costText, 44, navy, 2);
-  text("会话 " + s.sessions + " · 工具调用 " + fmt(s.toolCallsTotal) + " · Token " + fmt(totalTokens), 12, gray);
-  sep();
-  title("活跃", 14, navy);
-  if (hist.length > activityRows) {
-    // 只展示最近 7 天时明确标注，避免误认为完整数据。
-    ctx.fillStyle = gray;
-    ctx.font = `400 11px "PingFang SC", sans-serif`;
+    ctx.font = `400 ${size}px ${font === "mono" ? EXPORT_MONO : EXPORT_SANS}`;
     ctx.textAlign = "right";
-    ctx.fillText("LAST 7 DAYS", W - padding, y - rowH(14) + 14);
+    ctx.fillText(text, W - P, y + size);
     ctx.textAlign = "left";
+  };
+  const hline = (yy: number, strong = false): void => {
+    ctx.strokeStyle = strong ? C.lineStrong : C.line;
+    ctx.beginPath();
+    ctx.moveTo(P, yy);
+    ctx.lineTo(W - P, yy);
+    ctx.stroke();
+  };
+  const sectionHead = (index: string, titleText: string, meta: string): void => {
+    y += 16;
+    ctx.font = `700 13px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.blue;
+    ctx.fillText(index, P, y + 13);
+    ctx.font = `700 15px ${EXPORT_SANS}`;
+    ctx.fillStyle = C.ink;
+    ctx.fillText(titleText, P + 34, y + 13);
+    right(meta, 9.5, C.faint, "mono");
+    y += 16;
+    hline(y, true);
+    y += 12;
+  };
+  let y = P;
+
+  // ── 报告头 ──
+  paint(`${traceCode(report.preset, report.to)} · AGENT RESEARCH REPORT`, 10, C.faint, "mono", 400);
+  paint(`深迹 ${presetLabel}`, 26, C.ink, "sans", 700);
+  paint(`${dateStr(report.from)} — ${dateStr(report.to)} · CONTEXT ONLINE`, 11, C.muted, "sans", 400);
+  y += 6;
+  ctx.font = `700 44px ${EXPORT_SANS}`;
+  ctx.fillStyle = C.ink;
+  ctx.fillText(costText, P, y + 44);
+  if (delta !== null) {
+    ctx.font = `700 14px ${EXPORT_MONO}`;
+    ctx.fillStyle = delta > 0 ? C.red : C.safe;
+    ctx.fillText(`${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}%`, P + 160, y + 30);
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.muted;
+    ctx.fillText("VS 上周期", P + 160, y + 46);
+  } else {
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText("BASELINE / 首次记录，下期起可对比", P + 160, y + 44);
+  }
+  y += 44 + 12;
+  hline(y);
+  y += 14;
+  const statItems: [string, string][] = [
+    ["Sessions", fmt(s.sessions)],
+    ["Turns", fmt(s.turns)],
+    ["Tool calls", fmt(s.toolCallsTotal)],
+    ["Commands", fmt(s.commands)],
+    ["Token burn", fmt(totalTokens)],
+    ["Cache hit", `${cacheRate(s)}%`],
+  ];
+  const colW = (W - P * 2) / 3;
+  statItems.forEach((item, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = P + col * colW;
+    const yy = y + row * 32;
+    ctx.font = `700 16px ${EXPORT_SANS}`;
+    ctx.fillStyle = C.ink;
+    ctx.fillText(item[1], x, yy + 16);
+    ctx.font = `400 9px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(item[0].toUpperCase(), x, yy + 30);
+    if (col > 0) {
+      ctx.strokeStyle = C.line;
+      ctx.beginPath();
+      ctx.moveTo(x - 10, yy);
+      ctx.lineTo(x - 10, yy + 30);
+      ctx.stroke();
+    }
+  });
+  y += 2 * 32 + 8;
+
+  // ── 鲸评卡 ──
+  y += 6;
+  const noteTop = y;
+  const noteH = 12 + 52 + noteLines.length * 21 + 12 + 14 + 12;
+  ctx.fillStyle = C.paper;
+  ctx.fillRect(P, noteTop, W - P * 2, noteH);
+  ctx.strokeStyle = C.line;
+  ctx.strokeRect(P, noteTop, W - P * 2, noteH);
+  drawWhaleFace(ctx, P + 12, noteTop + 14, 44, mood);
+  ctx.font = `700 10px ${EXPORT_MONO}`;
+  ctx.fillStyle = C.blue;
+  ctx.fillText("WHALE NOTE / OBSERVER", P + 66, noteTop + 30);
+  ctx.font = `400 9px ${EXPORT_MONO}`;
+  ctx.fillStyle = C.faint;
+  ctx.fillText("DEEP TRACE DATA OBSERVER", P + 66, noteTop + 44);
+  y = noteTop + 52;
+  for (const line of noteLines) {
+    paint(`“${line}”`, 12, C.inkSoft, "sans", 400);
+  }
+  y += 4;
+  paint("基于本期使用数据自动生成的风味评论，不影响正式报告结论。", 9, C.faint, "sans", 400);
+  y = noteTop + noteH + 10;
+
+  // ── 02 Findings ──
+  sectionHead("02", "本期发现", "FINDINGS / INVESTIGATION LOG");
+  if (insights.length === 0) {
+    paint("本期没有需要升级处理的异常。PING / OK", 11, C.muted, "sans", 400);
+  }
+  const levelColor: Record<string, string> = { critical: C.red, warning: C.amber, tip: "#16a34a" };
+  const levelLabel: Record<string, string> = { critical: "CRITICAL", warning: "WATCH", tip: "NOTE" };
+  for (const insight of insights) {
+    ctx.fillStyle = levelColor[insight.level] ?? C.blue;
+    ctx.beginPath();
+    ctx.arc(P + 5, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `700 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = levelColor[insight.level] ?? C.blue;
+    ctx.fillText(insightCode(insight), P + 16, y + 9);
+    ctx.fillStyle = C.faint;
+    ctx.fillText(levelLabel[insight.level] ?? "INFO", P + 16 + ctx.measureText(insightCode(insight)).width + 10, y + 9);
+    y += 14;
+    paint(insight.title, 13, C.ink, "sans", 700);
+    paint(insight.detail, 11, C.muted, "sans", 400);
+    paint(`ACTION  ${insight.action}`, 11, C.inkSoft, "sans", 400);
+    const fix = FIX_SUGGESTIONS[insight.id];
+    if (fix !== undefined && fix.command !== undefined) {
+      paint(fix.command, 10, C.inkSoft, "mono", 400);
+    }
+    y += 6;
+  }
+
+  // ── 03 活跃与 Token ──
+  sectionHead("03", "活跃与 Token", `ACTIVITY / NIGHT ${night}%`);
+  paint(`SCAN 00—24 · DEPTH 4,096m · PING OK · NIGHT ${night}%`, 9.5, C.faint, "mono", 400);
+  if (hist.length > activityRows) {
+    right("LAST 7 DAYS", 9.5, C.faint, "mono");
   }
   if (hist.length > 0) {
     const max = Math.max(1, ...hist.flatMap((d) => d.hours));
     for (const day of hist.slice(-activityRows)) {
       for (let h = 0; h < 24; h++) {
         const count = day.hours[h] ?? 0;
-        ctx.fillStyle = count === 0 ? "#f1f5f9" : scanCell(count / max);
-        ctx.fillRect(padding + h * cellW, y, cellW - 2, cellW - 2);
+        if (count === 0) {
+          ctx.fillStyle = "#eef2f5";
+        } else {
+          const boosted = Math.pow(Math.min(1, Math.max(0, count / max)), 0.4);
+          ctx.fillStyle = `rgba(77,107,254,${(0.18 + boosted * 0.82).toFixed(2)})`;
+        }
+        ctx.fillRect(P + h * cellW, y, cellW - 2, cellW - 2);
       }
       y += cellW + 3;
     }
     y += 6;
   }
-  sep();
-  title("模型", 14, navy);
-  for (const [model, u] of modelEntries.slice(0, 5)) {
-    const tot = u.input + u.output + u.cacheRead + u.reasoning;
-    const share = tot / Math.max(1, totalTokens);
-    ctx.fillStyle = blue;
-    ctx.fillRect(padding, y + 4, (W - padding * 2) * share, 8);
-    text(`${model}  ${Math.round(share * 100)}%`, 12, navy);
+  paint(`活跃 ${s.activeDays} 天${s.busiestDay ? ` · 最忙 ${s.busiestDay.date}（${s.busiestDay.events} 条事件）` : ""}`, 11, C.muted, "sans", 400);
+  // TokenBar：input/output/cacheRead/reasoning 四段
+  const segments: [string, number, string][] = [
+    ["INPUT", s.tokens.input, C.blue],
+    ["OUTPUT", s.tokens.output, C.cyan],
+    ["CACHE", s.tokens.cacheRead, "#9aa7ff"],
+    ["REASON", s.tokens.reasoning, "#cdd6ff"],
+  ];
+  const barW = W - P * 2;
+  const barH = 14;
+  let acc = 0;
+  for (const [, value, color] of segments) {
+    const w = totalTokens > 0 ? (value / totalTokens) * barW : 0;
+    ctx.fillStyle = color;
+    ctx.fillRect(P + acc, y, Math.max(w, 2), barH);
+    acc += w;
   }
-  sep();
-  title("会话钻取", 14, navy);
-  for (const sd of sessions.slice(0, 5)) {
-    text(`${sd.title || "（未命名会话）"}  ¥${sd.cost.toFixed(2)}`, 12, navy);
-  }
-  sep();
-  title("危险操作", 14, navy);
-  if (s.dangerousCommands.length === 0) {
-    text("无", 12, gray);
-  } else {
-    for (const d of s.dangerousCommands.slice(0, 5)) {
-      text(`• ${d.command.replace(/\s+/g, " ").slice(0, 44)}`, 12, "#b91c1c");
+  ctx.strokeStyle = C.line;
+  ctx.strokeRect(P, y, barW, barH);
+  y += barH + 6;
+  let legendX = P;
+  let legendY = y;
+  for (const [label, value, color] of segments) {
+    ctx.fillStyle = color;
+    ctx.fillRect(legendX, legendY + 2, 8, 8);
+    ctx.font = `400 9px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.muted;
+    ctx.fillText(`${label} ${fmt(value)}`, legendX + 12, legendY + 10);
+    const step = 12 + ctx.measureText(`${label} ${fmt(value)}`).width + 16;
+    if (legendX + step > W - P) {
+      legendX = P;
+      legendY += 16;
+    } else {
+      legendX += step;
     }
   }
+  y = legendY + 16;
+
+  // ── 04 模型与工具 ──
+  sectionHead("04", "模型与工具", "MODEL / TOOL / PLUGINS");
+  for (const [model, u] of modelEntries) {
+    const share = totalTokens > 0 ? tot(u) / totalTokens : 0;
+    ctx.fillStyle = C.line;
+    ctx.fillRect(P, y + 4, barW, 8);
+    ctx.fillStyle = C.blue;
+    ctx.fillRect(P, y + 4, barW * share, 8);
+    paint(`${model}  ${Math.round(share * 100)}%  ${fmt(tot(u))} tok`, 12, C.ink, "sans", 600);
+  }
+  if (families.length > 0) {
+    paint(families.map((f) => `${f.family} × ${f.count}`).join(" · "), 10, C.muted, "sans", 400);
+  }
+  paint(`TOOL CALL · TOP ${toolEntries.length}`, 9, C.faint, "mono", 400);
+  const toolTotal = Math.max(1, s.toolCallsTotal);
+  toolEntries.forEach(([name, count], i) => {
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(String(i + 1).padStart(2, "0"), P, y + 10);
+    paint(`${name}`, 11, C.inkSoft, "sans", 400, W - P * 2 - 120);
+    right(`${Math.round((count / toolTotal) * 100)}% · ${count}`, 10, C.muted, "mono");
+  });
+
+  // ── 05 风险扫描 ──
+  sectionHead("05", "风险扫描", "RISK / READ ONLY");
+  for (const d of danger) {
+    ctx.fillStyle = d.sev === "red" ? C.red : C.amber;
+    ctx.beginPath();
+    ctx.arc(P + 5, y + 5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `700 9.5px ${EXPORT_MONO}`;
+    ctx.fillStyle = d.sev === "red" ? C.red : C.amber;
+    ctx.fillText(d.label ?? "未分类", P + 16, y + 9);
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.inkSoft;
+    ctx.fillText(ellipsis(d.command.replace(/\s+/g, " ").slice(0, 56), W - P * 2 - 190, 10), P + 16 + 110, y + 9);
+    ctx.font = `400 9px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(timeStr(d.time), W - P - 90, y + 9);
+    y += 21;
+  }
+  if (danger.length === 0) {
+    paint("本期未检测到危险操作。PING / OK", 11, C.muted, "sans", 400);
+  }
+  paint("RETRY DIAGNOSE", 9, C.faint, "mono", 400);
+  if (bursts.length > 0) {
+    for (const b of bursts) {
+      ctx.font = `400 10px ${EXPORT_MONO}`;
+      ctx.fillStyle = C.inkSoft;
+      ctx.fillText(ellipsis(b.cmd.replace(/\s+/g, " ").slice(0, 44), W - P * 2 - 180, 10), P, y + 10);
+      ctx.fillStyle = C.muted;
+      ctx.fillText(`× ${b.count} · ${timeStr(b.time)}`, W - P - 100, y + 10);
+      if (b.error !== undefined && b.error !== "") {
+        ctx.fillStyle = C.faint;
+        ctx.fillText(ellipsis(b.error.slice(0, 40), 300, 9), P + 140, y + 10);
+      }
+      y += 19;
+    }
+  } else {
+    paint("未检测到重试风暴。", 10, C.muted, "sans", 400);
+  }
+  if (secretCounts.size > 0) {
+    ctx.font = `700 9.5px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.red;
+    ctx.fillText(`SECRET SCAN · ${secretHits.length} HIT`, P, y + 10);
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.muted;
+    ctx.fillText(
+      [...secretCounts.entries()].map(([label, n]) => `${label} × ${n}`).join(" · "),
+      P + 150,
+      y + 10,
+    );
+    y += 16;
+    paint("只记录存在性，不展示原文。请尽快轮换对应密钥。", 9, C.faint, "sans", 400);
+  } else {
+    ctx.font = `700 9.5px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.safe;
+    ctx.fillText("SECRET SCAN · CLEAR", P, y + 10);
+    ctx.fillStyle = C.faint;
+    ctx.fillText("CONTENT NEVER REPRINTED", W - P - 20, y + 10, );
+    y += 18;
+  }
+
+  // ── 06 会话轨迹 ──
+  sectionHead("06", "会话轨迹", `TRACE LOG / ${sessions.length} TARGETS`);
+  for (let i = 0; i < sessions.length; i++) {
+    const sd = sessions[i];
+    const share = resolvedTotal > 0 ? Math.round((sd.cost / resolvedTotal) * 100) : 0;
+    ctx.font = `400 10px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(`T-${String(i + 1).padStart(2, "0")}`, P, y + 12);
+    ctx.font = `600 12px ${EXPORT_SANS}`;
+    ctx.fillStyle = C.ink;
+    ctx.fillText(ellipsis(sd.title || "（未命名会话）", W - P * 2 - 260, 12), P + 40, y + 12);
+    let badgeX = P + 40 + ctx.measureText(ellipsis(sd.title || "", W - P * 2 - 260, 12)).width + 10;
+    const badge = (text: string, color: string) => {
+      ctx.font = `700 8.5px ${EXPORT_MONO}`;
+      ctx.fillStyle = color;
+      ctx.fillText(text, badgeX, y + 11);
+      badgeX += ctx.measureText(text).width + 8;
+    };
+    if (sd.redDanger > 0) badge(`${sd.redDanger} 致命`, C.red);
+    if (sd.retryBursts > 0) badge(`${sd.retryBursts} 重试`, C.amber);
+    if (sd.toolCalls > 0) badge(`${sd.toolCalls} tools`, C.faint);
+    ctx.font = `700 12px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.ink;
+    ctx.fillText(`¥${sd.cost.toFixed(2)}`, W - P - 110, y + 12);
+    ctx.font = `400 8.5px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(`${share}% OF PERIOD`, W - P - 110, y + 24);
+    y += 24;
+    const sessionTokens = Object.values(sd.modelTokens ?? {}).reduce(
+      (sum, u) => sum + u.input + u.output + u.cacheRead + u.reasoning,
+      0,
+    );
+    ctx.font = `400 9px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.muted;
+    ctx.fillText(
+      `${new Date(sd.firstTime).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} ~ ${new Date(sd.lastTime).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · ${sd.events} 事件 · ${sd.commands} 命令 · ${sd.toolCalls} 工具${sessionTokens > 0 ? ` · ${fmt(sessionTokens)} token` : ""}`,
+      P + 40,
+      y + 10,
+    );
+    y += 18;
+  }
+  if (sessions.length === 0) {
+    paint("本期无会话级明细（legacy 报告）。", 11, C.muted, "sans", 400);
+  }
+
+  // ── 07 会话索引 ──
+  sectionHead("07", "会话索引", "SESSION INDEX / APPENDIX");
+  titles.forEach((t, i) => {
+    ctx.font = `400 9.5px ${EXPORT_MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(String(i + 1).padStart(2, "0"), P, y + 10);
+    paint(t, 10.5, C.inkSoft, "sans", 400, W - P * 2 - 40);
+  });
+  if (titles.length === 0) {
+    paint("无会话标题索引。", 10, C.muted, "sans", 400);
+  }
+
+  // ── 页脚 ──
   y += 10;
-  text("由深迹 DeepTrace 生成 · 只读", 11, gray);
+  hline(y);
+  y += 12;
+  paint(`BASED ON ${fmt(s.totalEvents)} SESSION EVENTS · READ ONLY · GENERATED ${dateStr(report.createdAt)}`, 9.5, C.faint, "mono", 400);
+
+  // 按实际绘制高度裁剪（预算偏大无妨，绝不裁切内容）。
+  const finalY = Math.ceil(y) + 8;
+  if (finalY * scale < canvas.height) {
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = finalY * scale;
+    const octx = out.getContext("2d");
+    if (octx !== null) {
+      octx.drawImage(canvas, 0, 0);
+      const a = document.createElement("a");
+      a.download = `深迹-${report.preset}-${dateStr(report.to)}.png`;
+      a.href = out.toDataURL("image/png");
+      a.click();
+      return;
+    }
+  }
   const a = document.createElement("a");
   a.download = `深迹-${report.preset}-${dateStr(report.to)}.png`;
   a.href = canvas.toDataURL("image/png");

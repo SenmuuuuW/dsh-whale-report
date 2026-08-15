@@ -80,7 +80,7 @@
 | GET `list` | 历史摘要列表（新到旧） |
 | GET `get?id=` | 单份完整报告 |
 | DELETE 由 POST `delete` 承载 | 删除指定 id |
-| GET `html?id=` | 独立可打印 HTML（导出 PDF） |
+| GET `html?id=` | 独立可打印 HTML（备用分享页；面板 PDF 改走打印） |
 | GET `/whale/assets/*` | 素材白名单路由（assets/whale/，仅允许清单内文件名） |
 
 ## 6. 洞察规则（8 条）
@@ -102,9 +102,9 @@
 
 ## 7. 导出
 
-- **PDF**：`renderHtmlReport` 独立可打印 HTML（A4，`@media print` 分页与断行保护），面板按钮 → 新页 → 浏览器打印另存 PDF。章节：报告头 / 鲸评 / Findings / 活跃+Token / 模型+工具（TOP 10 或 ALL）/ 风险（危险+重试诊断+密钥扫描）/ 会话钻取 / 页脚。
-- **PNG**：`exportReportImage` canvas 零依赖长图。内容：品牌头 / Hero 费用 / 活跃方块（最多最近 7 天，超限标注 LAST 7 DAYS）/ 模型排行 / 会话 Top5 / 危险操作 / 页脚；高度按实际绘制行数精确计算，长文本省略号截断。
-- **重试诊断**：仅存在于导出（PDF 含错误摘要样本，PNG 不含），面板不展示。
+- **PDF**：把面板报告克隆到 body 顶层后 `window.print()`（`@media print` 只显示报告、A4 分页），与面板逐像素一致、数据同源。`/whale/api/html` 独立页路由保留（备用分享页）。
+- **PNG**：`exportReportImage` canvas 按面板同款视觉完整绘制（报告头 / 鲸评 / Findings / 活跃+Token / 模型与工具 / 风险扫描（危险+重试诊断+密钥扫描）/ 会话轨迹 / 会话索引 / 页脚）；数据口径与面板同源（cacheRate/night/delta/鲸评规则同一函数）；高度由 `budgetExportHeight` 随内容预算 + 绘制后按实际高度裁剪，任何周期不裁切；活跃区最多最近 7 天，超限标注 LAST 7 DAYS。
+- **重试诊断**：仅存在于导出（PDF 与 PNG 均含错误摘要样本），面板不展示。
 
 ## 8. 兼容性策略（DSH preview 期生存术）
 
