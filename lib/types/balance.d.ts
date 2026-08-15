@@ -36,6 +36,14 @@ export interface BalanceAdapter {
 }
 /** dotenv 最小解析：读取 <file> 中 <name>=<value>（支持引号包裹）。 */
 export declare function readDotenvKey(filePath: string, name: string): string | null;
+/**
+ * 从 DSH 凭据文件（~/.dsh/.credentials.yaml）读取 key。
+ * 该文件是 DSH 官方凭据源（`.env` 可能是残留/过期值），格式为 YAML：
+ *   { DEEPSEEK_API_KEY: sk-xxx }   （flow style，单行）
+ *   DEEPSEEK_API_KEY: sk-xxx        （block style）
+ * 宽松正则解析，取不带引号的 key 值。
+ */
+export declare function readCredentialsKey(filePath: string, name: string): string | null;
 /** 解析官方 GET /user/balance 响应（金额字段为字符串）。结构不合法返回 null。 */
 export declare function parseDeepSeekBalance(json: unknown): {
     isAvailable: boolean;

@@ -55,6 +55,26 @@ export function readDotenvKey(filePath: string, name: string): string | null {
   }
 }
 
+/**
+ * 从 DSH 凭据文件（~/.dsh/.credentials.yaml）读取 key。
+ * 该文件是 DSH 官方凭据源（`.env` 可能是残留/过期值），格式为 YAML：
+ *   { DEEPSEEK_API_KEY: sk-xxx }   （flow style，单行）
+ *   DEEPSEEK_API_KEY: sk-xxx        （block style）
+ * 宽松正则解析，取不带引号的 key 值。
+ */
+export function readCredentialsKey(filePath: string, name: string): string | null {
+  if (!existsSync(filePath)) return null;
+  try {
+    const raw = readFileSync(filePath, "utf8");
+    const re = new RegExp(`${name}\\s*[:=]\\s*['"]?([A-Za-z0-9._-]{8,})['"]?`);
+    const match = raw.match(re);
+    if (match === null) return null;
+    return match[1] === "" ? null : match[1];
+  } catch {
+    return null;
+  }
+}
+
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 const BALANCE_TIMEOUT_MS = 8000;
 
@@ -66,22 +86,33 @@ export function parseDeepSeekBalance(
   const d = json as Record<string, unknown>;
   if (typeof d.is_available !== "boolean") return null;
   if (!Array.isArray(d.balance_infos) || d.balance_infos.length === 0) return null;
-  const info = d.balance_infos[0] as Record<string, unknown>;
-  if (typeof info !== "object" || info === null) return null;
-  const currency = typeof info.currency === "string" ? info.currency : "CNY";
-  const toNum = (v: unknown): number => (typeof v === "string" ? Number.parseFloat(v) : Number.NaN);
-  const total = toNum(info.total_balance);
-  const granted = toNum(info.granted_balance);
-  const toppedUp = toNum(info.topped_up_balance);
-  if (!Number.isFinite(total)) return null;
-  return {
-    isAvailable: d.is_available,
-    balance: {
+  // 多币种选择：官方可能同时返回 USD/CNY 等多个条目。
+  // 优先 CNY（产品定价口径），其次第一个非零余额，最后第一个条目。
+  const infos = d.balance_infos as Record<string, unknown>[];
+  const pick = (info: Record<string, unknown>): { currency: string; total: number; granted: number; toppedUp: number } | null => {
+    if (typeof info !== "object" || info === null) return null;
+    const currency = typeof info.currency === "string" ? info.currency : "CNY";
+    const toNum = (v: unknown): number => (typeof v === "string" ? Number.parseFloat(v) : Number.NaN);
+    const total = toNum(info.total_balance);
+    const granted = toNum(info.granted_balance);
+    const toppedUp = toNum(info.topped_up_balance);
+    if (!Number.isFinite(total)) return null;
+    return {
       currency,
       total,
       granted: Number.isFinite(granted) ? granted : 0,
       toppedUp: Number.isFinite(toppedUp) ? toppedUp : 0,
-    },
+    };
+  };
+  const parsed = infos.map(pick).filter((p): p is NonNullable<typeof p> => p !== null);
+  if (parsed.length === 0) return null;
+  const info =
+    parsed.find((p) => p.currency === "CNY") ??
+    parsed.find((p) => p.total > 0) ??
+    parsed[0];
+  return {
+    isAvailable: d.is_available,
+    balance: { currency: info.currency, total: info.total, granted: info.granted, toppedUp: info.toppedUp },
   };
 }
 
@@ -89,10 +120,14 @@ export const deepseekAdapter: BalanceAdapter = {
   id: "deepseek",
   name: "DeepSeek",
   readKey() {
-    // DSH 官方配置优先：~/.dsh/.env 的 DEEPSEEK_API_KEY（复用已有配置，不要求用户再输入）。
-    const fromDsh = readDotenvKey(join(homedir(), ".dsh", ".env"), "DEEPSEEK_API_KEY");
+    // DSH 凭据源优先：~/.dsh/.credentials.yaml（官方凭据文件）。
+    // .env 里的 DEEPSEEK_API_KEY 可能是残留/过期值（实测存在 102 字符无效 key），
+    // 所以 .credentials.yaml → .env → 进程环境变量 三级回退。
+    const dshRoot = join(homedir(), ".dsh");
+    const fromCredentials = readCredentialsKey(join(dshRoot, ".credentials.yaml"), "DEEPSEEK_API_KEY");
+    if (fromCredentials !== null) return fromCredentials;
+    const fromDsh = readDotenvKey(join(dshRoot, ".env"), "DEEPSEEK_API_KEY");
     if (fromDsh !== null) return fromDsh;
-    // 兜底：宿主进程环境变量。
     const env = process.env.DEEPSEEK_API_KEY;
     return env !== undefined && env !== "" ? env : null;
   },

@@ -13,6 +13,7 @@ import {
   parseDeepSeekBalance,
   queryBalance,
   clearBalanceCache,
+  readCredentialsKey,
   type BalanceAdapter,
 } from "../src/balance.js";
 
@@ -46,6 +47,52 @@ describe("parseDeepSeekBalance", () => {
     expect(parseDeepSeekBalance({ is_available: true, balance_infos: [{ currency: "CNY" }] })).toBeNull();
     expect(parseDeepSeekBalance("nope")).toBeNull();
     expect(parseDeepSeekBalance(null)).toBeNull();
+  });
+
+  it("多币种时优先 CNY（真实响应：USD 0.00 + CNY 904.47 → 取 CNY）", () => {
+    const parsed = parseDeepSeekBalance({
+      is_available: true,
+      balance_infos: [
+        { currency: "USD", total_balance: "0.00", granted_balance: "0.00", topped_up_balance: "0.00" },
+        { currency: "CNY", total_balance: "904.47", granted_balance: "904.47", topped_up_balance: "0.00" },
+      ],
+    });
+    expect(parsed?.balance).toEqual({ currency: "CNY", total: 904.47, granted: 904.47, toppedUp: 0 });
+  });
+
+  it("无 CNY 时优先非零余额条目", () => {
+    const parsed = parseDeepSeekBalance({
+      is_available: true,
+      balance_infos: [
+        { currency: "USD", total_balance: "0.00", granted_balance: "0.00", topped_up_balance: "0.00" },
+        { currency: "USD", total_balance: "12.50", granted_balance: "0.00", topped_up_balance: "12.50" },
+      ],
+    });
+    expect(parsed?.balance).toEqual({ currency: "USD", total: 12.5, granted: 0, toppedUp: 12.5 });
+  });
+});
+
+describe("readCredentialsKey（DSH 凭据文件）", () => {
+  it("解析 flow / block / export 三种风格", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-balance-"));
+    const file = path.join(dir, ".credentials.yaml");
+    try {
+      fs.writeFileSync(file, "{ DEEPSEEK_API_KEY: sk-ffffffffffffffffffffffffffffffff }");
+      expect(readCredentialsKey(file, "DEEPSEEK_API_KEY")).toBe("sk-ffffffffffffffffffffffffffffffff");
+      fs.writeFileSync(file, 'DEEPSEEK_API_KEY: "sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"');
+      expect(readCredentialsKey(file, "DEEPSEEK_API_KEY")).toBe("sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+      fs.writeFileSync(file, "export DEEPSEEK_API_KEY=sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+      expect(readCredentialsKey(file, "DEEPSEEK_API_KEY")).toBe("sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("文件不存在或未配置时返回 null", () => {
+    expect(readCredentialsKey("/nonexistent/.credentials.yaml", "DEEPSEEK_API_KEY")).toBeNull();
   });
 });
 
