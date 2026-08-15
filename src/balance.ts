@@ -76,7 +76,7 @@ export function readCredentialsKey(filePath: string, name: string): string | nul
 }
 
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
-const BALANCE_TIMEOUT_MS = 8000;
+const BALANCE_TIMEOUT_MS = 12000;
 
 /** 解析官方 GET /user/balance 响应（金额字段为字符串）。结构不合法返回 null。 */
 export function parseDeepSeekBalance(
@@ -194,6 +194,10 @@ export function clearBalanceCache(): void {
   balanceCache.clear();
 }
 
+/** 稳定状态（可缓存 60s）：连接成功 / key 明确无效 / 未配置。
+ *  瞬时错误（timeout/unavailable/error）不缓存——网络抖动不该让面板长期显示过期错误。 */
+const STABLE_STATUSES: readonly BalanceStatus[] = ["connected", "invalid-key", "unavailable"];
+
 /** 查询入口：缓存命中直接返回；refresh=true 强制重查（前端"刷新"按钮）。 */
 export async function queryBalance(adapter: BalanceAdapter, refresh = false): Promise<ProviderBalance> {
   if (!refresh) {
@@ -213,6 +217,8 @@ export async function queryBalance(adapter: BalanceAdapter, refresh = false): Pr
     return result;
   }
   const result = await adapter.fetchBalance(key);
-  setCachedBalance(adapter.id, result);
+  if (STABLE_STATUSES.includes(result.status)) {
+    setCachedBalance(adapter.id, result);
+  }
   return result;
 }

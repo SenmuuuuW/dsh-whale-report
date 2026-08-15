@@ -1805,6 +1805,12 @@ function ProviderBalanceCard(): ReactNode {
   useEffect(() => {
     load(false);
   }, []);
+  // 瞬时错误（超时/网络）自动重试一次，避免用户手动点刷新。
+  useEffect(() => {
+    if (data === null || data.status === "connected" || data.status === "invalid-key" || data.status === "unavailable") return;
+    const timer = window.setTimeout(() => load(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [data]);
   const money = (n: number | undefined): string => (n === undefined ? "—" : `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const liveTime = data !== null ? new Date(data.checkedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "——";
   return (

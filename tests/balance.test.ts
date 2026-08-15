@@ -148,7 +148,7 @@ describe("deepseekAdapter.fetchBalance", () => {
       ),
     );
     const pending = deepseekAdapter.fetchBalance(KEY);
-    vi.advanceTimersByTime(8000);
+    vi.advanceTimersByTime(12000);
     const result = await pending;
     expect(result.status).toBe("timeout");
     expect(JSON.stringify(result)).not.toContain(KEY);
