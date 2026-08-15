@@ -99,7 +99,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 10;
+export const INDEX_VERSION = 11;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -194,12 +194,24 @@ export async function warmIndex(svc: ReportServices): Promise<void> {
 }
 
 /** 一次完整生成：统计 + 费用 + 基线对比 + 洞察。工具与 API 共用同一管线。 */
+/** 生成本报告消耗：mode=local 表示纯本地确定性生成（0 token）；未来若接入模型渲染再扩展。 */
+export interface ReportGenerationMeta {
+  mode: "local" | "model";
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  totalTokens: number;
+  estimatedCostCny: number;
+  model?: string;
+}
+
 export interface ReportGeneration {
   stats: ReturnType<typeof collectEvents> extends Promise<infer S> ? S : never;
   cost: CostBreakdown;
   key: string;
   prev: PeriodStatsRecord | null;
   insights: Insight[];
+  reportGeneration: ReportGenerationMeta;
 }
 
 export async function generateReportData(
@@ -225,7 +237,17 @@ export async function generateReportData(
   const prevKey = previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
   const insights = computeInsights({ stats, prev: prev ?? undefined, cost });
-  return { stats, cost, key, prev, insights };
+  // 生成本报告消耗：DeepTrace 的 stats → insights → 鲸评 → 导出全为本地确定性代码，
+  // 不调用任何模型 API —— 报告生成本身消耗 0 token（这是产品事实，不是估算）。
+  const reportGeneration = {
+    mode: "local" as const,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheTokens: 0,
+    totalTokens: 0,
+    estimatedCostCny: 0,
+  };
+  return { stats, cost, key, prev, insights, reportGeneration };
 }
 
 export function toPeriodRecord(

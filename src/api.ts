@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { periodKey } from "./insights.js";
 import { computeCost } from "./pricing.js";
 import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
+import { adapterOf, queryBalance } from "./balance.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -111,6 +112,7 @@ async function generateReport(
     markdown,
     cost,
     insights: gen.insights,
+    reportGeneration: gen.reportGeneration,
     prev: gen.prev
       ? {
           key: gen.prev.key,
@@ -189,6 +191,34 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
           const method = pathname.startsWith("/whale/api/") ? pathname.slice("/whale/api/".length) : "";
           const table = svc.domain.table("reports");
           try {
+            if (req.method === "GET" && method === "balance") {
+              // Provider 余额：服务端发起的只读探针。key 永不出宿主进程。
+              const url = new URL(req.url ?? "/", "http://dsh.internal");
+              const provider = url.searchParams.get("provider") ?? "deepseek";
+              const refresh = url.searchParams.get("refresh") === "1";
+              const adapter = adapterOf(provider);
+              if (adapter === undefined) {
+                writeJson(res, 404, { ok: false, error: { code: "unknown-provider", message: `未知 provider ${provider}` } });
+                return;
+              }
+              try {
+                const balance = await queryBalance(adapter, refresh);
+                writeJson(res, 200, { ok: true, balance });
+              } catch {
+                // 余额查询失败绝不影响报告链路：返回不可用态而不是 500。
+                writeJson(res, 200, {
+                  ok: true,
+                  balance: {
+                    provider: adapter.id,
+                    name: adapter.name,
+                    status: "unavailable",
+                    checkedAt: Date.now(),
+                    error: "PROVIDER FAILURE",
+                  },
+                });
+              }
+              return;
+            }
             if (req.method === "GET" && method === "list") {
               const items = [...table.entries()]
                 .map(([, record]) => ({
@@ -261,6 +291,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
                   cost: gen.cost,
                   insights: gen.insights,
+                  reportGeneration: gen.reportGeneration,
                   prev: gen.prev
                     ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
                     : undefined,
@@ -304,6 +335,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
                 cost: gen.cost,
                 insights: gen.insights,
+                reportGeneration: gen.reportGeneration,
                 prev: gen.prev
                   ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
                   : undefined,

@@ -38,6 +38,15 @@ interface ReportFull extends ReportMeta {
     };
     insights?: InsightJson[];
     prev?: PrevSummary;
+    reportGeneration?: {
+        mode: "local" | "model";
+        inputTokens: number;
+        outputTokens: number;
+        cacheTokens: number;
+        totalTokens: number;
+        estimatedCostCny: number;
+        model?: string;
+    };
 }
 interface StatsJson {
     period: {
@@ -105,6 +114,13 @@ interface StatsJson {
         sessionId?: string;
     }[];
     plugins?: string[];
+    collab?: {
+        userMessages: number;
+        revisions: number;
+        lateConstraints: number;
+        sessionsWithRevision: number;
+        shortSessions: number;
+    };
     sessionsDetail?: {
         sessionId: string;
         title: string;

@@ -56,6 +56,14 @@ export interface SessionDetail {
   modelTokens: Record<string, ModelUsage>;
   /** 折算费用（CNY；生成管线填充）。 */
   cost: number;
+  /** 回合数（协作复盘用）。 */
+  turns: number;
+  /** 用户消息数（协作复盘用）。 */
+  userMessages: number;
+  /** 方向修正信号（协作复盘用）。 */
+  collabRevisions: number;
+  /** 迟到约束信号（协作复盘用）。 */
+  collabLateConstraints: number;
 }
 
 export interface ModelUsage {
@@ -111,6 +119,8 @@ export interface ReportStats {
   secretHits: { label: string; time: number; source: "user" | "tool"; sessionId: string }[];
   /** 会话级钻取明细（按费用排序，生成管线填充 cost）。 */
   sessionsDetail: SessionDetail[];
+  /** 协作信号（协作复盘用；确定性规则，不改任何既有口径）。 */
+  collab: CollabSignals;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -143,6 +153,52 @@ function textOfUserMessage(data: Record<string, unknown> | undefined): string[] 
     }
   }
   return texts;
+}
+
+/**
+ * 协作信号检测（确定性、无 LLM）：从单条用户消息文本判断两类协作信号。
+ * 词表保守，宁可少报也不误伤；只用于「协作复盘」的观察性指标，不评价人格。
+ */
+const REVISION_PATTERNS = [
+  /不是这个/, /换一个/, /换种/, /再改/, /重新来/, /重新做/, /重新写/, /重做/, /改成/, /改为/,
+  /不对/, /错了/, /不要这个/, /推翻/, /不要那样/, /这样不行/, /不行，/, /换个/, /换一下/,
+  /重新开始/, /别这样/, /删掉重来/, /不是要/, /搞错了/, /理解错了/, /方向不对/,
+  // 注意：重试语境（"再试一次 / 再来一次 / 重跑"）不是方向修正，故意不收录。
+];
+const CONSTRAINT_PATTERNS = [
+  /千万不要/, /必须注意/, /务必/, /只允许/, /不允许/, /禁止/, /千万别/, /确保/, /前提是/, /限制为/,
+  /只能在/, /仅限于/, /一定要/, /无论如何都不要/, /绝不要/,
+  // 强约束主模式：单字"必须"与"不要<动词>"结构（"不要紧"等非约束用法不匹配）。
+  /必须/, /不要写/, /不要改/, /不要删/, /不要动/, /不要用/, /不要碰/, /不要跑/, /不要执行/,
+  /不要乱/, /不要随便/, /保持/, /只能是/, /只能写/, /只能读/,
+];
+
+export interface UserMessageSignals {
+  /** 方向修正 / 需求反复信号（推翻、换一个、再改……）。 */
+  revision: boolean;
+  /** 新约束补充信号（执行中途追加的强约束性要求）。 */
+  constraint: boolean;
+}
+
+export function userMessageSignals(text: string): UserMessageSignals {
+  return {
+    revision: REVISION_PATTERNS.some((re) => re.test(text)),
+    constraint: CONSTRAINT_PATTERNS.some((re) => re.test(text)),
+  };
+}
+
+/** 协作信号聚合（报告级）。 */
+export interface CollabSignals {
+  /** 用户消息总数。 */
+  userMessages: number;
+  /** 方向修正信号总数。 */
+  revisions: number;
+  /** 迟到约束信号总数（首条用户消息之后的约束性补充）。 */
+  lateConstraints: number;
+  /** 出现过 ≥1 次方向修正的会话数。 */
+  sessionsWithRevision: number;
+  /** 短会话数（≤2 回合）。 */
+  shortSessions: number;
 }
 
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
@@ -194,6 +250,7 @@ export function emptyStats(period: Period): ReportStats {
     burstSamples: [],
     secretHits: [],
     sessionsDetail: [],
+    collab: { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 },
   };
 }
 
@@ -279,12 +336,16 @@ export function aggregate(
     redDanger: number;
     modelTokens: Record<string, ModelUsage>;
     title: string;
+    turns: number;
+    userMessages: number;
+    collabRevisions: number;
+    collabLateConstraints: number;
   }>();
   const sessionTitle = new Map<string, string>();
   const aggOf = (sid: string, time: number) => {
     let a = sessionAgg.get(sid);
     if (a === undefined) {
-      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "", turns: 0, userMessages: 0, collabRevisions: 0, collabLateConstraints: 0 };
       sessionAgg.set(sid, a);
     }
     return a;
@@ -332,18 +393,30 @@ export function aggregate(
     switch (event.type) {
       case "turn/start":
         stats.turns += 1;
+        aggOf(sessionId, event.time).turns += 1;
         break;
       case "step/start":
         stats.steps += 1;
         break;
       case "user/message": {
         stats.userMessages += 1;
+        const uagg = aggOf(sessionId, event.time);
+        uagg.userMessages += 1;
         for (const text of textOfUserMessage(data)) {
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(text)) {
               stats.secretHits.push({ label, time: event.time, source: "user", sessionId });
               break;
             }
+          }
+          const signals = userMessageSignals(text);
+          if (signals.revision) {
+            uagg.collabRevisions += 1;
+            stats.collab.revisions += 1;
+          }
+          if (signals.constraint && uagg.userMessages > 1) {
+            uagg.collabLateConstraints += 1;
+            stats.collab.lateConstraints += 1;
           }
         }
         break;
@@ -483,7 +556,11 @@ export function aggregate(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  let sessionsWithRevision = 0;
+  let shortSessions = 0;
   for (const [sid, a] of sessionAgg) {
+    if (a.collabRevisions > 0) sessionsWithRevision += 1;
+    if (a.turns > 0 && a.turns <= 2) shortSessions += 1;
     stats.sessionsDetail.push({
       sessionId: sid,
       title: sessionTitle.get(sid) ?? "",
@@ -497,8 +574,19 @@ export function aggregate(
       redDanger: a.redDanger,
       modelTokens: a.modelTokens,
       cost: 0,
+      turns: a.turns,
+      userMessages: a.userMessages,
+      collabRevisions: a.collabRevisions,
+      collabLateConstraints: a.collabLateConstraints,
     });
   }
+  stats.collab = {
+    userMessages: stats.userMessages,
+    revisions: stats.collab.revisions,
+    lateConstraints: stats.collab.lateConstraints,
+    sessionsWithRevision,
+    shortSessions,
+  };
 
   return stats;
 }
@@ -559,6 +647,8 @@ export interface HourBucket {
   burstSamples: { cmd: string; count: number; time: number; error?: string; sessionId: string }[];
   /** 疑似密钥命中（只存标签与时间）。 */
   secretHits: { label: string; time: number; source: "user" | "tool"; sessionId: string }[];
+  /** 协作信号（确定性词表检测；协作复盘用）。 */
+  collab: { revisions: number; lateConstraints: number };
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -590,6 +680,7 @@ function newBucket(h: number): HourBucket {
     retryBursts: 0,
     burstSamples: [],
     secretHits: [],
+    collab: { revisions: 0, lateConstraints: 0 },
   };
 }
 
@@ -615,6 +706,8 @@ export function bucketizeOwnEvents(
   let commandStreak = 0;
   let burstStart = 0;
   let lastError: string | undefined;
+  // 协作信号：该会话已出现的用户消息数（首条消息内的约束不算"迟到"）。
+  const sessionUserMsgs = new Map<string, number>();
   for (const event of events) {
     if (event.seq < ownStart) continue;
     if (stopAfter !== undefined && event.time >= stopAfter) break;
@@ -638,6 +731,8 @@ export function bucketizeOwnEvents(
         break;
       case "user/message": {
         bucket.userMessages += 1;
+        const seen = sessionUserMsgs.get(sessionId) ?? 0;
+        sessionUserMsgs.set(sessionId, seen + 1);
         for (const text of textOfUserMessage(data)) {
           for (const { pattern, label } of SECRET_PATTERNS) {
             if (pattern.test(text)) {
@@ -645,6 +740,10 @@ export function bucketizeOwnEvents(
               break;
             }
           }
+          const signals = userMessageSignals(text);
+          if (signals.revision) bucket.collab.revisions += 1;
+          // 首条用户消息里的约束是初始需求；后续消息里的约束才是"迟到补充"。
+          if (signals.constraint && seen > 0) bucket.collab.lateConstraints += 1;
         }
         break;
       }
@@ -780,12 +879,16 @@ export function aggregateBuckets(
     redDanger: number;
     modelTokens: Record<string, ModelUsage>;
     title: string;
+    turns: number;
+    userMessages: number;
+    collabRevisions: number;
+    collabLateConstraints: number;
   }>();
   const sessionTitle = new Map<string, string>();
   const aggOf = (sid: string, time: number) => {
     let a = sessionAgg.get(sid);
     if (a === undefined) {
-      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      a = { firstTime: time, lastTime: time, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "", turns: 0, userMessages: 0, collabRevisions: 0, collabLateConstraints: 0 };
       sessionAgg.set(sid, a);
     }
     return a;
@@ -796,7 +899,7 @@ export function aggregateBuckets(
     seenSessions.add(view.sessionId);
     let agg = sessionAgg.get(view.sessionId);
     if (agg === undefined) {
-      agg = { firstTime: Infinity, lastTime: 0, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "" };
+      agg = { firstTime: Infinity, lastTime: 0, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "", turns: 0, userMessages: 0, collabRevisions: 0, collabLateConstraints: 0 };
       sessionAgg.set(view.sessionId, agg);
     }
     for (const bucket of view.buckets) {
@@ -891,8 +994,12 @@ export function aggregateBuckets(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  let sessionsWithRevision = 0;
+  let shortSessions = 0;
   for (const [sid, a] of sessionAgg) {
     const view = views.find((v) => v.sessionId === sid);
+    if (a.collabRevisions > 0) sessionsWithRevision += 1;
+    if (a.turns > 0 && a.turns <= 2) shortSessions += 1;
     stats.sessionsDetail.push({
       sessionId: sid,
       title: view?.titles[0] ?? "",
@@ -906,7 +1013,18 @@ export function aggregateBuckets(
       redDanger: a.redDanger,
       modelTokens: a.modelTokens,
       cost: 0,
+      turns: a.turns,
+      userMessages: a.userMessages,
+      collabRevisions: a.collabRevisions,
+      collabLateConstraints: a.collabLateConstraints,
     });
   }
+  stats.collab = {
+    userMessages: stats.userMessages,
+    revisions: stats.collab.revisions,
+    lateConstraints: stats.collab.lateConstraints,
+    sessionsWithRevision,
+    shortSessions,
+  };
   return stats;
 }

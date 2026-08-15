@@ -30,6 +30,8 @@ export const ReportRecordSchema = z.object({
   cost: z.unknown().optional(),
   /** 洞察卡片（Insight[]；旧记录可缺省）。 */
   insights: z.unknown().optional(),
+  /** 生成本报告消耗（mode=local 时全 0；旧记录可缺省）。 */
+  reportGeneration: z.unknown().optional(),
   /** 上一周期对比摘要（用于展示涨跌；旧记录可缺省）。 */
   prev: z.unknown().optional(),
 });

@@ -10,6 +10,7 @@ import type { ReportRecord } from "./state.js";
 import type { ReportStats, SessionDetail } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
 import { whaleMood } from "./whale-notes.js";
+import { computeCollaborationInsights } from "./collaboration.js";
 
 function esc(text: string): string {
   return text
@@ -295,6 +296,39 @@ function sessionTokenTotal(session: SessionDetail): number {
     (total, usage) => total + usage.input + usage.output + usage.cacheRead + usage.reasoning,
     0,
   );
+}
+
+/** 协作复盘章节：确定性规则，样本不足时整章不渲染。 */
+/** 生成本报告消耗（旧记录缺省；结构宽松防御）。 */
+interface ReportGenerationMetaLike {
+  mode: "local" | "model";
+  totalTokens: number;
+  model?: string;
+}
+
+function collabHtml(record: ReportRecord): string {
+  const stats = record.stats as unknown as ReportStats;
+  const collab = stats.collab;
+  if (collab === undefined) return "";
+  const insights = computeCollaborationInsights({ ...collab, sessions: stats.sessions });
+  if (insights.length === 0) return "";
+  const rows = insights
+    .map(
+      (item) => `<div class="collab-row">
+        <span class="collab-code">${esc(item.code)}</span>
+        <h3>${esc(item.title)}</h3>
+        <p>${esc(item.observation)}</p>
+        <p class="collab-tip"><b>建议</b> ${esc(item.suggestion)}</p>
+      </div>`,
+    )
+    .join("");
+  return `<section class="chapter">
+    <div class="chapter-label"><span>02 / COLLAB</span><b>协作复盘</b><small>HUMAN × HARNESS<br>COLLABORATION<br>REVIEW</small></div>
+    <div class="chapter-content">
+      <div class="chapter-intro"><h2>Work<br>together.</h2><p>观察人机协作模式，找可能的摩擦，给可以尝试的优化——不评价人格，不归因单方。</p></div>
+      ${rows}
+    </div>
+  </section>`;
 }
 
 function traceLogHtml(stats: ReportStats, cost?: CostBreakdown): string {
@@ -594,8 +628,10 @@ export function renderHtmlReport(record: ReportRecord): string {
     </div>
   </section>
 
+  ${collabHtml(record)}
+
   <section class="chapter">
-    <div class="chapter-label"><span>02 / ACTIVITY</span><b>活跃轨迹</b><small>SONAR<br>SCAN LOG<br>UTC+08</small></div>
+    <div class="chapter-label"><span>03 / ACTIVITY</span><b>活跃轨迹</b><small>SONAR<br>SCAN LOG<br>UTC+08</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Agent<br>trajectory.</h2><p>${stats.activeDays} 个活跃日 · 峰值 ${stats.busiestDay === null ? "—" : `${esc(stats.busiestDay.date)} / ${stats.busiestDay.events} events`} · 深夜 ${nightRatio(stats)}%</p></div>
       ${gridHtml(stats)}
@@ -605,7 +641,7 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>03 / RESOURCES</span><b>模型与工具</b><small>MODEL<br>TOOL CALL<br>/think</small></div>
+    <div class="chapter-label"><span>04 / RESOURCES</span><b>模型与工具</b><small>MODEL<br>TOOL CALL<br>/think</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Dive<br>profile.</h2><p>模型、Token 与工具调用按同一周期口径汇总；费用仅作观察，不替代平台账单。</p></div>
       <div class="resource-grid">
@@ -616,7 +652,7 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>04 / RISKS</span><b>风险记录</b><small>READ ONLY<br>NO SECRET<br>CONTENT</small></div>
+    <div class="chapter-label"><span>05 / RISKS</span><b>风险记录</b><small>READ ONLY<br>NO SECRET<br>CONTENT</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Check before<br>you dive.</h2><p>只记录危险模式与疑似密钥的存在性；不会在报告中复现敏感信息原文。</p></div>
       <div class="risk-grid">${dangerHtml(stats)}${retryDiagnoseHtml(stats)}</div>
@@ -625,14 +661,22 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>05 / TRACE LOG</span><b>会话钻取</b><small>SESSION<br>INVESTIGATION<br>TARGET</small></div>
+    <div class="chapter-label"><span>06 / TRACE LOG</span><b>会话钻取</b><small>SESSION<br>INVESTIGATION<br>TARGET</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Follow the<br>trace.</h2><p>按费用排序的会话级轨迹。成本、重试与危险信号在同一行对齐，便于回到原会话复盘。</p></div>
       ${traceLogHtml(stats, cost)}
     </div>
   </section>
 
-  <footer class="report-foot"><span><b>深迹 DeepTrace</b> · YOUR AGENT, IN NUMBERS.</span><span>${stats.totalEvents} EVENTS · READ ONLY · GENERATED ${dateStr(record.createdAt)}</span></footer>
+  <footer class="report-foot">
+    <span><b>深迹 DeepTrace</b> · YOUR AGENT, IN NUMBERS.</span>
+    <span>${(() => {
+      const gen = record.reportGeneration as ReportGenerationMetaLike | undefined;
+      return gen === undefined
+        ? `${stats.totalEvents} EVENTS · READ ONLY · GENERATED ${dateStr(record.createdAt)}`
+        : `REPORT GENERATION ${gen.totalTokens} TOKENS · ${gen.mode === "local" ? "LOCAL DETERMINISTIC" : `MODEL${gen.model !== undefined ? ` ${gen.model}` : ""}`} · ${stats.totalEvents} EVENTS · READ ONLY`;
+    })()}</span>
+  </footer>
 </main>
 </body>
 </html>`;

@@ -12,9 +12,10 @@
  * cordis 客户端内核负责装配；betterSidebar 服务用惰性注入消费
  * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
-import { Component, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
+import { Component, useEffect, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
 import { toolFamilies } from "../insights.js";
 import { triggerNotes, whaleMood } from "../whale-notes.js";
+import { computeCollaborationInsights } from "../collaboration.js";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -737,6 +738,42 @@ const CSS = `
   }
 }
 
+/* ── Provider Balance：live instrumentation module ── */
+[data-whale-report-balance] {
+  margin: 0 0 14px; padding: 10px 14px 9px;
+  border: 1px solid var(--dt-line); border-radius: 10px;
+  background: var(--dt-paper-deep);
+}
+[data-whale-report-balancehead] { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+[data-whale-report-balancelabel] { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); letter-spacing: .1em; }
+[data-whale-report-balancename] { font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-blue); }
+[data-whale-report-balancestatus] { font: 400 9px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-muted); }
+[data-whale-report-balanceval] { font: 700 26px var(--dt-sans, ui-sans-serif, system-ui, sans-serif); color: var(--dt-ink); margin-top: 3px; }
+[data-whale-report-balanceval] small { font: 400 10px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-left: 8px; }
+[data-whale-report-balancebreak] { font: 400 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-muted); margin-top: 2px; }
+[data-whale-report-balancefoot] {
+  display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; padding-top: 6px;
+  border-top: 1px dashed var(--dt-line); font: 400 8.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint);
+}
+[data-whale-report-balancebtn] {
+  background: transparent; border: 1px solid var(--dt-line-strong); border-radius: 6px;
+  padding: 2px 9px; font: 600 10px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink-soft); cursor: pointer;
+}
+[data-whale-report-balancebtn]:hover { border-color: var(--dt-blue); color: var(--dt-blue); }
+[data-whale-report-balancebtn]:disabled { opacity: .5; cursor: default; }
+[data-whale-report-balancebtn][data-live="true"] { border-color: var(--dt-blue); color: var(--dt-blue); }
+
+/* ── 协作复盘章节行 ── */
+[data-whale-report-collab] { border-left: 2px solid var(--dt-cyan); padding-left: 12px; margin: 10px 0; }
+[data-whale-report-collabcode] { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-cyan); letter-spacing: .08em; }
+[data-whale-report-collabtitle] { font: 600 12.5px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink); margin-top: 2px; }
+[data-whale-report-collabobs] { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--dt-muted); margin-top: 2px; }
+[data-whale-report-collabtip] { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink-soft); margin-top: 2px; }
+[data-whale-report-collabtip] b { color: var(--dt-blue); font-weight: 700; }
+
+/* ── 报告 footer 元数据 ── */
+[data-whale-report-repmeta] { font: 400 9px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-top: 14px; }
+
 /* 打印 = 面板报告（克隆到 body 顶层后 window.print）：
  * body 其它直接子级全部隐藏（不占位、无空白页），报告独占 A4。 */
 @media print {
@@ -802,6 +839,7 @@ interface ReportFull extends ReportMeta {
   cost?: { perModel: Record<string, number>; total: number; currency: string; source: string };
   insights?: InsightJson[];
   prev?: PrevSummary;
+  reportGeneration?: { mode: "local" | "model"; inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number; estimatedCostCny: number; model?: string };
 }
 
 interface StatsJson {
@@ -831,6 +869,7 @@ interface StatsJson {
   burstSamples?: { cmd: string; count: number; time: number; error?: string; sessionId?: string }[];
   secretHits?: { label: string; time: number; source: string; sessionId?: string }[];
   plugins?: string[];
+  collab?: { userMessages: number; revisions: number; lateConstraints: number; sessionsWithRevision: number; shortSessions: number };
   sessionsDetail?: {
     sessionId: string;
     title: string;
@@ -1355,8 +1394,28 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           : <div data-whale-report-tokenline>本期没有需要升级处理的异常。PING / OK</div>}
       </section>
 
+      {(() => {
+        const collab = report.stats.collab !== undefined
+          ? computeCollaborationInsights({ ...report.stats.collab, sessions: report.stats.sessions })
+          : [];
+        if (collab.length === 0) return null;
+        return (
+          <section data-whale-report-reportsection>
+            <SectionHeader index="03" title="协作复盘" meta="HUMAN × HARNESS / COLLABORATION REVIEW" />
+            {collab.map((item) => (
+              <div key={item.code} data-whale-report-collab>
+                <div data-whale-report-collabcode>{item.code}</div>
+                <div data-whale-report-collabtitle>{item.title}</div>
+                <div data-whale-report-collabobs>观察：{item.observation}</div>
+                <div data-whale-report-collabtip><b>建议</b>：{item.suggestion}</div>
+              </div>
+            ))}
+          </section>
+        );
+      })()}
+
       <section data-whale-report-reportsection>
-        <SectionHeader index="03" title="活跃与 Token" meta={`ACTIVITY / NIGHT ${night}%`} />
+        <SectionHeader index="04" title="活跃与 Token" meta={`ACTIVITY / NIGHT ${night}%`} />
         <div data-whale-report-reportgrid>
           <div data-whale-report-subsection data-whale-report-zone>
             <div data-whale-report-scanmeta>
@@ -1379,7 +1438,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       </section>
 
       <section data-whale-report-reportsection>
-        <SectionHeader index="04" title="模型与工具" meta="ALLOCATION / INSTRUMENTATION" />
+        <SectionHeader index="05" title="模型与工具" meta="ALLOCATION / INSTRUMENTATION" />
         <div data-whale-report-reportgrid="equal">
           <div data-whale-report-subsection>
             <div data-whale-report-h2>MODEL ALLOCATION</div>
@@ -1412,7 +1471,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       </section>
 
       <section data-whale-report-reportsection>
-        <SectionHeader index="05" title="风险扫描" meta="RISKS / SECRET SCAN" />
+        <SectionHeader index="06" title="风险扫描" meta="RISKS / SECRET SCAN" />
         <div data-whale-report-reportgrid="equal">
           <div data-whale-report-risk data-severity={danger.some((d) => d.sev === "red") ? "critical" : "warning"}>
             <div data-whale-report-h2>DANGEROUS OPERATIONS / {danger.length}</div>
@@ -1473,12 +1532,12 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       </section>
 
       {(s.sessionsDetail ?? []).length > 0 && (
-        <SessionDrilldown sessions={s.sessionsDetail ?? []} totalCost={report.cost?.total} index="06" />
+        <SessionDrilldown sessions={s.sessionsDetail ?? []} totalCost={report.cost?.total} index="07" />
       )}
 
       {(s.titles ?? []).length > 0 && (
         <section data-whale-report-reportsection>
-          <SectionHeader index="07" title="会话索引" meta="APPENDIX / TITLES" />
+          <SectionHeader index="08" title="会话索引" meta="APPENDIX / TITLES" />
           <ul data-whale-report-titles>
             {s.titles.slice(0, 8).map((t) => <li key={t}>{t}</li>)}
           </ul>
@@ -1486,6 +1545,12 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
       )}
 
       <div data-whale-report-tokenline style={{ fontSize: 10, marginTop: 34, paddingTop: 12, borderTop: "1px solid var(--dt-line)" }} className="muted">
+        {report.reportGeneration !== undefined && (
+          <div data-whale-report-repmeta>
+            REPORT GENERATION · {fmt(report.reportGeneration.totalTokens)} TOKENS ·{" "}
+            {report.reportGeneration.mode === "local" ? "LOCAL DETERMINISTIC" : `MODEL${report.reportGeneration.model !== undefined ? ` · ${report.reportGeneration.model}` : ""}`}
+          </div>
+        )}
         BASED ON {s.totalEvents} SESSION EVENTS · READ ONLY · GENERATED {dateStr(report.createdAt)}
       </div>
     </div>
@@ -1704,6 +1769,85 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   }
 }
 
+/** Provider Balance：模型平台余额（live instrumentation module）。
+ * 服务端只读探针：key 永不出宿主进程；余额查询失败绝不影响报告加载。 */
+interface BalanceJson {
+  provider: string;
+  name: string;
+  status: "connected" | "invalid-key" | "timeout" | "unavailable" | "error";
+  balance?: { currency: string; total: number; granted: number; toppedUp: number };
+  isAvailable?: boolean;
+  checkedAt: number;
+  error?: string;
+}
+
+const BALANCE_STATUS_LABEL: Record<BalanceJson["status"], string> = {
+  connected: "可用",
+  "invalid-key": "密钥无效",
+  timeout: "请求超时",
+  unavailable: "不可用",
+  error: "接口异常",
+};
+
+function ProviderBalanceCard(): ReactNode {
+  const [data, setData] = useState<BalanceJson | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = (refresh: boolean): void => {
+    setLoading(true);
+    fetch(`/whale/api/balance${refresh ? "?refresh=1" : ""}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; balance: BalanceJson }>) : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((json) => setData(json.balance))
+      .catch(() =>
+        setData({ provider: "deepseek", name: "DeepSeek", status: "unavailable", checkedAt: Date.now(), error: "NETWORK" }),
+      )
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => {
+    load(false);
+  }, []);
+  const money = (n: number | undefined): string => (n === undefined ? "—" : `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  const liveTime = data !== null ? new Date(data.checkedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "——";
+  return (
+    <div data-whale-report-balance>
+      <div data-whale-report-balancehead>
+        <span data-whale-report-balancelabel>PROVIDER BALANCE / 模型余额</span>
+        <button
+          data-whale-report-balancebtn
+          data-live={!loading}
+          disabled={loading}
+          onClick={() => load(true)}
+        >
+          {loading ? "检查中…" : "刷新"}
+        </button>
+      </div>
+      <div data-whale-report-balancehead style={{ marginTop: 5 }}>
+        <span data-whale-report-balancename>{data?.name ?? "DeepSeek"}</span>
+        <span data-whale-report-balancestatus>
+          {data === null ? "CONNECTING…" : `${BALANCE_STATUS_LABEL[data.status]} · ${data.status.toUpperCase()}`}
+        </span>
+      </div>
+      {data !== null && data.status === "connected" && data.balance !== undefined ? (
+        <>
+          <div data-whale-report-balanceval>
+            {money(data.balance.total)}<small>{data.balance.currency}{data.isAvailable === false ? " · 余额不足" : ""}</small>
+          </div>
+          <div data-whale-report-balancebreak>
+            充值余额 {money(data.balance.toppedUp)} · 赠送余额 {money(data.balance.granted)}
+          </div>
+        </>
+      ) : (
+        <div data-whale-report-balanceval>
+          —<small>{data === null ? "CONNECTING" : (data.error ?? "UNAVAILABLE")}</small>
+        </div>
+      )}
+      <div data-whale-report-balancefoot>
+        <span>LIVE · {liveTime} · READ ONLY</span>
+        <span>KEY NEVER LEAVES LOCAL HOST</span>
+      </div>
+    </div>
+  );
+}
+
 /** 概览（打开即报告）：Hero 大数字 + 洞察 Feed + 活跃 + 模型。 */
 function Dashboard(props: {
   state: ContentState;
@@ -1776,6 +1920,8 @@ function Dashboard(props: {
           <input type="date" value={to} onChange={(e) => onCustom(from, e.target.value)} />
         </div>
       )}
+
+      <ProviderBalanceCard />
 
       {loading && (
         <div data-whale-report-loadingbar>
@@ -1930,10 +2076,12 @@ export function budgetExportHeight(report: ReportFull, sections: ExportSections 
   let h = P * 2 + 12 + 26 + 34 + 18 + 16 + 44 + statLines * 32 + 14; // 报告头（含 6 统计 2 行）
   h += 10 + 58 + noteLines * 21 + 14 + 10; // 鲸评卡
   h += 18 + 26 + 12 + (insights.length === 0 ? 18 : insights.length * 84) + 10; // 02 Findings
+  const collabShort = computeCollaborationInsights({ ...(s.collab ?? { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 }), sessions: s.sessions });
+  h += collabShort.length > 0 ? 18 + 26 + 12 + collabShort.length * 36 + 8 : 0; // 协作复盘（简短）
   h += 18 + 26 + 12 + 16 + (activityRows > 0 ? activityRows * (cellW + 3) + 6 : 0) + 18 + 26 + 16 + 12; // 03 活跃 + TokenBar
   h += 18 + 26 + 12 + modelEntries.length * 26 + families.length * 18 + 18 + toolEntries.length * 19 + 12; // 04 模型与工具
   h += 18 + 26 + 12 + danger.length * 21 + 18 + (bursts.length > 0 ? bursts.length * 19 : 18) + 18 + 12; // 05 风险
-  h += 26; // 页脚
+  h += 26 + 16; // 页脚（含 REPORT GENERATION 行）
   return Math.min(Math.ceil(h * 1.12) + 140, 32000);
 }
 
@@ -2256,8 +2404,25 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     y += 6;
   }
 
-  // ── 03 活跃与 Token ──
-  sectionHead("03", "活跃与 Token", `ACTIVITY / NIGHT ${night}%`);
+  // ── 协作复盘（简短版：最多 3 条）──
+  const collabShort = computeCollaborationInsights({
+    ...(s.collab ?? { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 }),
+    sessions: s.sessions,
+  });
+  if (collabShort.length > 0) {
+    sectionHead("03", "协作复盘", "HUMAN × HARNESS / COLLABORATION REVIEW");
+    for (const item of collabShort) {
+      ctx.font = `700 9.5px ${EXPORT_MONO}`;
+      ctx.fillStyle = C.cyan;
+      ctx.fillText(item.code, P, y + 10);
+      paint(item.title, 11.5, C.ink, "sans", 600, W - P * 2 - 110);
+      paint(`建议：${item.suggestion}`, 10.5, C.inkSoft, "sans", 400);
+      y += 4;
+    }
+  }
+
+  // ── 04 活跃与 Token ──
+  sectionHead("04", "活跃与 Token", `ACTIVITY / NIGHT ${night}%`);
   paint(`SCAN 00—24 · DEPTH 4,096m · PING OK · NIGHT ${night}%`, 9.5, C.faint, "mono", 400);
   if (hist.length > activityRows) {
     right("LAST 7 DAYS", 9.5, C.faint, "mono");
@@ -2318,7 +2483,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   y = legendY + 16;
 
   // ── 04 模型与工具 ──
-  sectionHead("04", "模型与工具", "MODEL / TOOL / PLUGINS");
+  sectionHead("05", "模型与工具", "MODEL / TOOL / PLUGINS");
   for (const [model, u] of modelEntries) {
     const share = totalTokens > 0 ? tot(u) / totalTokens : 0;
     ctx.fillStyle = C.line;
@@ -2341,7 +2506,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   });
 
   // ── 05 风险扫描 ──
-  sectionHead("05", "风险扫描", "RISK / READ ONLY");
+  sectionHead("06", "风险扫描", "RISK / READ ONLY");
   for (const d of danger) {
     ctx.fillStyle = d.sev === "red" ? C.red : C.amber;
     ctx.beginPath();
@@ -2410,7 +2575,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   y += 14;
   drawStatGrid();
   // ── 06 会话轨迹 ──
-  sectionHead("06", "会话轨迹", `TRACE LOG / ${sessions.length} TARGETS`);
+  sectionHead("07", "会话轨迹", `TRACE LOG / ${sessions.length} TARGETS`);
   for (let i = 0; i < sessions.length; i++) {
     const sd = sessions[i];
     const share = resolvedTotal > 0 ? Math.round((sd.cost / resolvedTotal) * 100) : 0;
@@ -2455,7 +2620,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   }
 
   // ── 07 会话索引 ──
-  sectionHead("07", "会话索引", "SESSION INDEX / APPENDIX");
+  sectionHead("08", "会话索引", "SESSION INDEX / APPENDIX");
   titles.forEach((t, i) => {
     ctx.font = `400 9.5px ${EXPORT_MONO}`;
     ctx.fillStyle = C.faint;
@@ -2472,6 +2637,18 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   y += 10;
   hline(y);
   y += 12;
+  const genMeta = report.reportGeneration as
+    | { mode: "local" | "model"; totalTokens: number; model?: string }
+    | undefined;
+  paint(
+    genMeta === undefined
+      ? "REPORT GENERATION · LOCAL DETERMINISTIC · 0 TOKENS"
+      : `REPORT GENERATION · ${fmt(genMeta.totalTokens)} TOKENS · ${genMeta.mode === "local" ? "LOCAL DETERMINISTIC" : `MODEL${genMeta.model !== undefined ? ` ${genMeta.model}` : ""}`}`,
+    9.5,
+    C.faint,
+    "mono",
+    400,
+  );
   paint(`BASED ON ${fmt(s.totalEvents)} SESSION EVENTS · READ ONLY · GENERATED ${dateStr(report.createdAt)}`, 9.5, C.faint, "mono", 400);
 
   // 按实际绘制高度裁剪（预算偏大无妨，绝不裁切内容）。

@@ -51,6 +51,14 @@ export interface SessionDetail {
     modelTokens: Record<string, ModelUsage>;
     /** 折算费用（CNY；生成管线填充）。 */
     cost: number;
+    /** 回合数（协作复盘用）。 */
+    turns: number;
+    /** 用户消息数（协作复盘用）。 */
+    userMessages: number;
+    /** 方向修正信号（协作复盘用）。 */
+    collabRevisions: number;
+    /** 迟到约束信号（协作复盘用）。 */
+    collabLateConstraints: number;
 }
 export interface ModelUsage {
     input: number;
@@ -130,12 +138,34 @@ export interface ReportStats {
     }[];
     /** 会话级钻取明细（按费用排序，生成管线填充 cost）。 */
     sessionsDetail: SessionDetail[];
+    /** 协作信号（协作复盘用；确定性规则，不改任何既有口径）。 */
+    collab: CollabSignals;
 }
 /** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
 export declare const SECRET_PATTERNS: {
     pattern: RegExp;
     label: string;
 }[];
+export interface UserMessageSignals {
+    /** 方向修正 / 需求反复信号（推翻、换一个、再改……）。 */
+    revision: boolean;
+    /** 新约束补充信号（执行中途追加的强约束性要求）。 */
+    constraint: boolean;
+}
+export declare function userMessageSignals(text: string): UserMessageSignals;
+/** 协作信号聚合（报告级）。 */
+export interface CollabSignals {
+    /** 用户消息总数。 */
+    userMessages: number;
+    /** 方向修正信号总数。 */
+    revisions: number;
+    /** 迟到约束信号总数（首条用户消息之后的约束性补充）。 */
+    lateConstraints: number;
+    /** 出现过 ≥1 次方向修正的会话数。 */
+    sessionsWithRevision: number;
+    /** 短会话数（≤2 回合）。 */
+    shortSessions: number;
+}
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
 export type DangerSeverity = "red" | "amber";
 /**
@@ -210,6 +240,11 @@ export interface HourBucket {
         source: "user" | "tool";
         sessionId: string;
     }[];
+    /** 协作信号（确定性词表检测；协作复盘用）。 */
+    collab: {
+        revisions: number;
+        lateConstraints: number;
+    };
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
