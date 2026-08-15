@@ -25,7 +25,7 @@ const CSS = `
 [data-whale-report-panel] { font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", sans-serif; }
 [data-whale-report-fab] {
   position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
-  width: 48px; height: 48px; border-radius: 12px;
+  width: 52px; height: 52px; border-radius: 12px;
   background: #4d6bfe; color: #fff;
   border: none; cursor: pointer; box-shadow: 0 4px 14px rgba(77,107,254,.35);
   transition: transform .15s ease, background .15s ease;
@@ -33,8 +33,8 @@ const CSS = `
 }
 [data-whale-report-fab]:hover { transform: translateY(-2px); background: #3e5bf5; }
 [data-whale-report-drawer] {
-  position: fixed; top: 0; right: 0; height: 100vh; width: 480px; max-width: 92vw;
-  z-index: 2147482999; background: #f6f7fb; color: #111827;
+  position: fixed; top: 0; right: 0; height: 100vh; width: 520px; max-width: 94vw;
+  z-index: 2147482999; background: #f4f5f9; color: #111827;
   box-shadow: -12px 0 40px rgba(15,23,42,.12);
   display: flex; flex-direction: column;
   transform: translateX(0); transition: transform .22s ease;
@@ -43,170 +43,163 @@ const CSS = `
 [data-whale-report-drawer][hidden] { transform: translateX(100%); pointer-events: none; }
 [data-whale-report-head] {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px; border-bottom: 1px solid #e5e7eb; background: #fff;
+  padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: #fff;
 }
-[data-whale-report-title] { font-size: 15px; font-weight: 700; color: #111827; letter-spacing: .01em; }
-[data-whale-report-close] { background: none; border: none; color: #6b7280; font-size: 16px; cursor: pointer; }
+[data-whale-report-title] { font-size: 16px; font-weight: 700; color: #111827; letter-spacing: .01em; }
+[data-whale-report-close] { background: none; border: none; color: #6b7280; font-size: 18px; cursor: pointer; }
 [data-whale-report-close]:hover { color: #111827; }
-[data-whale-report-tabs] { display: flex; gap: 22px; padding: 0 20px; border-bottom: 1px solid #e5e7eb; background: #fff; }
+[data-whale-report-tabs] { display: flex; gap: 24px; padding: 0 16px; border-bottom: 1px solid #e5e7eb; background: #fff; }
 [data-whale-report-tab] {
-  padding: 13px 2px 11px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+  padding: 13px 2px 11px; font-size: 14px; font-weight: 600; cursor: pointer;
   background: transparent; color: #6b7280; border: none; border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
 [data-whale-report-tab][data-active="true"] { color: #4d6bfe; border-bottom-color: #4d6bfe; }
-[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 16px; background: #f6f7fb; }
-[data-whale-report-chips] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+[data-whale-report-body] { flex: 1; overflow-y: auto; padding: 12px; background: #f4f5f9; }
+[data-whale-report-chips] { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 [data-whale-report-chip] {
-  padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+  padding: 8px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 500; cursor: pointer;
   background: #fff; color: #374151; border: 1px solid #d1d5db;
 }
 [data-whale-report-chip]:hover { border-color: #4d6bfe; color: #4d6bfe; }
 [data-whale-report-chip][data-active="true"] { background: #4d6bfe; border-color: #4d6bfe; color: #fff; }
-[data-whale-report-inputs] { display: flex; gap: 8px; margin-bottom: 16px; }
+[data-whale-report-inputs] { display: flex; gap: 8px; margin-bottom: 12px; }
 [data-whale-report-inputs] input {
   flex: 1; background: #fff; color: #111827; border: 1px solid #d1d5db;
-  border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  border-radius: 8px; padding: 9px 12px; font-size: 13.5px;
 }
 [data-whale-report-inputs] input:focus { outline: none; border-color: #4d6bfe; box-shadow: 0 0 0 3px rgba(77,107,254,.12); }
-[data-whale-report-actions] { display: flex; gap: 8px; margin-bottom: 14px; }
+[data-whale-report-actions] { display: flex; gap: 8px; }
 [data-whale-report-btn] {
-  padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 9px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
   border: 1px solid transparent; background: #4d6bfe; color: #fff;
 }
 [data-whale-report-btn]:hover { background: #3e5bf5; }
 [data-whale-report-btn][data-ghost="true"] { background: #fff; border-color: #d1d5db; color: #374151; }
 [data-whale-report-btn][data-ghost="true"]:hover { border-color: #9ca3af; }
 
-/* ── 报告视图：hero + 白卡片分区 ── */
-[data-whale-report-hero] {
-  border-radius: 14px; padding: 18px 20px; margin-bottom: 12px;
-  background: #4d6bfe; color: #fff;
+/* ── 报告视图：紧凑头部 + 大数字统计条 ── */
+[data-whale-report-headrow] {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 4px 2px 12px;
 }
-[data-whale-report-herotitle] { font-size: 16px; font-weight: 700; }
-[data-whale-report-herosub] { font-size: 12px; opacity: .85; margin-top: 3px; }
-[data-whale-report-herostat] { display: flex; gap: 18px; margin-top: 14px; flex-wrap: wrap; }
-[data-whale-report-herostat] div { display: flex; flex-direction: column; }
-[data-whale-report-herostat] b { font-size: 19px; font-weight: 800; }
-[data-whale-report-herostat] span { font-size: 11px; opacity: .8; margin-top: 1px; }
+[data-whale-report-reptitle] { font-size: 18px; font-weight: 800; color: #111827; }
+[data-whale-report-repsub] { font-size: 13px; color: #6b7280; margin-top: 3px; }
+[data-whale-report-statgrid] {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px;
+}
+[data-whale-report-stat] {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px 12px 9px;
+}
+[data-whale-report-stat] b {
+  display: block; font-size: 24px; font-weight: 800; color: #111827;
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+[data-whale-report-stat] span { font-size: 11.5px; color: #6b7280; }
+[data-whale-report-stat] em.delta-up { color: #dc2626; font-size: 12px; font-weight: 700; margin-left: 6px; font-style: normal; }
+[data-whale-report-stat] em.delta-down { color: #16a34a; font-size: 12px; font-weight: 700; margin-left: 6px; font-style: normal; }
+[data-whale-report-budget] { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; color: #4b5563; }
+[data-whale-report-budgetbar] { flex: 1; height: 8px; border-radius: 4px; background: #e5e7eb; overflow: hidden; }
+[data-whale-report-budgetbar] i { display: block; height: 100%; }
+
+/* ── 卡片 ── */
 [data-whale-report-card] {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-  padding: 14px 16px; margin-bottom: 12px;
-  box-shadow: 0 1px 2px rgba(16,24,40,.03);
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 10px;
 }
 [data-whale-report-h2] {
-  font-size: 13.5px; font-weight: 700; color: #111827; margin: 0 0 10px;
+  font-size: 14px; font-weight: 700; color: #111827; margin: 0 0 8px;
   display: flex; align-items: center; gap: 7px;
 }
-[data-whale-report-h2]::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: #4d6bfe; }
-[data-whale-report-tokenline] { font-size: 12.5px; color: #374151; line-height: 1.9; }
+[data-whale-report-h2]::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: #4d6bfe; }
+[data-whale-report-tokenline] { font-size: 13.5px; color: #374151; line-height: 1.8; }
 [data-whale-report-tokenline] .muted { color: #9ca3af; }
 
-/* 方块活动图：固定尺寸方格 + 行前缀标签 */
-[data-whale-report-weekrow] { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-[data-whale-report-weekrowlabel] { width: 34px; flex-shrink: 0; font-size: 9.5px; color: #9ca3af; text-align: right; }
-[data-whale-report-squares] { display: grid; grid-auto-flow: column; grid-auto-columns: 13px; grid-auto-rows: 13px; gap: 3px; }
-[data-whale-report-squares] i { width: 13px; height: 13px; border-radius: 3px; display: block; }
-[data-whale-report-legend] { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #9ca3af; margin-top: 8px; }
-[data-whale-report-legend] i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+/* ── 洞察：告警条式（左色条 + 单行信息） ── */
+[data-whale-report-insights] { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+[data-whale-report-insight] {
+  background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #4d6bfe;
+  border-radius: 8px; padding: 8px 12px; cursor: pointer;
+}
+[data-whale-report-insight][data-open="true"] { padding-bottom: 10px; }
+[data-whale-report-insighthead] { display: flex; align-items: baseline; gap: 8px; }
+[data-whale-report-insighthead] b { font-size: 13.5px; color: #111827; }
+[data-whale-report-insighthead] span { font-size: 12.5px; color: #6b7280; }
+[data-whale-report-insightdetail] { font-size: 13px; color: #374151; line-height: 1.7; margin-top: 5px; }
+[data-whale-report-insightaction] { font-size: 13px; color: #4d6bfe; margin-top: 4px; }
+[data-whale-report-insightestimate] { font-size: 12px; color: #6b7280; margin-top: 3px; }
 
-/* 活动矩阵：行=24h 列=天 */
-[data-whale-report-gridwrap] { margin: 6px 0 2px; }
-[data-whale-report-grid] { display: flex; gap: 3px; align-items: stretch; }
-[data-whale-report-gridhours] { display: flex; flex-direction: column; gap: 3px; margin-right: 5px; flex-shrink: 0; }
-[data-whale-report-gridhours] span { height: 10px; font-size: 8.5px; color: #9ca3af; line-height: 10px; text-align: right; width: 22px; }
-[data-whale-report-gridcol] { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-[data-whale-report-gridcol] i { height: 10px; border-radius: 2px; }
-[data-whale-report-griddates] { display: flex; gap: 3px; margin: 6px 0 0 27px; }
-[data-whale-report-griddates] span { flex: 1; min-width: 0; font-size: 8.5px; color: #9ca3af; text-align: center; overflow: hidden; white-space: nowrap; }
-[data-whale-report-gridempty] { font-size: 12px; color: #6b7280; padding: 8px 0; }
-
-/* 每日活跃柱状 */
-[data-whale-report-daily] { display: flex; align-items: flex-end; gap: 3px; height: 88px; margin: 10px 0 4px; }
-[data-whale-report-dailycol] { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; gap: 4px; min-width: 0; }
-[data-whale-report-dailycol] i { display: block; width: 100%; max-width: 20px; border-radius: 3px 3px 0 0; background: #4d6bfe; }
-[data-whale-report-dailycol] span { font-size: 9px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* 活动方块 */
+[data-whale-report-weekrow] { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+[data-whale-report-weekrowlabel] { width: 36px; flex-shrink: 0; font-size: 10.5px; color: #9ca3af; text-align: right; }
+[data-whale-report-squares] { display: grid; grid-auto-flow: column; grid-auto-columns: 14px; grid-auto-rows: 14px; gap: 3px; }
+[data-whale-report-squares] i { width: 14px; height: 14px; border-radius: 3px; display: block; }
+[data-whale-report-legend] { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #9ca3af; margin-top: 7px; }
+[data-whale-report-legend] i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; }
+[data-whale-report-gridempty] { font-size: 13px; color: #6b7280; padding: 6px 0; }
 
 /* Token 构成 */
-[data-whale-report-tokenbar] { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #f3f4f6; margin: 8px 0 6px; }
+[data-whale-report-tokenbar] { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: #f3f4f6; margin: 6px 0 6px; }
 [data-whale-report-tokenbar] i { display: block; height: 100%; }
-[data-whale-report-tokenlegend] { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: #4b5563; }
+[data-whale-report-tokenlegend] { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: #4b5563; }
 [data-whale-report-tokenlegend] span { display: inline-flex; align-items: center; gap: 4px; }
-[data-whale-report-tokenlegend] i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+[data-whale-report-tokenlegend] i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
 
 /* 模型用量 */
-[data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 8px; }
-[data-whale-report-modelrow] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; }
-[data-whale-report-modelhead] { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-[data-whale-report-modelhead] b { font-size: 13px; font-weight: 700; color: #111827; }
-[data-whale-report-modelhead] span { font-size: 12px; font-weight: 700; color: #4d6bfe; }
-[data-whale-report-modelbar] { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f3f4f6; }
+[data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 7px; }
+[data-whale-report-modelrow] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 9px 11px; }
+[data-whale-report-modelhead] { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+[data-whale-report-modelhead] b { font-size: 13.5px; font-weight: 700; color: #111827; }
+[data-whale-report-modelhead] span { font-size: 12.5px; font-weight: 700; color: #4d6bfe; font-variant-numeric: tabular-nums; }
+[data-whale-report-modelbar] { display: flex; height: 9px; border-radius: 4px; overflow: hidden; background: #f3f4f6; }
 [data-whale-report-modelbar] i { display: block; height: 100%; }
-[data-whale-report-modelnums] { font-size: 11px; color: #6b7280; margin-top: 6px; }
+[data-whale-report-modelnums] { font-size: 12px; color: #6b7280; margin-top: 5px; font-variant-numeric: tabular-nums; }
 
-/* 危险操作 */
+/* 危险/敏感 */
 [data-whale-report-dangersum] {
-  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
-  padding: 10px 12px; font-size: 12.5px; color: #3730a3; line-height: 1.7; margin-bottom: 8px;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+  padding: 9px 11px; font-size: 13px; color: #3730a3; line-height: 1.6; margin-bottom: 7px;
 }
-[data-whale-report-dangercats] { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+[data-whale-report-dangercats] { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
 [data-whale-report-dangercat] {
-  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
-  border-radius: 999px; font-size: 11.5px; background: #fef2f2; color: #b91c1c;
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px;
+  border-radius: 999px; font-size: 12px; background: #fef2f2; color: #b91c1c;
   border: 1px solid #fecaca;
 }
 [data-whale-report-dangercat] b { font-weight: 800; }
 [data-whale-report-secretcat] {
-  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
-  border-radius: 999px; font-size: 11.5px; background: #f5f3ff; color: #6d28d9;
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px;
+  border-radius: 999px; font-size: 12px; background: #f5f3ff; color: #6d28d9;
   border: 1px solid #ddd6fe;
 }
 [data-whale-report-secretcat] b { font-weight: 800; }
 [data-whale-report-danger] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
   background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
-  padding: 8px 10px; margin: 6px 0; color: #b91c1c; word-break: break-all;
+  padding: 8px 10px; margin: 5px 0; color: #b91c1c; word-break: break-all;
 }
-[data-whale-report-danger] em { display: block; font-style: normal; font-size: 11px; color: #dc2626; opacity: .75; margin-top: 4px; }
-[data-whale-report-samplesbtn] { margin-top: 4px; }
-[data-whale-report-titles] li { font-size: 12.5px; color: #374151; margin: 5px 0; }
-[data-whale-report-empty] { color: #6b7280; font-size: 13.5px; text-align: center; padding: 48px 0; }
-[data-whale-report-hitem] {
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
-}
-[data-whale-report-hitem]:hover { border-color: #4d6bfe; box-shadow: 0 2px 8px rgba(77,107,254,.08); }
-[data-whale-report-hitem] b { font-size: 13.5px; font-weight: 700; color: #111827; }
-[data-whale-report-hitem] span { display: block; font-size: 12px; color: #6b7280; margin-top: 4px; }
-[data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
-[data-whale-report-summary] { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0; }
-[data-whale-report-sumitem] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
-[data-whale-report-sumitem] b { font-size: 20px; font-weight: 800; color: #111827; }
-[data-whale-report-sumitem] span { font-size: 11.5px; color: #6b7280; }
-
-[data-whale-report-budgetedit] { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 12px; color: #374151; }
-[data-whale-report-budgetedit] input { width: 90px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; font-size: 12.5px; color: #111827; }
-[data-whale-report-budgetedit] input:focus { outline: none; border-color: #4d6bfe; }
-[data-whale-report-herodelta] { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; font-size: 12px; }
-[data-whale-report-herodelta] .muted { opacity: .8; }
-[data-whale-report-budget] { margin-top: 10px; }
-[data-whale-report-budgetbar] { height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; margin-bottom: 5px; }
-[data-whale-report-budgetbar] i { display: block; height: 100%; }
-[data-whale-report-budget] span { font-size: 11px; opacity: .9; }
-[data-whale-report-insights] { display: flex; flex-direction: column; gap: 8px; }
-[data-whale-report-insight] { border: 1px solid; border-radius: 10px; padding: 10px 12px; }
-[data-whale-report-insighthead] { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-[data-whale-report-insighticon] { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 800; flex-shrink: 0; }
-[data-whale-report-insighthead] b { font-size: 12.5px; color: #111827; }
-[data-whale-report-insightdetail] { font-size: 12px; color: #374151; line-height: 1.7; }
-[data-whale-report-insightaction] { font-size: 12px; color: #4d6bfe; margin-top: 4px; line-height: 1.6; }
-[data-whale-report-insightestimate] { font-size: 11px; color: #6b7280; margin-top: 4px; }
 [data-whale-report-danger][data-sev="red"] { background: #fef2f2; border-color: #dc2626; color: #b91c1c; }
 [data-whale-report-danger][data-sev="amber"] { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
 [data-whale-report-danger][data-sev="amber"] em { color: #b45309; }
+[data-whale-report-danger] em { display: block; font-style: normal; font-size: 12px; color: #dc2626; opacity: .75; margin-top: 4px; }
+[data-whale-report-samplesbtn] { margin-top: 4px; }
+[data-whale-report-titles] li { font-size: 13px; color: #374151; margin: 4px 0; }
+[data-whale-report-empty] { color: #6b7280; font-size: 13.5px; text-align: center; padding: 40px 0; }
+[data-whale-report-hitem] {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 11px 13px; margin-bottom: 7px; cursor: pointer;
+}
+[data-whale-report-hitem]:hover { border-color: #4d6bfe; }
+[data-whale-report-hitem] b { font-size: 13.5px; font-weight: 700; color: #111827; }
+[data-whale-report-hitem] span { display: block; font-size: 12.5px; color: #6b7280; margin-top: 3px; }
+[data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 20px 0; text-align: center; }
+[data-whale-report-budgetedit] { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: 13px; color: #374151; }
+[data-whale-report-budgetedit] input { width: 100px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 7px 10px; font-size: 13.5px; color: #111827; }
+[data-whale-report-budgetedit] input:focus { outline: none; border-color: #4d6bfe; }
 
 /* Tab 形态 */
-[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 14px 16px 24px; color: #111827; background: #f6f7fb; }
+[data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 12px; color: #111827; background: #f4f5f9; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #fff; }
 
 @media print {
@@ -218,10 +211,10 @@ const CSS = `
   }
   [data-whale-report-fab], [data-whale-report-close], [data-whale-report-tabs],
   [data-whale-report-chips], [data-whale-report-inputs], [data-whale-report-actions] { display: none !important; }
-  [data-whale-report-hero] { background: #4d6bfe; color: #fff; }
   [data-whale-report-card] { box-shadow: none; break-inside: avoid; }
 }
 `;
+
 
 
 let styleInjected = false;
@@ -581,26 +574,36 @@ const INSIGHT_META: Record<InsightJson["level"], { color: string; icon: string }
 };
 
 function InsightsSection({ insights }: { insights: InsightJson[] }): ReactNode {
-  if (insights.length === 0) return null;
+  const shown = insights.filter((i) => i.level !== "info");
+  if (shown.length === 0) return null;
+  const [openId, setOpenId] = useState<string | null>(null);
   return (
-    <div data-whale-report-card>
-      <div data-whale-report-h2>洞察</div>
-      <div data-whale-report-insights>
-        {insights.map((insight) => {
-          const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.info;
-          return (
-            <div key={insight.id} data-whale-report-insight style={{ borderColor: `${meta.color}55` }}>
-              <div data-whale-report-insighthead>
-                <span data-whale-report-insighticon style={{ background: meta.color }}>{meta.icon}</span>
-                <b>{insight.title}</b>
-              </div>
-              <div data-whale-report-insightdetail>{insight.detail}</div>
-              <div data-whale-report-insightaction>{insight.action}</div>
-              {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
+    <div data-whale-report-insights>
+      {shown.map((insight) => {
+        const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.warning;
+        const open = openId === insight.id;
+        return (
+          <div
+            key={insight.id}
+            data-whale-report-insight
+            data-open={open}
+            style={{ borderLeftColor: meta.color }}
+            onClick={() => setOpenId(open ? null : insight.id)}
+          >
+            <div data-whale-report-insighthead>
+              <b>{insight.title}</b>
+              <span>{open ? "收起" : "详情"}</span>
             </div>
-          );
-        })}
-      </div>
+            {open && (
+              <>
+                <div data-whale-report-insightdetail>{insight.detail}</div>
+                <div data-whale-report-insightaction>{insight.action}</div>
+                {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -644,45 +647,44 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
     : null;
   return (
     <div>
-      <div data-whale-report-actions>
-        <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
-        <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
+      <div data-whale-report-headrow>
+        <div>
+          <div data-whale-report-reptitle>深迹 {PRESETS.find((p) => p.key === report.preset)?.label ?? "报告"}</div>
+          <div data-whale-report-repsub>{dateStr(report.from)} ~ {dateStr(report.to)}</div>
+        </div>
+        <div data-whale-report-actions>
+          <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
+          <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
+        </div>
       </div>
 
-      <div data-whale-report-hero>
-        <div data-whale-report-herotitle>深迹 {PRESETS.find((p) => p.key === report.preset)?.label ?? "报告"}</div>
-        <div data-whale-report-herosub>{dateStr(report.from)} ~ {dateStr(report.to)}</div>
-        <div data-whale-report-herostat>
-          <div><b>{s.sessions}</b><span>会话</span></div>
-          <div><b>{s.turns}</b><span>回合</span></div>
-          <div><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
-          <div><b>{fmt(s.commands)}</b><span>命令</span></div>
-          <div><b>{fmt(totalTokens)}</b><span>Token</span></div>
-          {typeof report.cost?.total === "number" && (
-            <div><b>¥{report.cost.total.toFixed(2)}</b><span>预估费用</span></div>
-          )}
+      <div data-whale-report-statgrid>
+        <div data-whale-report-stat><b>{s.sessions}</b><span>会话</span></div>
+        <div data-whale-report-stat><b>{s.turns}</b><span>回合</span></div>
+        <div data-whale-report-stat><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
+        <div data-whale-report-stat><b>{fmt(s.commands)}</b><span>命令</span></div>
+        <div data-whale-report-stat><b>{fmt(totalTokens)}</b><span>Token</span></div>
+        <div data-whale-report-stat>
+          <b>¥{typeof report.cost?.total === "number" ? report.cost.total.toFixed(2) : "—"}</b>
+          <span>
+            预估费用
+            {delta !== null && (
+              <em className={delta > 0 ? "delta-up" : "delta-down"}>{delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%</em>
+            )}
+          </span>
         </div>
-        {delta !== null && (
-          <div data-whale-report-herodelta>
-            <span>较上周期费用</span>
-            <b style={{ color: delta > 0 ? "#fca5a5" : "#86efac" }}>
-              {delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%
-            </b>
-            <span className="muted">（¥{report.prev!.cost.toFixed(2)} → ¥{report.cost!.total.toFixed(2)}）</span>
-          </div>
-        )}
-        {budgetUsed !== null && (
-          <div data-whale-report-budget>
-            <div data-whale-report-budgetbar>
-              <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#86efac" }} />
-            </div>
-            <span>
-              周预算 ¥{report.budget!.toFixed(2)} · 已用 {(budgetUsed * 100).toFixed(0)}%
-              {budgetUsed >= 1 ? "（已超支）" : ""}
-            </span>
-          </div>
-        )}
       </div>
+
+      {budgetUsed !== null && (
+        <div data-whale-report-budget>
+          <div data-whale-report-budgetbar>
+            <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#16a34a" }} />
+          </div>
+          <span>
+            预算 {budgetUsed >= 1 ? "超支" : `${(budgetUsed * 100).toFixed(0)}%`} · ¥{report.cost!.total.toFixed(2)} / ¥{report.budget!.toFixed(2)}
+          </span>
+        </div>
+      )}
 
       <InsightsSection insights={report.insights ?? []} />
 
