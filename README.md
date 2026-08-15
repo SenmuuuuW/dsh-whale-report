@@ -223,8 +223,8 @@ MIT
 
 ## Friends
 
-- [dsh-tianshu-tui](https://github.com/huiliyi37/dsh-tianshu-tui)
-- [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
+- [dsh-tianshu-tui](https://github.com/huiliyi37/dsh-tianshu-tui) — 超好看的 DSH 终端界面（TUI）
+- [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — 很实用的 DSH 侧边栏工作台
 
 ---
 
