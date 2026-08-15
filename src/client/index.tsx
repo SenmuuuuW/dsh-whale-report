@@ -132,6 +132,12 @@ const CSS = `
 [data-whale-report-feedaction] { font-size: 13px; color: #4d6bfe; margin-top: 4px; }
 [data-whale-report-feedestimate] { font-size: 12px; color: #6b7280; margin-top: 3px; }
 
+[data-whale-report-feedmore] {
+  width: 100%; background: none; border: 1px dashed #d1d5db; color: #4d6bfe;
+  font-size: 12.5px; padding: 7px; border-radius: 8px; cursor: pointer; margin-bottom: 12px;
+}
+[data-whale-report-feedmore]:hover { border-color: #4d6bfe; background: #eef2ff; }
+
 /* ── 完整报告按钮 ── */
 [data-whale-report-fullbtn] { width: 100%; margin: 4px 0 12px; padding: 11px; font-size: 14px; }
 
@@ -190,8 +196,8 @@ const CSS = `
 /* 活动方块 */
 [data-whale-report-weekrow] { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
 [data-whale-report-weekrowlabel] { width: 36px; flex-shrink: 0; font-size: 10.5px; color: #9ca3af; text-align: right; }
-[data-whale-report-squares] { display: grid; grid-auto-flow: column; grid-auto-columns: 14px; grid-auto-rows: 14px; gap: 3px; }
-[data-whale-report-squares] i { width: 14px; height: 14px; border-radius: 3px; display: block; }
+[data-whale-report-squares] { display: grid; grid-auto-rows: auto; gap: 3px; flex: 1; min-width: 0; }
+[data-whale-report-squares] i { aspect-ratio: 1; border-radius: 3px; display: block; width: 100%; }
 [data-whale-report-legend] { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #9ca3af; margin-top: 7px; }
 [data-whale-report-legend] i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; }
 [data-whale-report-gridempty] { font-size: 13px; color: #6b7280; padding: 6px 0; }
@@ -788,7 +794,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         return (
         <div data-whale-report-card>
           <div data-whale-report-h2>重试诊断（{bursts.length}）</div>
-          {bursts.map((b, i) => (
+          {bursts.slice(0, 3).map((b, i) => (
             <div key={i} data-whale-report-danger data-sev="amber">
               {b.cmd}
               <em>
@@ -797,6 +803,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
               </em>
             </div>
           ))}
+          {bursts.length > 3 && <div data-whale-report-tokenline>……共 {bursts.length} 条，完整列表见导出 PDF</div>}
         </div>
         );
       })()}
@@ -1134,7 +1141,10 @@ function Dashboard(props: {
   const delta = report?.prev !== undefined && report.prev.cost > 0 && cost !== undefined
     ? Math.round(((cost - report.prev.cost) / report.prev.cost) * 100)
     : null;
-  const insights = (report?.insights ?? []).filter((i) => i.level !== "info");
+  const levelWeight: Record<string, number> = { critical: 0, warning: 1, tip: 2 };
+  const insights = (report?.insights ?? [])
+    .filter((i) => i.level !== "info")
+    .sort((a, b) => (levelWeight[a.level] ?? 3) - (levelWeight[b.level] ?? 3));
   const totalTokens = s !== undefined ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning : 0;
   const modelRows = (() => {
     if (s === undefined) return [];
@@ -1233,7 +1243,12 @@ function Dashboard(props: {
           {insights.length > 0 && (
             <>
               <div data-whale-report-h2>值得注意</div>
-              <InsightFeed insights={insights} stats={s} />
+              <InsightFeed insights={insights.slice(0, 3)} stats={s} />
+              {insights.length > 3 && (
+                <button data-whale-report-feedmore onClick={onOpenReport}>
+                  还有 {insights.length - 3} 条洞察，见完整报告 →
+                </button>
+              )}
             </>
           )}
 
