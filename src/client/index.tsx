@@ -538,6 +538,22 @@ function ActivityStrip({ report }: { report: ReportFull }): ReactNode {
     );
   }
 
+  // 24小时：滚动窗口 → 一行 24 格（每小时一格，跨天不叠加）
+  if (preset === "24h") {
+    const hist = s.hourHistogram ?? [];
+    if (hist.length === 0) return <EmptyActivity />;
+    const max = Math.max(1, ...hist);
+    return (
+      <div>
+        <SquareRow
+          label="24h"
+          cells={hist.map((count, h) => cell(count, max, `${String(h).padStart(2, "0")}:00 · ${count}`))}
+        />
+        <Legend />
+      </div>
+    );
+  }
+
   // 周报 / 自定义：每格 1 小时（7 行 × 24 格，每行 1 天）
   if (preset === "weekly" || preset === "custom") {
     const series = s.dayHourSeries ?? [];
