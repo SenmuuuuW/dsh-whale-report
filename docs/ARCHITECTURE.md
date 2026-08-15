@@ -51,7 +51,7 @@
 
 | 表 | 键 | 值要点 |
 | --- | --- | --- |
-| `reports` | `whale-<ts>-<rand>` | sem(语义版本) + stats + insights + cost + prev + budget |
+| `reports` | `whale-<ts>-<rand>` | sem(语义版本) + stats + insights + cost + prev |
 | `session_index` | `<sessionId>` | v(版本) + builtAt + 10 分钟分桶 + titles；INDEX_VERSION=10 |
 | `period_stats` | `wk-2026-W33` 等 | 周期基线（对比用）；前缀 day-/24h-/wk-/mo-/yr- 互不冲突 |
 | `settings` | `user` | budgetWeeklyCny |
@@ -94,4 +94,3 @@
 - [x] 报告引擎 / 面板 / 洞察 / 治理 / 会话钻取 / 插件环境（已加载第三方插件）/ 导出（PDF+PNG）/ 修复建议
 - [ ] 原生"打开会话"机制（待官方 client API 明确）
 - [ ] 长会话内存优化（LRU 化 session_index）
-- [ ] 多周期预算（日报/月报预算）

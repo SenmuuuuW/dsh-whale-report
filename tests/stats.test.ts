@@ -325,15 +325,6 @@ describe("维护加固：边界与不误报", () => {
     expect(previousPeriodKey("daily", Date.parse("2026-08-01T00:00:00Z"))).toBe("day-2026-07-31");
   });
 
-  it("预算边界：预算为 0 或未设置不触发护栏", async () => {
-    const { computeInsights } = await import("../src/insights.js");
-    const base = new Date(2026, 7, 10).getTime();
-    const events = [ev("turn/start", base), ev("assistant/message", base, { usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, reasoningTokens: 5 } })];
-    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
-    const cost = { perModel: {}, total: 10, currency: "CNY", source: "builtin" as const, fetchedAt: 0 };
-    expect(computeInsights({ stats, cost }).some((i) => i.id.startsWith("budget"))).toBe(false);
-  });
-
   it("数据不足时不触发任何洞察（避免噪音）", async () => {
     const { computeInsights } = await import("../src/insights.js");
     const base = new Date(2026, 7, 10).getTime();
@@ -394,5 +385,43 @@ describe("密钥扫描与重试诊断（只读安全）", () => {
     expect(rows[0]).toEqual({ family: "核心工具", count: 10 });
     expect(rows.some((r) => r.family === "深迹" && r.count === 3)).toBe(true);
     expect(rows.some((r) => r.family === "其他" && r.count === 1)).toBe(true);
+  });
+});
+
+describe("会话钻取与插件环境", () => {
+  it("会话级明细：直算与分桶两条路径的 top 会话一致", () => {
+    const base = new Date(2026, 7, 10).getTime();
+    const events = [
+      ev("turn/start", base),
+      ev("assistant/message", base + 1, { usage: { inputTokens: 2000, outputTokens: 500, cacheReadTokens: 1000, reasoningTokens: 100 } }),
+      ev("tool/call", base + 2, { name: "bash", arguments: JSON.stringify({ command: "pnpm install" }) }),
+      ev("tool/call", base + 3, { name: "bash", arguments: JSON.stringify({ command: "pnpm install" }) }),
+      ev("tool/call", base + 4, { name: "bash", arguments: JSON.stringify({ command: "pnpm install" }) }),
+    ];
+    const period = { from: base - 1000, to: base + 3600000 };
+    const direct = aggregate(events, period);
+    const built = bucketizeOwnEvents("s1", events.map((e) => ({ ...e, seq: 0 })), 0);
+    const indexed = aggregateBuckets([{ sessionId: "s1", buckets: built.buckets, titles: built.titles }], period);
+
+    expect(direct.sessionsDetail.length).toBe(1);
+    expect(direct.sessionsDetail[0].toolCalls).toBe(3);
+    expect(direct.sessionsDetail[0].retryBursts).toBe(1);
+    expect(indexed.sessionsDetail.length).toBe(1);
+    expect(indexed.sessionsDetail[0].toolCalls).toBe(direct.sessionsDetail[0].toolCalls);
+    expect(indexed.sessionsDetail[0].retryBursts).toBe(direct.sessionsDetail[0].retryBursts);
+  });
+
+  it("secretHits/burstSamples 携带 sessionId（洞察可定位会话）", () => {
+    const base = new Date(2026, 7, 10).getTime();
+    const events = [
+      ev("user/message", base, { content: [{ type: "text", text: "key: sk-abcdefghijklmnopqrstuvwxyz123456" }] }),
+      ev("tool/call", base + 1, { name: "bash", arguments: JSON.stringify({ command: "npm i" }) }),
+      ev("tool/result", base + 2, { message: { isError: true, content: "ERESOLVE" } }),
+      ev("tool/call", base + 3, { name: "bash", arguments: JSON.stringify({ command: "npm i" }) }),
+      ev("tool/call", base + 4, { name: "bash", arguments: JSON.stringify({ command: "npm i" }) }),
+    ];
+    const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
+    expect(stats.secretHits[0].sessionId).toBe("s1");
+    expect(stats.burstSamples[0].sessionId).toBe("s1");
   });
 });

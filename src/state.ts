@@ -32,8 +32,6 @@ export const ReportRecordSchema = z.object({
   insights: z.unknown().optional(),
   /** 上一周期对比摘要（用于展示涨跌；旧记录可缺省）。 */
   prev: z.unknown().optional(),
-  /** 生成时的周预算（CNY；可缺省）。 */
-  budget: z.number().optional(),
 });
 
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;

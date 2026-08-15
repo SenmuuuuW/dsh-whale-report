@@ -68,7 +68,7 @@ export function computeInsights(input: InsightInput): Insight[] {
       level: night >= 30 ? "warning" : "tip",
       title: `深夜时段消耗 ¥${nightCost.toFixed(1)}（占 ${night}%）`,
       detail: `凌晨 0-6 点事件占比 ${night}%。深夜多为无人值守任务。`,
-      action: "长任务设置预算上限。",
+      action: "深夜的长任务加超时控制。",
       estimate: `一半深夜任务移到白天，约省 ¥${(nightCost * 0.5).toFixed(1)}/周期（估算）。`,
     });
   }

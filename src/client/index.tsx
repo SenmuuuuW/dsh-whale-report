@@ -1022,9 +1022,6 @@ function insightPreview(insight: InsightJson, s: StatsJson): string | null {
       return null;
     case "secret-hit":
       return s.secretHits?.map((h) => h.label).join("、") ?? null;
-    case "budget-over":
-    case "budget-near":
-      return null;
     case "session-fragmentation":
       return `平均 ${s.sessions > 0 ? (s.turns / s.sessions).toFixed(1) : "0"} 回合/会话`;
     case "cost-trend":

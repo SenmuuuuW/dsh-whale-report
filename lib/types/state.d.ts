@@ -23,7 +23,6 @@ export declare const ReportRecordSchema: z.ZodObject<{
     cost: z.ZodOptional<z.ZodUnknown>;
     insights: z.ZodOptional<z.ZodUnknown>;
     prev: z.ZodOptional<z.ZodUnknown>;
-    budget: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type ReportRecord = z.infer<typeof ReportRecordSchema>;
 export declare const SessionIndexSchema: z.ZodObject<{
@@ -83,7 +82,6 @@ export declare const whaleDomain: {
             cost?: unknown;
             insights?: unknown;
             prev?: unknown;
-            budget?: number | undefined;
         }>;
         session_index: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
             sessionId: string;
