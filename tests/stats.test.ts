@@ -141,9 +141,12 @@ describe("报告文案", () => {
     expect(md).toContain("危险操作");
   });
 
-  it("预设区间长度正确", () => {
-    const now = T0;
-    expect(presetRange("daily", now).from).toBe(now - 24 * H);
+  it("预设区间：日报=今天自然日 0 点起，24h=滚动窗口", () => {
+    const now = new Date(2026, 7, 10, 15, 30, 0).getTime(); // 本地 8/10 15:30
+    const localMidnight = new Date(2026, 7, 10).getTime();
+    expect(presetRange("daily", now).from).toBe(localMidnight);
+    expect(presetRange("daily", now).to).toBe(now);
+    expect(presetRange("24h", now).from).toBe(now - 24 * H);
     expect(presetRange("weekly", now).from).toBe(now - 7 * 24 * H);
     expect(presetRange("monthly", now).from).toBe(now - 30 * 24 * H);
     expect(presetRange("yearly", now).from).toBe(now - 365 * 24 * H);

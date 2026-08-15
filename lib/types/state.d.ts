@@ -4,10 +4,13 @@
  */
 import { z } from "zod";
 export type ReportId = string;
+/** 报告语义版本：语义变更（如 daily 改自然日、新增预设）时 +1，旧记录作废重建。 */
+export declare const REPORT_SEM = 2;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 export type SettingsKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{
+    sem: z.ZodOptional<z.ZodNumber>;
     id: z.ZodString;
     preset: z.ZodString;
     from: z.ZodNumber;
@@ -84,6 +87,7 @@ export declare const whaleDomain: {
             totalEvents: number;
             stats: unknown;
             markdown: string;
+            sem?: number | undefined;
             cost?: unknown;
             insights?: unknown;
             prev?: unknown;

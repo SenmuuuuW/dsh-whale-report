@@ -385,8 +385,18 @@ function ChartIcon({ size = 20 }: { size?: number }): ReactNode {
   );
 }
 
+const HERO_LABEL: Record<string, string> = {
+  daily: "今日 Agent 消耗",
+  "24h": "近 24 小时消耗",
+  weekly: "本周 Agent 消耗",
+  monthly: "本月 Agent 消耗",
+  yearly: "本年 Agent 消耗",
+  custom: "区间 Agent 消耗",
+};
+
 const PRESETS = [
   { key: "daily", label: "日报" },
+  { key: "24h", label: "24小时" },
   { key: "weekly", label: "周报" },
   { key: "monthly", label: "月报" },
   { key: "yearly", label: "年报" },
@@ -918,7 +928,7 @@ function insightPreview(insight: InsightJson, s: StatsJson): string | null {
     case "cache-good":
       return `命中率 ${Math.round((s.tokens.cacheRead / Math.max(1, s.tokens.input + s.tokens.cacheRead)) * 1000) / 10}%`;
     case "night-cost":
-      return `${new Date(s.hourHistogram.indexOf(Math.max(...s.hourHistogram.slice(0, 6))) * 3600000).toISOString().slice(11, 16)} 时段`;
+      return null;
     case "secret-hit":
       return s.secretHits?.map((h) => h.label).join("、") ?? null;
     case "budget-over":
@@ -1168,9 +1178,9 @@ function Dashboard(props: {
         <div data-whale-report-brandtag>Your Agent, in numbers.</div>
         <div data-whale-report-brandactions>
           <button data-whale-report-link onClick={onBudgetToggle}>
-            {typeof cost === "number" && typeof report?.budget === "number" && report.budget > 0
+            {typeof cost === "number" && typeof report?.budget === "number" && report.budget > 0 && preset === "weekly"
               ? `¥${cost.toFixed(2)} / ¥${report.budget.toFixed(2)}`
-              : "设置预算"}
+              : "预算"}
           </button>
         </div>
       </div>
@@ -1212,7 +1222,7 @@ function Dashboard(props: {
       {report !== null && s !== undefined && (
         <>
           <div data-whale-report-hero>
-            <div data-whale-report-herolabel>本周 Agent 消耗</div>
+            <div data-whale-report-herolabel>{HERO_LABEL[preset] ?? "Agent 消耗"}</div>
             <div data-whale-report-heroval>¥{typeof cost === "number" ? cost.toFixed(2) : "—"}</div>
             <div data-whale-report-herodelta2>
               {delta === null ? (
@@ -1231,7 +1241,7 @@ function Dashboard(props: {
             </div>
           </div>
 
-          {budgetUsed !== null && (
+          {budgetUsed !== null && preset === "weekly" && (
             <div data-whale-report-budget>
               <div data-whale-report-budgetbar>
                 <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#4d6bfe" }} />

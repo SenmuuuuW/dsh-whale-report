@@ -6,11 +6,15 @@ import { z } from "zod";
 import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
 
 export type ReportId = string;
+
+/** 报告语义版本：语义变更（如 daily 改自然日、新增预设）时 +1，旧记录作废重建。 */
+export const REPORT_SEM = 2;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 export type SettingsKey = string;
 
 export const ReportRecordSchema = z.object({
+  sem: z.number().int().optional(),
   id: z.string().min(1),
   preset: z.string(),
   from: z.number(),

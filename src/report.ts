@@ -13,10 +13,11 @@ import type { CostBreakdown } from "./pricing.js";
 import { toolFamilies, type Insight } from "./insights.js";
 import type { PeriodStatsRecord } from "./state.js";
 
-export type ReportPreset = "daily" | "weekly" | "monthly" | "yearly" | "custom";
+export type ReportPreset = "daily" | "24h" | "weekly" | "monthly" | "yearly" | "custom";
 
 export const PRESET_LABELS: Record<ReportPreset, string> = {
   daily: "日报",
+  "24h": "24小时",
   weekly: "周报",
   monthly: "月报",
   yearly: "年报",
@@ -27,7 +28,14 @@ export const PRESET_LABELS: Record<ReportPreset, string> = {
 export function presetRange(preset: ReportPreset, now: number): { from: number; to: number } {
   const DAY = 24 * 60 * 60 * 1000;
   switch (preset) {
-    case "daily":
+    case "daily": {
+      // 日报 = 今天（自然日 0:00 起），不是滚动 24 小时。
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      return { from: d.getTime(), to: now };
+    }
+    case "24h":
+      // 24小时 = 滚动窗口（过去 24 小时）。
       return { from: now - 1 * DAY, to: now };
     case "weekly":
       return { from: now - 7 * DAY, to: now };

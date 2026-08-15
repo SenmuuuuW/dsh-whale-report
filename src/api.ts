@@ -14,7 +14,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isTrustedApiRequest } from "./trust-fence.js";
-import { whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js";
+import { REPORT_SEM, whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js";
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
@@ -76,7 +76,7 @@ async function generateReport(
   payload: { preset?: unknown; from?: unknown; to?: unknown },
 ): Promise<ReportRecord> {
   const preset = (payload.preset as ReportPreset) ?? "weekly";
-  if (!["daily", "weekly", "monthly", "yearly", "custom"].includes(preset)) {
+  if (!["daily", "24h", "weekly", "monthly", "yearly", "custom"].includes(preset)) {
     throw new Error(`未知预设：${String(preset)}`);
   }
   const now = Date.now();
@@ -96,6 +96,7 @@ async function generateReport(
   const markdown = renderReport(stats, preset, cost, gen.prev, gen.insights);
 
   const record: ReportRecord = {
+    sem: REPORT_SEM,
     id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     preset,
     from: range.from,
@@ -196,6 +197,33 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 preset === "custom"
                   ? { from: parseTime(payload.from, now - 7 * DAY_MS), to: parseTime(payload.to, now) }
                   : presetRange(preset, now);
+              // 自定义区间每次重新生成（key 语义与周期预设不同，不复用）。
+              if (preset === "custom") {
+                const gen = await generateReportData(svc, preset, range);
+                await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+                const record: ReportRecord = {
+                  sem: REPORT_SEM,
+                  id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                  preset,
+                  from: range.from,
+                  to: range.to,
+                  createdAt: now,
+                  sessions: gen.stats.sessions,
+                  turns: gen.stats.turns,
+                  totalEvents: gen.stats.totalEvents,
+                  stats: gen.stats as unknown,
+                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
+                  cost: gen.cost,
+                  insights: gen.insights,
+                  prev: gen.prev
+                    ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                    : undefined,
+                  budget: gen.budgetWeeklyCny,
+                };
+                await table.put(record.id, record);
+                writeJson(res, 200, { ok: true, fresh: true, report: record });
+                return;
+              }
               const key = periodKey(preset, range.to);
               // 复用条件：周期匹配 + 含 cost 的新版记录（旧版缺字段，直接重建）+
               // 取最新一条。
@@ -203,6 +231,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               for (const [, record] of table.entries()) {
                 if (
                   record.preset === preset &&
+                  record.sem === REPORT_SEM &&
                   record.cost !== undefined &&
                   periodKey(record.preset, record.to) === key &&
                   (found === undefined || record.createdAt > found.createdAt)

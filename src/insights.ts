@@ -193,7 +193,7 @@ export function computeInsights(input: InsightInput): Insight[] {
 export function periodKey(preset: string, toMs: number): string {
   const d = new Date(toMs);
   const iso = d.toISOString();
-  if (preset === "daily") return `dy-${iso.slice(0, 10)}`;
+  if (preset === "daily" || preset === "24h") return `dy-${iso.slice(0, 10)}`;
   if (preset === "monthly") return `mo-${iso.slice(0, 7)}`;
   if (preset === "yearly") return `yr-${iso.slice(0, 4)}`;
   // weekly：ISO 周（周一为一周起点）
@@ -209,6 +209,7 @@ export function periodKey(preset: string, toMs: number): string {
 export function previousPeriodKey(preset: string, toMs: number): string {
   const d = new Date(toMs);
   if (preset === "daily") return periodKey("daily", d.getTime() - 86400000);
+  if (preset === "24h") return periodKey("24h", d.getTime() - 86400000);
   if (preset === "monthly") {
     const p = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
     return periodKey("monthly", p.getTime());

@@ -267,7 +267,7 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
       preset: {
         type: "string",
         required: true,
-        enum: ["daily", "weekly", "monthly", "yearly", "custom"],
+        enum: ["daily", "24h", "weekly", "monthly", "yearly", "custom"],
         description: "Report period preset. Use custom for arbitrary ranges.",
       },
       from: {
