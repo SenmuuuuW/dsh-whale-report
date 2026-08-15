@@ -221,6 +221,13 @@ MIT
 
 ---
 
+## Friends
+
+- [dsh-tianshu-tui](https://github.com/huiliyi37/dsh-tianshu-tui)
+- [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
+
+---
+
 <p align="center"><em>DeepTrace is built to make Agent behavior inspectable, measurable, and easier to improve.</em></p>
 
 <p align="center"><img src="assets/whale/whale-happy.svg" alt="" width="28"><br/>
