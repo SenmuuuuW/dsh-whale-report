@@ -11,11 +11,11 @@
 ┌────────────────────────────────┐          ┌──────────────────────────────┐
 │ src/index.ts（插件入口）        │          │ src/client/index.tsx          │
 │  ├─ 四接缝：tools /            │◄─fetch───│  三视图：概览 / 报告 / 历史     │
-│  │  sessionQuery /             │  /whale/ │  概览：品牌区→Hero→洞察Feed→   │
+│  │  sessionQuery /             │  /whale/ │  概览：品牌区→余额→Hero→洞察→   │
 │  │  storageDomain / web 路由   │   api/*  │  活跃→模型→会话钻取→鲸评短卡    │
-│  ├─ /whale/api 路由（6 方法）   │          │  报告：报告头→鲸评→Findings→  │
+│  ├─ /whale/api 路由（7 方法）   │          │  报告：报告头→鲸评→Findings→  │
 │  ├─ /whale/assets 素材路由      │          │  活跃/Token→模型/工具→风险→    │
-│  └─ whale 存储域（3 张表）      │          │  会话钻取→会话索引附录         │
+│  └─ whale 存储域（3 张表）      │          │  会话钻取→会话索引→导出         │
 └────────────────────────────────┘          │  导出：PDF(HTML页)/PNG(canvas) │
                                             └──────────────────────────────┘
 ```
@@ -30,7 +30,7 @@
        listSessions → 会话头（id / createdAt / cwd / delegationDepth）
        持久化会话：session_index 命中（INDEX_VERSION 匹配 + 10 分钟 TTL）→ 复用分桶
                    未命中 → readSession + bucketizeOwnEvents（seedLength 去重，
-                   排除 whale/* 自事件，10 分钟分桶）→ 写回索引
+                   排除 whale/* 自事件，10 分钟分桶；user/message 逐条做协作信号\n                   检测：方向修正 / 迟到约束，确定性词表）→ 写回索引
        live 会话：每次直读（不落索引）
        并发 12 读取 → aggregateBuckets(views, period, headers)
   → computeCost()：官方定价页实时价（6h 缓存，内置价兜底）→ 每模型费用
@@ -38,6 +38,9 @@
   → 插件环境清单：loader 枚举已加载第三方插件名（排除 @deepseek-ai/* 与 cordis）
   → periodKey(preset, to) + previousPeriodKey → period_stats 上一周期基线
   → computeInsights()：8 条确定性规则（阈值、归因、估算口径固定）
+  → computeCollaborationInsights()：协作复盘 ≤3 条（需求漂移 / 迟到约束 / 上下文碎片化，
+      样本不足不触发；确定性，无 LLM）
+  → reportGeneration：本地确定性生成 → 0 token（mode=local）
   → 落库：reports（REPORT_SEM=3）+ period_stats（原地更新）
 ```
 
@@ -52,9 +55,11 @@
 | `src/stats.ts` | 聚合引擎：事件聚合、危险分级、密钥检测、重试风暴、分桶索引、会话级明细 | 纯函数；直算/分桶两条路径等价（有不变式测试） |
 | `src/insights.ts` | 洞察规则 + 周期 key + 工具族归类 | 确定性，无 LLM |
 | `src/whale-notes.ts` | 鲸鱼娘统一规则：鲸评触发 + 表情（同一套阈值） | 客户端与 HTML 导出共用，单一阈值源 |
+| `src/collaboration.ts` | 协作复盘：确定性规则（≤3 条，样本不足不触发） | 无 LLM；不改既有口径 |
+| `src/balance.ts` | Provider 余额：adapter 架构 + DeepSeek 实现 + 60s 缓存 | key 只在本机服务端使用 |
 | `src/pricing.ts` | 官方计价页抓取 + 费用计算（flash/pro 档位） | 失败回退内置价 |
 | `src/tools.ts` | 会话索引（10 分钟分桶/TTL/预热）+ 共享生成管线 + `whale_report` 聊天工具 | 面板与对话同源 |
-| `src/api.ts` | HTTP 路由（6 方法 + 素材白名单） | 本机同源围栏（trust-fence） |
+| `src/api.ts` | HTTP 路由（7 方法 + 素材白名单） | 本机同源围栏（trust-fence） |
 | `src/report.ts` / `src/html.ts` | markdown / PDF HTML 报告 | 同一数据两种呈现 |
 | `src/state.ts` | 存储域 schema（3 张表） | zod 边界校验 |
 | `src/client/index.tsx` | 浏览器 UI：三视图 + 导出（PDF/PNG） | 零依赖，模块表装配 |
@@ -69,7 +74,7 @@
 
 **版本策略**：
 - `REPORT_SEM = 3`：报告语义变更（周期定义、字段含义）时 +1，旧记录作废重建
-- `INDEX_VERSION = 10`：分桶结构变更时 +1，旧索引自然失效
+- `INDEX_VERSION = 11`：分桶结构变更时 +1，旧索引自然失效
 
 ## 5. API（`/whale/api/*`，全部经本机同源围栏）
 
@@ -81,6 +86,7 @@
 | GET `get?id=` | 单份完整报告 |
 | DELETE 由 POST `delete` 承载 | 删除指定 id |
 | GET `html?id=` | 独立可打印 HTML（备用分享页；面板 PDF 改走打印） |
+| GET `balance?provider=&refresh=` | Provider 余额（服务端只读探针；key 永不出宿主；60s 缓存） |
 | GET `/whale/assets/*` | 素材白名单路由（assets/whale/，仅允许清单内文件名） |
 
 ## 6. 洞察规则（8 条）
@@ -97,6 +103,8 @@
 | 费用趋势 | 较上周期费用涨跌 ≥20% | tip / warning |
 
 （另有 info 级"缓存命中率良好"记录，概览不展示，仅入档。）
+
+**协作复盘（`collaboration.ts`，≤3 条）**：REQUIREMENT-DRIFT（修正 ≥5 次且 ≥3 会话）/ LATE-CONSTRAINT（迟到约束 ≥3 条）/ CONTEXT-FRAGMENTATION（短会话 ≥5 且占比 ≥40%）；会话 <5 或用户消息 <30 时不展示。
 
 **鲸鱼娘规则（`whale-notes.ts`，单一阈值源）**：danger（仅红级 → angry）> retry ≥3（→ dazed）> night ≥15%（→ sleepy）> fragment；表情与鲸评文案由同一函数推导，客户端与导出端一致。
 
@@ -123,6 +131,7 @@
 - 危险命令：只存命令首行（引号段剥离防 grep 误报），红/黄两级分级
 - API 围栏：仅本机 loopback + 同源标记（`trust-fence.ts`）
 - 修复建议：只输出方案与命令模板（`FIX_SUGGESTIONS`），**永不自动执行**
+- Provider 余额：key 只在宿主进程内读取（`~/.dsh/.env` 的 `DEEPSEEK_API_KEY`）与请求，绝不下发浏览器 / 不入 report / 不入导出 / 不写日志；错误信息一律固定文案
 - 插件环境清单：只列插件名，非工具级归因（精确归属尚未实现）
 
 ## 10. Roadmap
