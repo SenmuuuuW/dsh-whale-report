@@ -11,7 +11,6 @@ export type ReportId = string;
 export const REPORT_SEM = 3;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
-export type SettingsKey = string;
 
 export const ReportRecordSchema = z.object({
   sem: z.number().int().optional(),
@@ -77,15 +76,6 @@ export const PeriodStatsSchema = z.object({
 
 export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
 
-/** 用户设置（当前只有每周预算，CNY）。 */
-export const SettingsRecordSchema = z.object({
-  key: z.string().min(1),
-  budgetWeeklyCny: z.number().min(0).optional(),
-  updatedAt: z.number(),
-});
-
-export type SettingsRecord = z.infer<typeof SettingsRecordSchema>;
-
 export const whaleDomain = defineDomain({
   name: "whale",
   version: 1,
@@ -93,6 +83,5 @@ export const whaleDomain = defineDomain({
     reports: domainTable<ReportId, ReportRecord>(ReportRecordSchema),
     session_index: domainTable<SessionIndexKey, SessionIndexRecord>(SessionIndexSchema),
     period_stats: domainTable<PeriodKey, PeriodStatsRecord>(PeriodStatsSchema),
-    settings: domainTable<SettingsKey, SettingsRecord>(SettingsRecordSchema),
   },
 });

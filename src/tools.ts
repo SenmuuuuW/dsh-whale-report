@@ -8,7 +8,7 @@
  */
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
-import type { SessionIndexRecord, PeriodStatsRecord, SettingsRecord } from "./state.js";
+import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
 import { computeCost, getPrices, modelCost, modelTier, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
@@ -62,10 +62,6 @@ export interface ReportServices {
   periodStats?: {
     get(key: string): PeriodStatsRecord | undefined;
     put(key: string, value: PeriodStatsRecord): Promise<void>;
-  };
-  settings?: {
-    get(key: string): SettingsRecord | undefined;
-    put(key: string, value: SettingsRecord): Promise<void>;
   };
 }
 
@@ -204,7 +200,6 @@ export interface ReportGeneration {
   key: string;
   prev: PeriodStatsRecord | null;
   insights: Insight[];
-  budgetWeeklyCny?: number;
 }
 
 export async function generateReportData(
@@ -229,10 +224,8 @@ export async function generateReportData(
   const key = periodKey(preset, range.to);
   const prevKey = previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
-  // 周预算只对周报生效：日报/月报/年报不参与"预算超支"判断。
-  const budgetWeeklyCny = preset === "weekly" ? svc.settings?.get("user")?.budgetWeeklyCny : undefined;
-  const insights = computeInsights({ stats, prev: prev ?? undefined, cost, budgetWeeklyCny });
-  return { stats, cost, key, prev, insights, budgetWeeklyCny };
+  const insights = computeInsights({ stats, prev: prev ?? undefined, cost });
+  return { stats, cost, key, prev, insights };
 }
 
 export function toPeriodRecord(

@@ -68,7 +68,6 @@
 | POST `summary` | 概览数据：同周期 5 分钟内复用，过期原地重算（不删历史） |
 | GET `list` / `get` / `delete` | 历史管理 |
 | GET `html?id=` | 独立可打印 HTML（导出 PDF） |
-| GET/POST `settings` | 周预算读写 |
 
 ## 6. 洞察规则（8 类）
 

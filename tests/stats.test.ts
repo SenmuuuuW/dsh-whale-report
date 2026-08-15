@@ -278,15 +278,6 @@ describe("洞察引擎", () => {
     expect(insights.some((i) => i.id === "night-cost")).toBe(true);
   });
 
-  it("预算规则：超支触发 critical", async () => {
-    const { computeInsights } = await import("../src/insights.js");
-    const stats = makeStats();
-    const insights = computeInsights({ stats, budgetWeeklyCny: 8, cost: { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 } });
-    expect(insights.some((i) => i.id === "budget-over")).toBe(true);
-    const near = computeInsights({ stats, budgetWeeklyCny: 11, cost: { perModel: {}, total: 10, currency: "CNY", source: "builtin", fetchedAt: 0 } });
-    expect(near.some((i) => i.id === "budget-near")).toBe(true);
-  });
-
   it("周期 key：day-/24h-/wk-/mo-/yr- 前缀互不冲突，24h 无上一周期", async () => {
     const { periodKey, previousPeriodKey } = await import("../src/insights.js");
     const to = Date.parse("2026-08-14T12:00:00Z"); // 周五
@@ -340,7 +331,6 @@ describe("维护加固：边界与不误报", () => {
     const events = [ev("turn/start", base), ev("assistant/message", base, { usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, reasoningTokens: 5 } })];
     const stats = aggregate(events, { from: base - 1000, to: base + 3600000 });
     const cost = { perModel: {}, total: 10, currency: "CNY", source: "builtin" as const, fetchedAt: 0 };
-    expect(computeInsights({ stats, budgetWeeklyCny: 0, cost }).some((i) => i.id.startsWith("budget"))).toBe(false);
     expect(computeInsights({ stats, cost }).some((i) => i.id.startsWith("budget"))).toBe(false);
   });
 
@@ -348,7 +338,7 @@ describe("维护加固：边界与不误报", () => {
     const { computeInsights } = await import("../src/insights.js");
     const base = new Date(2026, 7, 10).getTime();
     const stats = aggregate([ev("turn/start", base)], { from: base - 1000, to: base + 3600000 });
-    const insights = computeInsights({ stats, budgetWeeklyCny: 50, cost: { perModel: {}, total: 0.5, currency: "CNY", source: "builtin" as const, fetchedAt: 0 } });
+    const insights = computeInsights({ stats, cost: { perModel: {}, total: 0.5, currency: "CNY", source: "builtin" as const, fetchedAt: 0 } });
     expect(insights.length).toBe(0);
   });
 });

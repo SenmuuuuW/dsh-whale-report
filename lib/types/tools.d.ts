@@ -7,7 +7,7 @@
  * 引擎只读，不写回任何会话数据。
  */
 import { type ToolDefinition } from "@deepseek-ai/dsh-tools";
-import type { SessionIndexRecord, PeriodStatsRecord, SettingsRecord } from "./state.js";
+import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
 import { type CostBreakdown } from "./pricing.js";
 import { type Insight } from "./insights.js";
 import { type ReportStats } from "./stats.js";
@@ -70,10 +70,6 @@ export interface ReportServices {
         get(key: string): PeriodStatsRecord | undefined;
         put(key: string, value: PeriodStatsRecord): Promise<void>;
     };
-    settings?: {
-        get(key: string): SettingsRecord | undefined;
-        put(key: string, value: SettingsRecord): Promise<void>;
-    };
 }
 export interface ToolsHost {
     tools: {
@@ -108,7 +104,6 @@ export interface ReportGeneration {
     key: string;
     prev: PeriodStatsRecord | null;
     insights: Insight[];
-    budgetWeeklyCny?: number;
 }
 export declare function generateReportData(svc: ReportServices, preset: string, range: {
     from: number;

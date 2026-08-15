@@ -23,7 +23,6 @@ export interface InsightInput {
     stats: ReportStats;
     prev?: PeriodStatsRecord;
     cost?: CostBreakdown;
-    budgetWeeklyCny?: number;
 }
 /** 缓存命中率：缓存命中占输入+命中的比例。 */
 export declare function cacheHitRate(stats: ReportStats): number;

@@ -158,7 +158,8 @@ const CSS = `
 [data-whale-report-noteopts] { display: flex; gap: 2px; background: #eef2ff; border-radius: 999px; padding: 2px; }
 [data-whale-report-noteopts] button { border: none; background: none; font-size: 11px; color: #64748b; padding: 2px 9px; border-radius: 999px; cursor: pointer; }
 [data-whale-report-noteopts] button[data-active="true"] { background: #4d6bfe; color: #fff; }
-[data-whale-report-noteline] { font-size: 13.5px; color: #334155; line-height: 1.8; padding: 4px 2px; }
+[data-whale-report-noteline] { font-size: 13.5px; color: #334155; padding: 4px 2px; }
+[data-whale-report-notelineitem] { line-height: 1.85; padding: 1.5px 0; }
 [data-whale-report-notemore] { font-size: 12px; color: #64748b; line-height: 1.7; padding: 2px 2px; }
 [data-whale-report-notefoot] { font-size: 11px; color: #9ca3af; margin-top: 8px; padding-top: 7px; border-top: 1px dashed #e5e7eb; }
 [data-whale-report-note-short] {
@@ -228,9 +229,6 @@ const CSS = `
 [data-whale-report-stat] span { font-size: 11.5px; color: #6b7280; }
 [data-whale-report-stat] em.delta-up { color: #dc2626; font-size: 12px; font-weight: 700; margin-left: 6px; font-style: normal; }
 [data-whale-report-stat] em.delta-down { color: #16a34a; font-size: 12px; font-weight: 700; margin-left: 6px; font-style: normal; }
-[data-whale-report-budget] { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; color: #4b5563; }
-[data-whale-report-budgetbar] { flex: 1; height: 8px; border-radius: 4px; background: #e5e7eb; overflow: hidden; }
-[data-whale-report-budgetbar] i { display: block; height: 100%; }
 
 /* ── 卡片 ── */
 [data-whale-report-card] {
@@ -323,9 +321,6 @@ const CSS = `
 [data-whale-report-hitem] b { font-size: 13.5px; font-weight: 700; color: #111827; }
 [data-whale-report-hitem] span { display: block; font-size: 12.5px; color: #6b7280; margin-top: 3px; }
 [data-whale-report-loading] { color: #6b7280; font-size: 13px; padding: 20px 0; text-align: center; }
-[data-whale-report-budgetedit] { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: 13px; color: #374151; }
-[data-whale-report-budgetedit] input { width: 100px; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 7px 10px; font-size: 13.5px; color: #111827; }
-[data-whale-report-budgetedit] input:focus { outline: none; border-color: #4d6bfe; }
 
 /* Tab 形态 */
 [data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 10px 16px 20px; color: #111827; background: #f4f5f9; }
@@ -394,7 +389,6 @@ interface ReportFull extends ReportMeta {
   cost?: { perModel: Record<string, number>; total: number; currency: string; source: string };
   insights?: InsightJson[];
   prev?: PrevSummary;
-  budget?: number;
 }
 
 interface StatsJson {
@@ -817,9 +811,6 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const delta = report.prev !== undefined && report.prev.cost > 0 && typeof report.cost?.total === "number"
     ? Math.round(((report.cost.total - report.prev.cost) / report.prev.cost) * 100)
     : null;
-  const budgetUsed = typeof report.budget === "number" && report.budget > 0 && typeof report.cost?.total === "number"
-    ? Math.min(1, report.cost.total / report.budget)
-    : null;
   return (
     <div>
       <div data-whale-report-headrow>
@@ -850,17 +841,6 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           </span>
         </div>
       </div>
-
-      {budgetUsed !== null && (
-        <div data-whale-report-budget>
-          <div data-whale-report-budgetbar>
-            <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#16a34a" }} />
-          </div>
-          <span>
-            预算 {budgetUsed >= 1 ? "超支" : `${(budgetUsed * 100).toFixed(0)}%`} · ¥{report.cost!.total.toFixed(2)} / ¥{report.budget!.toFixed(2)}
-          </span>
-        </div>
-      )}
 
       <InsightsSection insights={report.insights ?? []} />
       <WhaleNote report={report} />
@@ -1021,8 +1001,6 @@ interface ContentState {
   dashboard: ReportFull | null;
   current: ReportFull | null;
   history: ReportMeta[] | null;
-  budgetInput: string;
-  showBudgetEdit: boolean;
 }
 
 /** 洞察预览行（紧凑 Feed：标题 + 一行数据预览）。 */
@@ -1068,15 +1046,12 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     dashboard: null,
     current: null,
     history: null,
-    budgetInput: "",
-    showBudgetEdit: false,
   };
 
   requestSeq = 0;
 
   componentDidMount(): void {
     void this.loadDashboard(this.state.preset);
-    void this.loadBudget();
   }
 
   setToast(message: string): void {
@@ -1084,36 +1059,6 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     window.setTimeout(() => {
       this.setState((prev) => (prev.toast === message ? { ...prev, toast: null } : prev));
     }, 4000);
-  }
-
-  async loadBudget(): Promise<void> {
-    try {
-      const response = await fetch("/whale/api/settings");
-      const body = (await response.json()) as { ok: boolean; settings?: number | null };
-      if (response.ok && body.ok && typeof body.settings === "number") {
-        this.setState({ budgetInput: String(body.settings) });
-      }
-    } catch {
-      /* 忽略 */
-    }
-  }
-
-  async saveBudget(): Promise<void> {
-    const value = Number(this.state.budgetInput);
-    const budget = Number.isFinite(value) && value > 0 ? value : undefined;
-    try {
-      const response = await fetch("/whale/api/settings", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ budgetWeeklyCny: budget }),
-      });
-      const body = (await response.json()) as { ok: boolean; error?: { message?: string } };
-      if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "保存失败");
-      this.setState({ error: null, showBudgetEdit: false });
-      this.setToast("预算已保存");
-    } catch (error) {
-      this.setToast(error instanceof Error ? error.message : String(error));
-    }
   }
 
   /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。 */
@@ -1212,9 +1157,6 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
               void this.loadDashboard("custom");
             }}
             onOpenReport={() => this.setState({ view: "report" })}
-            onBudgetToggle={() => this.setState({ showBudgetEdit: !this.state.showBudgetEdit })}
-            onBudgetInput={(v) => this.setState({ budgetInput: v })}
-            onSaveBudget={() => void this.saveBudget()}
           />
         )}
 
@@ -1258,12 +1200,9 @@ function Dashboard(props: {
   onPreset: (p: ContentState["preset"]) => void;
   onCustom: (from: string, to: string) => void;
   onOpenReport: () => void;
-  onBudgetToggle: () => void;
-  onBudgetInput: (v: string) => void;
-  onSaveBudget: () => void;
 }): ReactNode {
-  const { state, onPreset, onCustom, onOpenReport, onBudgetToggle, onBudgetInput, onSaveBudget } = props;
-  const { preset, loading, error, dashboard, showBudgetEdit, budgetInput, from, to } = state;
+  const { state, onPreset, onCustom, onOpenReport } = props;
+  const { preset, loading, error, dashboard, from, to } = state;
   const report = dashboard;
   const s = report?.stats;
   const cost = report?.cost?.total;
@@ -1286,31 +1225,12 @@ function Dashboard(props: {
       return { model, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
     });
   })();
-  const budgetUsed = typeof report?.budget === "number" && report.budget > 0 && cost !== undefined
-    ? Math.min(1, cost / report.budget)
-    : null;
-
   return (
     <div data-whale-report-body>
       <div data-whale-report-brand>
         <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
         <div data-whale-report-brandtag>Your Agent, in numbers.</div>
-        <div data-whale-report-brandactions>
-          <button data-whale-report-link onClick={onBudgetToggle}>
-            {typeof cost === "number" && typeof report?.budget === "number" && report.budget > 0 && preset === "weekly"
-              ? `¥${cost.toFixed(2)} / ¥${report.budget.toFixed(2)}`
-              : "预算"}
-          </button>
-        </div>
       </div>
-
-      {showBudgetEdit && (
-        <div data-whale-report-budgetedit>
-          <span>周预算（¥）：</span>
-          <input type="number" min="0" step="1" placeholder="如 50" value={budgetInput} onChange={(e) => onBudgetInput(e.target.value)} />
-          <button data-whale-report-btn data-ghost="true" onClick={onSaveBudget}>保存</button>
-        </div>
-      )}
 
       <div data-whale-report-chips>
         {PRESETS.map((p) => (
@@ -1367,15 +1287,6 @@ function Dashboard(props: {
             </div>
           </div>
 
-          {budgetUsed !== null && preset === "weekly" && (
-            <div data-whale-report-budget>
-              <div data-whale-report-budgetbar>
-                <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#4d6bfe" }} />
-              </div>
-              <span>¥{cost!.toFixed(2)} / ¥{report.budget!.toFixed(2)} {budgetUsed >= 1 ? "超支" : ""}</span>
-            </div>
-          )}
-
           {insights.length > 0 && (
             <>
               <div data-whale-report-h2><WhaleFace mood={whaleMood(report)} size={16} />值得注意</div>
@@ -1396,7 +1307,7 @@ function Dashboard(props: {
                 <WhaleFace mood={whaleMood(report)} size={30} />
                 <div>
                   <b>本期鲸评</b>
-                  <span>“{NOTE_TEMPLATES[kinds[0]].light}”</span>
+                  <span>“{NOTE_TEMPLATES[kinds[0]].light[0]}”</span>
                 </div>
               </div>
             );
@@ -1598,35 +1509,66 @@ function WhaleFace({ mood, size = 44 }: { mood: "happy" | "angry" | "sleepy" | "
 function whaleMood(report: ReportFull): "happy" | "angry" | "sleepy" | "dazed" {
   const s = report.stats;
   const redDanger = (s.dangerousCommands ?? []).some((d) => d.sev === "red");
-  const overBudget = typeof report.cost?.total === "number" && typeof report.budget === "number" && report.budget > 0 && report.cost.total >= report.budget;
-  if (redDanger || overBudget) return "angry";
+  if (redDanger) return "angry";
   const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   if (night >= 25) return "sleepy";
   if ((s.retryBursts ?? 0) >= 5) return "dazed";
   return "happy";
 }
 
-/** 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式），确定性不翻车。 */
+/**
+ * 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式）。
+ * 每条 = 2-3 句台词（galgame 独白感：语气词、省略号、小动作）。
+ * 确定性生成，绝不翻车。
+ */
 const NOTE_TEMPLATES = {
   retry: {
-    light: "同一个命令试了好多次，先看看前置条件是不是没满足哦。",
-    spicy: "同一个命令试了这么多次……你是在调试 bug，还是在训练 bug 记住你？",
+    light: [
+      "同一个命令，试了一次，两次，三次……",
+      "我数到第五遍的时候，已经不知道该替你加油，还是替你着急了。",
+      "（叹气）先看看前置条件嘛，一次修对，好不好？",
+    ],
+    spicy: [
+      "同一个命令，你连着敲了好多遍呢。",
+      "我真的分不清——你是在调试 bug，还是在训练 bug 记住你。",
+      "如果重试有用的话，鲸鱼早就学会飞了。",
+    ],
   },
   night: {
-    light: "凌晨还在高强度工作，记得给自己放个假。",
-    spicy: "凌晨还在高强度调用我，你不睡，鲸也不睡吗？",
-  },
-  budget: {
-    light: "预算快见底了，注意控制长任务。",
-    spicy: "这周预算已经快见底了。你是在写项目，还是在燃烧钱包？",
+    light: [
+      "凌晨这个点了，你还在使唤我……",
+      "（揉眼睛）我不累，但是你应该很累了吧？",
+      "记得留一点时间给明天的自己哦。",
+    ],
+    spicy: [
+      "凌晨还在高强度调用我……",
+      "你不睡，鲸也不睡吗？",
+      "（小声）而且深夜的 bug，第二天早上看往往根本没 bug。",
+    ],
   },
   fragment: {
-    light: "会话开得有点多，同主题试试续聊，命中率会更好。",
-    spicy: "开了好多会话，但每个都聊两句就跑掉……你对上下文怎么这么薄情呀？",
+    light: [
+      "开了好多会话，但每个都聊两句就跑掉了呢。",
+      "就像逛书店，每本书翻两页就放回去……",
+      "同主题试试续聊吧，缓存命中率会高很多哦。",
+    ],
+    spicy: [
+      "会话开了又开，每个都浅尝辄止……",
+      "你对上下文怎么这么薄情呀？",
+      "（委屈）我可是把每一轮都记得清清楚楚的。",
+    ],
   },
   danger: {
-    light: "检测到一些危险操作，记得重要目录先备份。",
-    spicy: "你怎么又在边缘试探？",
+    light: [
+      "呜哇，检测到一些危险操作……",
+      "（认真）重要目录，记得先备份一下哦。",
+      "安全第一，不然下次哭的就是我们两个了。",
+    ],
+    spicy: [
+      "你怎么又在边缘试探？",
+      "（双手抱胸）我数着呢，这是第几次了。",
+      "下次动手之前，先问问我，好不好？",
+    ],
   },
 } as const;
 
@@ -1638,11 +1580,6 @@ function triggerNotes(report: ReportFull): NoteKind[] {
   const hits: { kind: NoteKind; weight: number }[] = [];
   if ((s.dangerousCommands ?? []).some((d) => d.sev === "red")) hits.push({ kind: "danger", weight: 0 });
   else if (s.dangerousCommands.length > 0) hits.push({ kind: "danger", weight: 1 });
-  if (typeof report.cost?.total === "number" && typeof report.budget === "number" && report.budget > 0) {
-    const ratio = report.cost.total / report.budget;
-    if (ratio >= 1) hits.push({ kind: "budget", weight: 0 });
-    else if (ratio >= 0.8) hits.push({ kind: "budget", weight: 2 });
-  }
   if ((s.retryBursts ?? 0) >= 3) hits.push({ kind: "retry", weight: 2 });
   const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   if (night >= 15) hits.push({ kind: "night", weight: 3 });
@@ -1653,6 +1590,7 @@ function triggerNotes(report: ReportFull): NoteKind[] {
 /** 本期鲸评卡片（完整版，两种模式可切换）。 */
 function WhaleNote({ report }: { report: ReportFull }): ReactNode {
   const [mode, setMode] = useState<"light" | "spicy">("light");
+  const s = report.stats;
   const kinds = triggerNotes(report);
   const mood = whaleMood(report);
   const top = kinds[0];
@@ -1669,13 +1607,24 @@ function WhaleNote({ report }: { report: ReportFull }): ReactNode {
         </div>
       </div>
       {top !== undefined && (
-        <div data-whale-report-noteline>“{NOTE_TEMPLATES[top][mode]}”</div>
+        <div data-whale-report-noteline>
+          {NOTE_TEMPLATES[top][mode].map((line, i) => (
+            <div key={i} data-whale-report-notelineitem>
+              {line.replace("{n}", String(s.retryBursts ?? 0))}
+            </div>
+          ))}
+        </div>
       )}
-      {kinds.slice(1, 3).map((kind) => (
-        <div key={kind} data-whale-report-notemore>· {NOTE_TEMPLATES[kind][mode]}</div>
+      {kinds.slice(1, 2).map((kind) => (
+        <div key={kind} data-whale-report-notemore>
+          {NOTE_TEMPLATES[kind][mode][0]}
+        </div>
       ))}
       {kinds.length === 0 && (
-        <div data-whale-report-noteline>“本周数据很健康，继续保持就好啦。”</div>
+        <div data-whale-report-noteline>
+          <div data-whale-report-notelineitem>“本周数据很健康呢。”</div>
+          <div data-whale-report-notelineitem>（开心地晃了晃尾巴）继续保持就好啦。</div>
+        </div>
       )}
       <div data-whale-report-notefoot>基于本期使用数据自动生成的风味评论，不影响正式报告结论。</div>
       {mood === "angry" && <div data-whale-report-notemore>（鲸鱼娘现在有点生气，注意安全操作。）</div>}

@@ -8,7 +8,6 @@ export type ReportId = string;
 export declare const REPORT_SEM = 3;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
-export type SettingsKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{
     sem: z.ZodOptional<z.ZodNumber>;
     id: z.ZodString;
@@ -65,13 +64,6 @@ export declare const PeriodStatsSchema: z.ZodObject<{
     activeDays: z.ZodNumber;
 }, z.core.$strip>;
 export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
-/** 用户设置（当前只有每周预算，CNY）。 */
-export declare const SettingsRecordSchema: z.ZodObject<{
-    key: z.ZodString;
-    budgetWeeklyCny: z.ZodOptional<z.ZodNumber>;
-    updatedAt: z.ZodNumber;
-}, z.core.$strip>;
-export type SettingsRecord = z.infer<typeof SettingsRecordSchema>;
 export declare const whaleDomain: {
     name: string;
     version: number;
@@ -127,11 +119,6 @@ export declare const whaleDomain: {
             redDanger: number;
             retryBursts: number;
             activeDays: number;
-        }>;
-        settings: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
-            key: string;
-            updatedAt: number;
-            budgetWeeklyCny?: number | undefined;
         }>;
     };
 };

@@ -14,7 +14,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { isTrustedApiRequest } from "./trust-fence.js";
-import { REPORT_SEM, whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js";
+import { REPORT_SEM, whaleDomain, type ReportRecord } from "./state.js";
 
 /** summary 概览新鲜度：同周期报告超过此窗口即重新计算（原地更新，不删历史）。 */
 const SUMMARY_FRESHNESS_MS = 5 * 60 * 1000;
@@ -37,10 +37,6 @@ export interface WebServerLike {
 
 export interface ApiServices extends ReportServices {
   domain: Domain<typeof whaleDomain>;
-}
-
-function tableSettings(svc: ApiServices) {
-  return svc.domain.table("settings");
 }
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
@@ -124,7 +120,6 @@ async function generateReport(
           dangerCount: gen.prev.dangerCount,
         }
       : undefined,
-    budget: gen.budgetWeeklyCny,
   };
   await svc.domain.table("reports").put(record.id, record);
   return record;
@@ -221,7 +216,6 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   prev: gen.prev
                     ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
                     : undefined,
-                  budget: gen.budgetWeeklyCny,
                 };
                 await table.put(record.id, record);
                 writeJson(res, 200, { ok: true, fresh: true, report: record });
@@ -265,25 +259,9 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 prev: gen.prev
                   ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
                   : undefined,
-                budget: gen.budgetWeeklyCny,
               };
               await table.put(record.id, record);
               writeJson(res, 200, { ok: true, fresh: true, report: record });
-              return;
-            }
-            if (req.method === "GET" && method === "settings") {
-              const record = tableSettings(svc).get("user");
-              writeJson(res, 200, { ok: true, settings: record?.budgetWeeklyCny ?? null });
-              return;
-            }
-            if (req.method === "POST" && method === "settings") {
-              const payload = (await readJsonBody(req)) as { budgetWeeklyCny?: unknown };
-              const budget = typeof payload.budgetWeeklyCny === "number" && Number.isFinite(payload.budgetWeeklyCny)
-                ? Math.max(0, payload.budgetWeeklyCny)
-                : undefined;
-              const settings: SettingsRecord = { key: "user", budgetWeeklyCny: budget, updatedAt: Date.now() };
-              await tableSettings(svc).put("user", settings);
-              writeJson(res, 200, { ok: true, settings: settings.budgetWeeklyCny ?? null });
               return;
             }
             if (req.method === "POST") {
