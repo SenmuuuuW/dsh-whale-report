@@ -14,6 +14,7 @@
  */
 import { Component, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
 import { toolFamilies } from "../insights.js";
+import { triggerNotes, whaleMood } from "../whale-notes.js";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -326,6 +327,416 @@ const CSS = `
 [data-whale-report-tabhost] { height: 100%; overflow-y: auto; padding: 10px 16px 20px; color: #111827; background: #f4f5f9; }
 [data-whale-report-tabhost] [data-whale-report-card] { background: #fff; }
 
+/* ────────────────────────── DeepTrace editorial UI ────────────────────────── */
+[data-whale-report], [data-whale-report-drawer], [data-whale-report-tabhost] {
+  --dt-paper: #f5f8f9;
+  --dt-paper-deep: #edf3f6;
+  --dt-ink: #0b1733;
+  --dt-ink-soft: #33445f;
+  --dt-muted: #6e7c8f;
+  --dt-faint: #94a2b3;
+  --dt-line: #d9e3e8;
+  --dt-line-strong: #b9c9d3;
+  --dt-blue: #4d6bfe;
+  --dt-cyan: #36b9d1;
+  --dt-abyss: #07162f;
+  --dt-red: #c83a48;
+  --dt-amber: #b87519;
+  color: var(--dt-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+}
+[data-whale-report] button, [data-whale-report-drawer] button, [data-whale-report-tabhost] button,
+[data-whale-report] input, [data-whale-report-drawer] input, [data-whale-report-tabhost] input { font: inherit; }
+[data-whale-report-drawer], [data-whale-report-tabhost] { container: dtrace / inline-size; }
+[data-whale-report-drawer] {
+  width: 680px; max-width: 94vw; background: var(--dt-paper); border-left-color: var(--dt-line);
+  box-shadow: -18px 0 48px rgba(7, 22, 47, .12);
+}
+[data-whale-report-head] {
+  min-height: 48px; padding: 0 20px; background: var(--dt-paper);
+  border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-title] { color: var(--dt-ink); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+[data-whale-report-close] { color: var(--dt-muted); }
+[data-whale-report-fab] {
+  width: 50px; height: 50px; border-radius: 50%; background: var(--dt-abyss);
+  box-shadow: 0 8px 24px rgba(7, 22, 47, .2);
+}
+[data-whale-report-fab]:hover { background: #10264d; transform: translateY(-2px); }
+[data-whale-report-tabhost] {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden; padding: 0;
+  color: var(--dt-ink); background: var(--dt-paper);
+}
+[data-whale-report-drawer] > [data-whale-report-body] {
+  display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; padding: 0;
+}
+[data-whale-report-tabs] {
+  position: sticky; top: 0; z-index: 20; flex: 0 0 auto; gap: 28px;
+  padding: 0 24px; background: rgba(245, 248, 249, .97); border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-tab] {
+  padding: 15px 0 12px; color: var(--dt-muted); font-size: 12px; font-weight: 650;
+  letter-spacing: .08em; border-bottom-width: 1px;
+}
+[data-whale-report-tab][data-active="true"] { color: var(--dt-ink); border-bottom-color: var(--dt-blue); }
+[data-whale-report-body] {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 0 24px 36px; background: var(--dt-paper);
+  scrollbar-color: var(--dt-line-strong) transparent;
+}
+
+/* Brand opening — editorial masthead, not a card. */
+[data-whale-report-brand] {
+  position: relative; min-height: 224px; margin: 0 -24px; padding: 32px 24px 28px;
+  display: block; overflow: hidden; background: var(--dt-paper-deep); border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-brandcopy] { position: relative; z-index: 3; max-width: 64%; }
+[data-whale-report-brandkicker], [data-whale-report-overline], [data-whale-report-micro],
+[data-whale-report-brandmeta], [data-whale-report-feedcode], [data-whale-report-feedindex],
+[data-whale-report-sessionindex], [data-whale-report-modelrank], [data-whale-report-scanmeta],
+[data-whale-report-reportlabel] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px; line-height: 1.5; letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-brandkicker] { color: var(--dt-blue); font-weight: 750; }
+[data-whale-report-brandname] {
+  margin-top: 16px; color: var(--dt-ink); font-size: clamp(34px, 8cqw, 52px); font-weight: 820;
+  line-height: .92; letter-spacing: -.055em;
+}
+[data-whale-report-brandname] span {
+  display: block; margin-top: 9px; color: var(--dt-ink); font-size: .43em; font-weight: 700;
+  line-height: 1; letter-spacing: .03em;
+}
+[data-whale-report-brandtag] {
+  max-width: 240px; margin-top: 22px; color: var(--dt-ink-soft); font-size: 12px; font-weight: 650;
+  line-height: 1.45; letter-spacing: .14em; text-transform: uppercase;
+}
+[data-whale-report-brandmeta] { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-top: 18px; color: var(--dt-muted); }
+[data-whale-report-brandmeta] span::before { content: ""; display: inline-block; width: 4px; height: 4px; margin: 0 7px 2px 0; background: var(--dt-cyan); border-radius: 50%; }
+[data-whale-report-brandvisual] { position: absolute; inset: 0; pointer-events: none; }
+[data-whale-report-heroimg] {
+  position: absolute; z-index: 2; right: 14px; bottom: -5px; width: clamp(118px, 31cqw, 166px); height: auto;
+  border-radius: 0; image-rendering: pixelated; filter: none; transform-origin: 50% 100%;
+  transition: transform .25s ease;
+}
+[data-whale-report-brand]:hover [data-whale-report-heroimg] { transform: translateY(-3px); }
+[data-whale-report-sonar] { position: absolute; right: 14px; bottom: 19px; width: 160px; aspect-ratio: 1; }
+[data-whale-report-sonar] i { position: absolute; inset: 50%; border: 1px solid rgba(77, 107, 254, .22); border-radius: 50%; transform: translate(-50%, -50%); }
+[data-whale-report-sonar] i:nth-child(1) { width: 46%; height: 46%; }
+[data-whale-report-sonar] i:nth-child(2) { width: 72%; height: 72%; }
+[data-whale-report-sonar] i:nth-child(3) { width: 100%; height: 100%; animation: dt-sonar 4.8s ease-out infinite; }
+[data-whale-report-depthscale] { position: absolute; right: 10px; top: 18px; height: 82px; padding-right: 14px; border-right: 1px solid var(--dt-line-strong); color: var(--dt-faint); font: 9px/1.1 ui-monospace, monospace; letter-spacing: .08em; }
+[data-whale-report-depthscale]::after { content: "4096m\\A 3072\\A 2048\\A 1024\\A 0000"; white-space: pre; display: block; line-height: 18px; text-align: right; }
+
+/* Period selector reads like a report index, not pills. */
+[data-whale-report-chips] {
+  gap: 0; margin: 0; padding: 0; flex-wrap: nowrap; overflow-x: auto; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-chip] {
+  flex: 0 0 auto; padding: 14px 14px 12px; border: 0; border-bottom: 2px solid transparent;
+  border-radius: 0; background: transparent; color: var(--dt-muted); font-size: 11.5px; font-weight: 650;
+}
+[data-whale-report-chip]:hover { border-bottom-color: var(--dt-line-strong); color: var(--dt-ink); background: transparent; }
+[data-whale-report-chip][data-active="true"] { color: var(--dt-blue); background: transparent; border-color: var(--dt-blue); }
+[data-whale-report-inputs] { margin: 0; padding: 14px 0; border-bottom: 1px solid var(--dt-line); }
+[data-whale-report-inputs] input { min-width: 0; border: 0; border-bottom: 1px solid var(--dt-line-strong); border-radius: 0; background: transparent; color: var(--dt-ink); }
+[data-whale-report-inputs] input:focus { box-shadow: none; border-color: var(--dt-blue); }
+
+/* Cost headline — one editorial datum with an instrumentation rail. */
+[data-whale-report-hero] {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .72fr); gap: 24px;
+  margin: 0; padding: 34px 0 30px; background: transparent; border: 0; border-bottom: 1px solid var(--dt-line); border-radius: 0;
+}
+[data-whale-report-herohead] { min-width: 0; }
+[data-whale-report-herolabel] { color: var(--dt-muted); font: 700 10px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
+[data-whale-report-heroval] {
+  margin: 8px 0 4px; color: var(--dt-ink); font-size: clamp(48px, 12cqw, 76px); font-weight: 830;
+  line-height: .98; letter-spacing: -.065em; font-variant-numeric: tabular-nums;
+}
+[data-whale-report-herodelta2] { gap: 7px; font-size: 12px; }
+[data-whale-report-herodelta2] em.up { color: var(--dt-red); }
+[data-whale-report-herodelta2] em.down { color: #267957; }
+[data-whale-report-herodelta2] span, [data-whale-report-herodelta2] .muted { color: var(--dt-muted); }
+[data-whale-report-herostat] {
+  align-self: end; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0;
+  margin: 0; padding: 0; border: 0; color: var(--dt-muted); font-size: 11px;
+}
+[data-whale-report-herostat] span { min-height: 60px; padding: 9px 10px; border-top: 1px solid var(--dt-line); }
+[data-whale-report-herostat] span:nth-child(odd) { border-right: 1px solid var(--dt-line); padding-left: 0; }
+[data-whale-report-herostat] b { display: block; margin-bottom: 4px; color: var(--dt-ink); font-size: 18px; line-height: 1; }
+
+/* Shared editorial section rhythm. */
+[data-whale-report-section] { margin-top: 34px; }
+[data-whale-report-sectionhead] {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: end; gap: 10px;
+  margin-bottom: 13px; padding-bottom: 9px; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-sectionindex] { color: var(--dt-blue); font: 700 10px/1 ui-monospace, monospace; letter-spacing: .12em; }
+[data-whale-report-sectiontitle] { color: var(--dt-ink); font-size: 17px; font-weight: 760; line-height: 1.15; letter-spacing: -.018em; }
+[data-whale-report-sectionmeta] { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; text-align: right; }
+[data-whale-report-h2] {
+  margin: 0 0 10px; color: var(--dt-ink); font-size: 14px; font-weight: 720; letter-spacing: -.01em;
+}
+[data-whale-report-card] { position: relative; margin: 0; padding: 0; background: transparent; border: 0; border-radius: 0; }
+[data-whale-report-card]::after { display: none; }
+[data-whale-report-zone] {
+  margin: 0 -12px; padding: 18px 12px 16px; background: var(--dt-paper-deep);
+  border-top: 1px solid var(--dt-line); border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-scanmeta] { display: flex; flex-wrap: wrap; gap: 7px 18px; margin-bottom: 13px; color: var(--dt-muted); }
+[data-whale-report-scanmeta] b { color: var(--dt-cyan); font-weight: 750; }
+
+/* Investigation log. */
+[data-whale-report-feed], [data-whale-report-insights] { display: block; margin: 0; }
+[data-whale-report-feedrow], [data-whale-report-insight] {
+  position: relative; display: grid; grid-template-columns: 32px 62px minmax(0, 1fr); gap: 10px;
+  align-items: start; padding: 14px 0; background: transparent; border: 0; border-bottom: 1px solid var(--dt-line);
+  border-radius: 0; cursor: pointer;
+}
+[data-whale-report-feedrow]:first-child, [data-whale-report-insight]:first-child { border-top: 1px solid var(--dt-line); }
+[data-whale-report-feedrow]:hover, [data-whale-report-insight]:hover { border-color: var(--dt-line-strong); background: rgba(255, 255, 255, .38); }
+[data-whale-report-feedrow][data-level="critical"], [data-whale-report-insight][data-level="critical"] { --dt-level: var(--dt-red); }
+[data-whale-report-feedrow][data-level="warning"], [data-whale-report-insight][data-level="warning"] { --dt-level: var(--dt-amber); }
+[data-whale-report-feedrow][data-level="tip"], [data-whale-report-insight][data-level="tip"] { --dt-level: #267957; }
+[data-whale-report-feedrow][data-level="info"], [data-whale-report-insight][data-level="info"] { --dt-level: var(--dt-blue); }
+[data-whale-report-feedindex] { color: var(--dt-faint); padding-top: 2px; }
+[data-whale-report-feedcode] { color: var(--dt-level, var(--dt-blue)); font-weight: 750; padding-top: 2px; }
+[data-whale-report-feedmain] { min-width: 0; }
+[data-whale-report-feedtitle], [data-whale-report-insighthead] b { color: var(--dt-ink); font-size: 13.5px; font-weight: 720; line-height: 1.45; }
+[data-whale-report-feedpreview] { margin-top: 4px; color: var(--dt-muted); font-size: 11.5px; }
+[data-whale-report-feedrow][data-open="true"] [data-whale-report-feedmain] { padding-bottom: 4px; }
+[data-whale-report-feeddetail], [data-whale-report-insightdetail] { margin-top: 10px; color: var(--dt-ink-soft); font-size: 12.5px; line-height: 1.75; }
+[data-whale-report-feedaction], [data-whale-report-insightaction] { margin-top: 7px; color: var(--dt-blue); font-size: 12.5px; }
+[data-whale-report-feedestimate], [data-whale-report-insightestimate] { color: var(--dt-muted); }
+[data-whale-report-feedmore] {
+  width: 100%; margin: 0; padding: 12px 0; background: transparent; border: 0; border-bottom: 1px solid var(--dt-line);
+  border-radius: 0; color: var(--dt-blue); font-size: 11.5px; text-align: left;
+}
+[data-whale-report-feedmore]:hover { background: transparent; border-color: var(--dt-line-strong); }
+[data-whale-report-feeddot] { display: none; }
+[data-whale-report-insighthead] { display: flex; justify-content: space-between; gap: 12px; }
+[data-whale-report-insighthead] span { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; text-transform: uppercase; }
+[data-whale-report-fix] {
+  margin-top: 12px; padding: 10px 0 2px 12px; background: transparent; border: 0; border-left: 1px solid var(--dt-blue);
+  border-radius: 0; color: var(--dt-ink-soft); font-size: 11.5px;
+}
+[data-whale-report-fixcmd] code { background: transparent; border: 0; border-bottom: 1px solid var(--dt-line); border-radius: 0; }
+[data-whale-report-fixcmd] button { padding: 4px 0; }
+
+/* Whale note — a magazine marginalia rather than a dashboard card. */
+[data-whale-report-note], [data-whale-report-note-short] {
+  position: relative; overflow: visible; background: #eef3f8; border: 0; border-top: 1px solid #ccd9e3; border-bottom: 1px solid #ccd9e3;
+  border-radius: 0;
+}
+[data-whale-report-note-short] {
+  display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; align-items: center;
+  margin: 34px -12px 0; padding: 18px 18px 18px 12px; cursor: pointer;
+}
+[data-whale-report-note-short]:hover { border-color: var(--dt-blue); }
+[data-whale-report-note-short] img { width: 62px !important; height: 62px !important; image-rendering: pixelated; transform: translateY(5px); }
+[data-whale-report-notecode] { color: var(--dt-blue); font: 700 9px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
+[data-whale-report-note-short] b { margin-top: 3px; color: var(--dt-ink); font-size: 13px; letter-spacing: .02em; }
+[data-whale-report-note-short] span, [data-whale-report-notequote] { display: block; margin-top: 5px; color: var(--dt-ink); font-family: ui-serif, Georgia, "Songti SC", serif; font-size: 15px; line-height: 1.65; }
+[data-whale-report-note] { margin: 30px -12px 0; padding: 20px 22px 18px 92px; min-height: 132px; }
+[data-whale-report-note] > [data-whale-report-notehead] > img { position: absolute; left: 14px; top: 18px; width: 64px !important; height: 64px !important; image-rendering: pixelated; }
+[data-whale-report-notehead] { margin: 0 0 9px; align-items: center; }
+[data-whale-report-notetitle] { display: block; }
+[data-whale-report-notetitle] b { display: block; color: var(--dt-blue); font: 750 10px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
+[data-whale-report-noteopts] { display: inline-flex; gap: 12px; margin-top: 7px; padding: 0; background: transparent; border-radius: 0; }
+[data-whale-report-noteopts] button { padding: 0 0 3px; color: var(--dt-muted); border-bottom: 1px solid transparent; border-radius: 0; font-size: 10px; }
+[data-whale-report-noteopts] button[data-active="true"] { color: var(--dt-ink); background: transparent; border-bottom-color: var(--dt-blue); }
+[data-whale-report-noteline] { padding: 0; color: var(--dt-ink); font-family: ui-serif, Georgia, "Songti SC", serif; font-size: 14px; }
+[data-whale-report-notelineitem] { padding: 0; line-height: 1.75; }
+[data-whale-report-notemore] { color: var(--dt-muted); font-size: 11.5px; }
+[data-whale-report-notefoot] { color: var(--dt-faint); border-top-color: #ccd9e3; font: 9px/1.6 ui-monospace, monospace; letter-spacing: .04em; }
+
+/* Activity and token scan. */
+[data-whale-report-weekrow] { gap: 9px; margin-bottom: 5px; }
+[data-whale-report-weekrowlabel] { width: 43px; color: var(--dt-faint); font: 9px/1 ui-monospace, monospace; }
+[data-whale-report-squares] { gap: 3px; }
+[data-whale-report-squares] i { border-radius: 1px; outline: 1px solid rgba(11, 23, 51, .025); }
+[data-whale-report-legend] { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; }
+[data-whale-report-legend] i { width: 10px; height: 10px; border-radius: 1px; }
+[data-whale-report-tokenbar] { height: 6px; margin: 10px 0; border-radius: 0; background: var(--dt-line); }
+[data-whale-report-tokenlegend] { gap: 7px 18px; color: var(--dt-muted); font: 10px/1.6 ui-monospace, monospace; }
+[data-whale-report-tokenlegend] i { width: 5px; height: 5px; border-radius: 0; }
+
+/* Model allocation ledger. */
+[data-whale-report-modeltable] { display: block; }
+[data-whale-report-modelrow] {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px;
+  padding: 14px 0; background: transparent; border: 0; border-bottom: 1px solid var(--dt-line); border-radius: 0;
+}
+[data-whale-report-modelrow]:first-child { border-top: 1px solid var(--dt-line); }
+[data-whale-report-modelrank] { grid-row: 1 / span 3; color: var(--dt-faint); padding-top: 2px; }
+[data-whale-report-modelhead] { margin: 0; }
+[data-whale-report-modelhead] b { color: var(--dt-ink); font-size: 13.5px; }
+[data-whale-report-modelhead] span { color: var(--dt-blue); font: 700 11px/1.5 ui-monospace, monospace; }
+[data-whale-report-modelbar] { height: 2px; margin-top: 9px; border-radius: 0; background: var(--dt-line); overflow: visible; }
+[data-whale-report-modelbar] i { min-width: 2px; }
+[data-whale-report-modelnums] { margin-top: 7px; color: var(--dt-muted); font: 9.5px/1.55 ui-monospace, monospace; }
+
+/* Full report opening and section compositions. */
+[data-whale-report-reportopening] {
+  position: relative; overflow: hidden; margin: 0 -24px; padding: 28px 24px 24px; color: #f5f8ff; background: var(--dt-abyss);
+  border-bottom: 1px solid #18345d;
+}
+[data-whale-report-reportopening] [data-whale-report-actions] { position: relative; z-index: 2; }
+[data-whale-report-reportopening] [data-whale-report-btn] {
+  padding: 8px 12px; color: #fff; background: var(--dt-blue); border-color: var(--dt-blue); white-space: nowrap;
+}
+[data-whale-report-reportopening] [data-whale-report-btn]:hover { background: #627cff; border-color: #627cff; }
+[data-whale-report-reportopening] [data-whale-report-btn][data-ghost="true"] {
+  color: #c6d3e5; background: transparent; border-color: rgba(198, 211, 229, .28);
+}
+[data-whale-report-reportopening] [data-whale-report-btn][data-ghost="true"]:hover {
+  color: #fff; background: rgba(255, 255, 255, .06); border-color: rgba(198, 211, 229, .48);
+}
+[data-whale-report-reportlabel] { color: #7fcde0; }
+[data-whale-report-reptitle] { margin-top: 12px; color: #f5f8ff; font-size: clamp(25px, 6cqw, 38px); font-weight: 790; letter-spacing: -.035em; }
+[data-whale-report-repsub] { color: #9fb1ca; font: 10px/1.6 ui-monospace, monospace; letter-spacing: .06em; }
+[data-whale-report-openingcost] { margin-top: 30px; color: #fff; font-size: clamp(48px, 12cqw, 72px); font-weight: 820; line-height: 1; letter-spacing: -.06em; }
+[data-whale-report-reportopening] [data-whale-report-herodelta2] span { color: #9fb1ca; }
+[data-whale-report-reportopening] [data-whale-report-herodelta2] .muted { color: #7f93af; }
+[data-whale-report-headrow] { position: relative; z-index: 2; padding: 0; }
+[data-whale-report-reportopening] [data-whale-report-statgrid] { margin: 26px 0 0; }
+[data-whale-report-statgrid] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+[data-whale-report-stat] { min-width: 0; padding: 12px 10px 8px 0; background: transparent; border: 0; border-top: 1px solid rgba(207, 222, 245, .24); border-radius: 0; }
+[data-whale-report-stat]:not(:nth-child(3n + 1)) { padding-left: 10px; border-left: 1px solid rgba(207, 222, 245, .16); }
+[data-whale-report-stat] b { color: #fff; font-size: clamp(18px, 5cqw, 27px); }
+[data-whale-report-stat] span { color: #91a5c1; font: 9px/1.5 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
+[data-whale-report-stat] em.delta-up { color: #ff8e98; }
+[data-whale-report-stat] em.delta-down { color: #75d6b1; }
+[data-whale-report-reporthero] { position: absolute; right: 18px; top: 76px; width: 104px; height: 104px; object-fit: contain; image-rendering: pixelated; opacity: .82; }
+[data-whale-report-reportsection] { margin-top: 38px; padding-top: 0; }
+[data-whale-report-reportsection] > [data-whale-report-sectionhead] { margin-bottom: 16px; }
+[data-whale-report-reportgrid] { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(210px, .82fr); gap: 28px; }
+[data-whale-report-reportgrid="equal"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+[data-whale-report-subsection] { min-width: 0; }
+[data-whale-report-tokenline] { color: var(--dt-ink-soft); font-size: 12.5px; line-height: 1.75; }
+[data-whale-report-tokenline] .muted, [data-whale-report-tokenline].muted { color: var(--dt-faint); }
+
+/* Risk log and tools ledger. */
+[data-whale-report-risk] { padding-left: 14px; border-left: 2px solid var(--dt-amber); }
+[data-whale-report-risk][data-severity="critical"] { border-left-color: var(--dt-red); }
+[data-whale-report-dangersum] { margin: 0 0 12px; padding: 0; background: transparent; border: 0; border-radius: 0; color: var(--dt-ink-soft); }
+[data-whale-report-dangercats] { gap: 6px 14px; margin-bottom: 11px; }
+[data-whale-report-dangercat], [data-whale-report-secretcat],
+[data-whale-report-badge-red], [data-whale-report-badge-amber], [data-whale-report-badge-gray] {
+  padding: 0; background: transparent; border: 0; border-radius: 0; font: 9px/1.5 ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase;
+}
+[data-whale-report-dangercat], [data-whale-report-badge-red] { color: var(--dt-red); }
+[data-whale-report-secretcat] { color: #6750a4; }
+[data-whale-report-badge-amber] { color: var(--dt-amber); }
+[data-whale-report-badge-gray] { color: var(--dt-muted); }
+[data-whale-report-danger] {
+  margin: 0; padding: 10px 0; background: transparent !important; border: 0; border-bottom: 1px solid #ead9dc !important;
+  border-radius: 0; color: #9f2e3a !important; font-size: 11px;
+}
+[data-whale-report-danger] em { color: var(--dt-muted) !important; }
+[data-whale-report-samplesbtn] { padding-left: 0; color: var(--dt-blue); }
+[data-whale-report-toollist] { border-top: 1px solid var(--dt-line); }
+[data-whale-report-toolrow] { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--dt-line); color: var(--dt-ink-soft); font-size: 12px; }
+[data-whale-report-toolrow] code { color: var(--dt-ink); font-family: ui-monospace, monospace; }
+[data-whale-report-toolrow] b { color: var(--dt-blue); font-family: ui-monospace, monospace; }
+
+/* Trace log. */
+[data-whale-report-trace] { margin-top: 34px; }
+[data-whale-report-sessionrow] {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 14px 0; border-bottom: 1px solid var(--dt-line); border-radius: 0;
+}
+[data-whale-report-sessionrow]:first-of-type { border-top: 1px solid var(--dt-line); }
+[data-whale-report-sessionrow]:hover { background: rgba(255, 255, 255, .42); border-radius: 0; }
+[data-whale-report-sessionindex] { color: var(--dt-faint); padding-top: 2px; }
+[data-whale-report-sessionmain] b { color: var(--dt-ink); font-size: 13px; }
+[data-whale-report-sessionmain] span { gap: 6px 12px; flex-wrap: wrap; margin-top: 6px; }
+[data-whale-report-sessionmeta] { color: var(--dt-muted); font: 9px/1.5 ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+[data-whale-report-sessioncost] { color: var(--dt-blue); font: 750 13px/1.4 ui-monospace, monospace; text-align: right; }
+[data-whale-report-sessioncost] small { display: block; margin-top: 3px; color: var(--dt-faint); font-size: 8.5px; font-weight: 500; }
+[data-whale-report-sessiondetail] { margin-left: 48px; padding: 11px 0 14px; border-bottom: 1px solid var(--dt-line); }
+[data-whale-report-btn] { border-radius: 3px; background: var(--dt-abyss); font-size: 11.5px; letter-spacing: .02em; }
+[data-whale-report-btn]:hover { background: #10264d; }
+[data-whale-report-btn][data-ghost="true"] { background: transparent; color: var(--dt-ink-soft); border-color: var(--dt-line-strong); }
+[data-whale-report-fullbtn] { margin: 34px 0 0; padding: 14px; border-radius: 2px; letter-spacing: .08em; text-transform: uppercase; }
+
+/* History becomes an archive index. */
+[data-whale-report-historyhead] { padding: 28px 0 12px; border-bottom: 1px solid var(--dt-line); }
+[data-whale-report-hitem] { margin: 0; padding: 15px 0; background: transparent; border: 0; border-bottom: 1px solid var(--dt-line); border-radius: 0; }
+[data-whale-report-hitem]:hover { background: rgba(255, 255, 255, .42); border-color: var(--dt-line-strong); }
+[data-whale-report-hitem] b { color: var(--dt-ink); }
+[data-whale-report-hitem] span { color: var(--dt-muted); font-family: ui-monospace, monospace; font-size: 10px; }
+
+/* Loading and restrained motion. */
+[data-whale-report-sk-hero], [data-whale-report-sk-line] { background: var(--dt-line); animation: dt-pulse 1.25s ease-in-out infinite; }
+[data-whale-report-section], [data-whale-report-hero], [data-whale-report-brand], [data-whale-report-reportsection] { animation: dt-reveal .22s ease-out both; }
+@keyframes dt-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dt-pulse { 50% { opacity: .52; } }
+@keyframes dt-sonar { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.62); } 28% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
+
+@container dtrace (max-width: 620px) {
+  [data-whale-report-body] { padding-right: 18px; padding-left: 18px; }
+  [data-whale-report-brand], [data-whale-report-reportopening] { margin-right: -18px; margin-left: -18px; padding-right: 18px; padding-left: 18px; }
+  [data-whale-report-hero] { grid-template-columns: 1fr; gap: 18px; }
+  [data-whale-report-herostat] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  [data-whale-report-herostat] span { min-height: 48px; padding-left: 9px; border-left: 1px solid var(--dt-line); border-right: 0 !important; }
+  [data-whale-report-herostat] span:first-child { padding-left: 0; border-left: 0; }
+  [data-whale-report-reportgrid], [data-whale-report-reportgrid="equal"] { grid-template-columns: 1fr; gap: 28px; }
+  [data-whale-report-headrow] { display: block; }
+  [data-whale-report-actions] { margin-top: 16px; flex-wrap: wrap; }
+  [data-whale-report-reporthero] { top: 148px; width: 84px; height: 84px; opacity: .66; }
+}
+@container dtrace (max-width: 460px) {
+  [data-whale-report-body] { padding-right: 14px; padding-left: 14px; }
+  [data-whale-report-tabs] { padding: 0 14px; }
+  [data-whale-report-brand], [data-whale-report-reportopening] { margin-right: -14px; margin-left: -14px; padding-right: 14px; padding-left: 14px; }
+  [data-whale-report-brand] { min-height: 205px; }
+  [data-whale-report-brandcopy] { max-width: 68%; }
+  [data-whale-report-brandname] { font-size: 34px; }
+  [data-whale-report-brandtag] { max-width: 176px; font-size: 10px; }
+  [data-whale-report-brandmeta] { display: none; }
+  [data-whale-report-heroimg] { right: 2px; width: 112px; }
+  [data-whale-report-sonar] { right: -10px; width: 126px; }
+  [data-whale-report-depthscale] { display: none; }
+  [data-whale-report-chips] { margin-right: -14px; margin-left: -14px; padding-left: 6px; }
+  [data-whale-report-heroval] { font-size: 49px; }
+  [data-whale-report-herostat] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-whale-report-herostat] span { border-left: 0; }
+  [data-whale-report-herostat] span:nth-child(even) { padding-left: 10px; border-left: 1px solid var(--dt-line); }
+  [data-whale-report-feedrow], [data-whale-report-insight] { grid-template-columns: 28px 48px minmax(0, 1fr); gap: 6px; }
+  [data-whale-report-sectionhead] { grid-template-columns: 34px minmax(0, 1fr); }
+  [data-whale-report-sectionmeta] { display: none; }
+  [data-whale-report-note] { margin-right: -7px; margin-left: -7px; padding: 18px 14px 16px 72px; }
+  [data-whale-report-note] > [data-whale-report-notehead] > img { left: 8px; width: 52px !important; height: 52px !important; }
+  [data-whale-report-note-short] { margin-right: -7px; margin-left: -7px; grid-template-columns: 52px minmax(0, 1fr); padding-left: 8px; }
+  [data-whale-report-note-short] img { width: 52px !important; height: 52px !important; }
+  [data-whale-report-statgrid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-whale-report-stat]:not(:nth-child(3n + 1)) { padding-left: 0; border-left: 0; }
+  [data-whale-report-stat]:nth-child(even) { padding-left: 10px; border-left: 1px solid rgba(207, 222, 245, .16); }
+  [data-whale-report-reporthero] { top: 154px; width: 78px; height: 78px; opacity: .54; }
+  [data-whale-report-sessionrow] { grid-template-columns: 31px minmax(0, 1fr) auto; gap: 7px; }
+  [data-whale-report-sessiondetail] { margin-left: 38px; display: block; }
+  [data-whale-report-sessiondetail] button { margin-top: 9px; }
+  [data-whale-report-weekrowlabel] { width: 36px; }
+  [data-whale-report-squares] { gap: 2px; }
+}
+@container dtrace (max-width: 360px) {
+  [data-whale-report-chips] {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-right: -14px; margin-left: -14px; padding-left: 0; overflow: visible;
+  }
+  [data-whale-report-chip] { min-width: 0; width: 100%; padding: 10px 3px 9px; text-align: center; }
+  [data-whale-report-sessionmain] { min-width: 0; overflow: hidden; }
+  [data-whale-report-sessionmain] b { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-whale-report] *, [data-whale-report] *::before, [data-whale-report] *::after,
+  [data-whale-report-drawer] *, [data-whale-report-drawer] *::before, [data-whale-report-drawer] *::after,
+  [data-whale-report-tabhost] *, [data-whale-report-tabhost] *::before, [data-whale-report-tabhost] *::after {
+    scroll-behavior: auto !important; animation: none !important; transition: none !important;
+  }
+}
+
 @media print {
   body * { visibility: hidden; }
   [data-whale-report-drawer], [data-whale-report-drawer] * { visibility: visible; }
@@ -430,6 +841,7 @@ interface StatsJson {
     dangerCount: number;
     redDanger: number;
     cost: number;
+    modelTokens?: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
   }[];
 }
 
@@ -487,6 +899,43 @@ function dateStr(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+function isoWeek(ms: number): number {
+  const date = new Date(ms);
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return Math.ceil(((utc.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+function traceCode(preset: string, to = Date.now()): string {
+  if (preset === "weekly") return `TRACE / WEEK ${String(isoWeek(to)).padStart(2, "0")}`;
+  return `TRACE / ${preset.toUpperCase()}`;
+}
+
+function cacheRate(stats: StatsJson): number {
+  return Math.round((stats.tokens.cacheRead / Math.max(1, stats.tokens.input + stats.tokens.cacheRead)) * 100);
+}
+
+function insightCode(insight: InsightJson): string {
+  if (insight.id.includes("secret")) return "SECRET";
+  if (insight.id.includes("retry")) return "RETRY";
+  if (insight.id.includes("cost")) return "COST";
+  if (insight.id.includes("cache")) return "CACHE";
+  if (insight.id.includes("night")) return "DEPTH";
+  if (insight.id.includes("danger")) return "RISK";
+  return "TRACE";
+}
+
+function SectionHeader({ index, title, meta }: { index: string; title: string; meta?: string }): ReactNode {
+  return (
+    <div data-whale-report-sectionhead>
+      <span data-whale-report-sectionindex>{index}</span>
+      <div data-whale-report-sectiontitle>{title}</div>
+      {meta !== undefined && <span data-whale-report-sectionmeta>{meta}</span>}
+    </div>
+  );
+}
+
 function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
   const max = Math.max(1, ...histogram);
   const hue = (level: number): string => {
@@ -517,10 +966,13 @@ function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
 
 /** 每日事件趋势：纯 CSS 柱状图。 */
 /** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
-/** 绿色强度（越绿越活跃）。低值用幂放大：count 只是峰值 1% 的方块也要肉眼可见。 */
+/** 声呐蓝强度。低值用幂放大：count 只是峰值 1% 的方块也要肉眼可见。 */
 function green(level: number): string {
   const boosted = Math.pow(Math.min(1, Math.max(0, level)), 0.4);
-  return `rgba(34,197,94,${(0.22 + boosted * 0.78).toFixed(2)})`;
+  const alpha = 0.2 + boosted * 0.8;
+  return boosted > 0.72
+    ? `rgba(54,185,209,${alpha.toFixed(2)})`
+    : `rgba(77,107,254,${alpha.toFixed(2)})`;
 }
 
 /** 图例：少 → 多。 */
@@ -548,7 +1000,7 @@ function SquareRow({ label, cells }: { label: string; cells: { title: string; le
       <span data-whale-report-weekrowlabel>{label}</span>
       <div data-whale-report-squares>
         {cells.map((c, i) => (
-          <i key={i} title={c.title} style={{ background: c.level === 0 ? "#f1f5f9" : green(c.level) }} />
+          <i key={i} title={c.title} style={{ background: c.level === 0 ? "#dce7ec" : green(c.level) }} />
         ))}
       </div>
     </div>
@@ -689,15 +1141,15 @@ function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
     <div>
       <div data-whale-report-tokenbar>
         {seg(tokens.input, "#4d6bfe", "输入")}
-        {seg(tokens.output, "#38bdf8", "输出")}
-        {seg(tokens.cacheRead, "#94a3b8", "缓存命中")}
-        {seg(tokens.reasoning, "#c4b5fd", "思考")}
+        {seg(tokens.output, "#36b9d1", "输出")}
+        {seg(tokens.cacheRead, "#9aaaba", "缓存命中")}
+        {seg(tokens.reasoning, "#0b1733", "思考")}
       </div>
       <div data-whale-report-tokenlegend>
         <span><i style={{ background: "#4d6bfe" }} />输入 {fmt(tokens.input)}</span>
-        <span><i style={{ background: "#38bdf8" }} />输出 {fmt(tokens.output)}</span>
-        <span><i style={{ background: "#94a3b8" }} />缓存 {fmt(tokens.cacheRead)}</span>
-        <span><i style={{ background: "#c4b5fd" }} />思考 {fmt(tokens.reasoning)}</span>
+        <span><i style={{ background: "#36b9d1" }} />输出 {fmt(tokens.output)}</span>
+        <span><i style={{ background: "#9aaaba" }} />缓存 {fmt(tokens.cacheRead)}</span>
+        <span><i style={{ background: "#0b1733" }} />思考 {fmt(tokens.reasoning)}</span>
       </div>
     </div>
   );
@@ -709,24 +1161,24 @@ function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: Repo
     (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
   );
   if (entries.length === 0) return <div data-whale-report-tokenline>（无模型用量数据）</div>;
+  const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
   return (
     <div data-whale-report-modeltable>
-      {entries.map(([model, u]) => {
+      {entries.map(([model, u], index) => {
         const total = u.input + u.output + u.cacheRead + u.reasoning;
+        const share = grand > 0 ? Math.round((total / grand) * 100) : 0;
         return (
           <div key={model} data-whale-report-modelrow>
+            <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
             <div data-whale-report-modelhead>
               <b>{model}</b>
-              <span>{fmt(total)} token{typeof cost?.perModel[model] === "number" ? ` · ¥${cost.perModel[model].toFixed(2)}` : ""}</span>
+              <span>{share}%{typeof cost?.perModel[model] === "number" ? ` / ¥${cost.perModel[model].toFixed(2)}` : ""}</span>
             </div>
             <div data-whale-report-modelbar>
-              <i title={`输入 ${fmt(u.input)}`} style={{ width: `${(u.input / total) * 100}%`, background: "#4d6bfe" }} />
-              <i title={`输出 ${fmt(u.output)}`} style={{ width: `${(u.output / total) * 100}%`, background: "#38bdf8" }} />
-              <i title={`缓存命中 ${fmt(u.cacheRead)}`} style={{ width: `${(u.cacheRead / total) * 100}%`, background: "#94a3b8" }} />
-              <i title={`思考 ${fmt(u.reasoning)}`} style={{ width: `${(u.reasoning / total) * 100}%`, background: "#c4b5fd" }} />
+              <i title={`${model} · ${share}%`} style={{ width: `${share}%`, background: "#4d6bfe" }} />
             </div>
             <div data-whale-report-modelnums>
-              输入 {fmt(u.input)} · 输出 {fmt(u.output)} · 缓存 {fmt(u.cacheRead)} · 思考 {fmt(u.reasoning)}
+              TOTAL {fmt(total)} · IN {fmt(u.input)} · OUT {fmt(u.output)} · CACHE {fmt(u.cacheRead)} · THINK {fmt(u.reasoning)}
             </div>
           </div>
         );
@@ -748,27 +1200,31 @@ function InsightsSection({ insights }: { insights: InsightJson[] }): ReactNode {
   const [openId, setOpenId] = useState<string | null>(null);
   return (
     <div data-whale-report-insights>
-      {shown.map((insight) => {
-        const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.warning;
+      {shown.map((insight, index) => {
         const open = openId === insight.id;
         return (
           <div
             key={insight.id}
             data-whale-report-insight
+            data-level={insight.level}
             data-open={open}
             onClick={() => setOpenId(open ? null : insight.id)}
           >
-            <div data-whale-report-insighthead>
-              <b>{insight.title}</b>
-              <span>{open ? "收起" : "详情"}</span>
+            <span data-whale-report-feedindex>{String(index + 1).padStart(2, "0")}</span>
+            <span data-whale-report-feedcode>{insightCode(insight)}</span>
+            <div data-whale-report-feedmain>
+              <div data-whale-report-insighthead>
+                <b>{insight.title}</b>
+                <span>{open ? "CLOSE" : "OPEN"}</span>
+              </div>
+              {open && (
+                <>
+                  <div data-whale-report-insightdetail>{insight.detail}</div>
+                  <div data-whale-report-insightaction>{insight.action}</div>
+                  {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
+                </>
+              )}
             </div>
-            {open && (
-              <>
-                <div data-whale-report-insightdetail>{insight.detail}</div>
-                <div data-whale-report-insightaction>{insight.action}</div>
-                {insight.estimate !== undefined && <div data-whale-report-insightestimate>{insight.estimate}</div>}
-              </>
-            )}
           </div>
         );
       })}
@@ -811,158 +1267,185 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
     ? Math.round(((report.cost.total - report.prev.cost) / report.prev.cost) * 100)
     : null;
   return (
-    <div>
-      <div data-whale-report-headrow>
-        <div>
-          <div data-whale-report-reptitle>深迹 {PRESETS.find((p) => p.key === report.preset)?.label ?? "报告"}</div>
-          <div data-whale-report-repsub>{dateStr(report.from)} ~ {dateStr(report.to)}</div>
+    <div data-whale-report-report>
+      <header data-whale-report-reportopening>
+        <img
+          src="/whale/assets/whale-hero.svg"
+          alt=""
+          data-whale-report-reporthero
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+        <div data-whale-report-headrow>
+          <div>
+            <div data-whale-report-reportlabel>{traceCode(report.preset, report.to)} / AGENT RESEARCH REPORT</div>
+            <div data-whale-report-reptitle>深迹 {PRESETS.find((p) => p.key === report.preset)?.label ?? "报告"}</div>
+            <div data-whale-report-repsub>{dateStr(report.from)} — {dateStr(report.to)} / CONTEXT ONLINE</div>
+          </div>
+          <div data-whale-report-actions>
+            <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
+            <button data-whale-report-btn data-ghost="true" onClick={() => exportReportImage(report)}>图片</button>
+            <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
+          </div>
         </div>
-        <div data-whale-report-actions>
-          <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
-          <button data-whale-report-btn data-ghost="true" onClick={() => exportReportImage(report)}>图片</button>
-          <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
+        <div data-whale-report-openingcost>¥{typeof report.cost?.total === "number" ? report.cost.total.toFixed(2) : "—"}</div>
+        <div data-whale-report-herodelta2>
+          {delta === null ? (
+            <span className="muted">BASELINE / 首次记录</span>
+          ) : (
+            <><em className={delta > 0 ? "up" : "down"}>{delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%</em><span> vs 上周期</span></>
+          )}
         </div>
-      </div>
+        <div data-whale-report-statgrid>
+          <div data-whale-report-stat><b>{s.sessions}</b><span>Sessions</span></div>
+          <div data-whale-report-stat><b>{s.turns}</b><span>Turns</span></div>
+          <div data-whale-report-stat><b>{fmt(s.toolCallsTotal)}</b><span>Tool calls</span></div>
+          <div data-whale-report-stat><b>{fmt(s.commands)}</b><span>Commands</span></div>
+          <div data-whale-report-stat><b>{fmt(totalTokens)}</b><span>Token burn</span></div>
+          <div data-whale-report-stat><b>{cacheRate(s)}%</b><span>Cache hit</span></div>
+        </div>
+      </header>
 
-      <div data-whale-report-statgrid>
-        <div data-whale-report-stat><b>{s.sessions}</b><span>会话</span></div>
-        <div data-whale-report-stat><b>{s.turns}</b><span>回合</span></div>
-        <div data-whale-report-stat><b>{fmt(s.toolCallsTotal)}</b><span>工具调用</span></div>
-        <div data-whale-report-stat><b>{fmt(s.commands)}</b><span>命令</span></div>
-        <div data-whale-report-stat><b>{fmt(totalTokens)}</b><span>Token</span></div>
-        <div data-whale-report-stat>
-          <b>¥{typeof report.cost?.total === "number" ? report.cost.total.toFixed(2) : "—"}</b>
-          <span>
-            预估费用
-            {delta !== null && (
-              <em className={delta > 0 ? "delta-up" : "delta-down"}>{delta > 0 ? "▲" : "▼"} {Math.abs(delta)}%</em>
-            )}
-          </span>
-        </div>
-      </div>
-
-      <InsightsSection insights={report.insights ?? []} />
       <WhaleNote report={report} />
 
-      <div data-whale-report-card>
-        <div data-whale-report-h2>活跃时段（凌晨 {night}%）</div>
-        <ActivityStrip report={report} />
-        <div data-whale-report-tokenline>
-          活跃 {s.activeDays} 天
-          {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
+      <section data-whale-report-reportsection>
+        <SectionHeader index="02" title="本期发现" meta="FINDINGS / INVESTIGATION LOG" />
+        {(report.insights ?? []).filter((item) => item.level !== "info").length > 0
+          ? <InsightsSection insights={report.insights ?? []} />
+          : <div data-whale-report-tokenline>本期没有需要升级处理的异常。PING / OK</div>}
+      </section>
+
+      <section data-whale-report-reportsection>
+        <SectionHeader index="03" title="活跃与 Token" meta={`ACTIVITY / NIGHT ${night}%`} />
+        <div data-whale-report-reportgrid>
+          <div data-whale-report-subsection data-whale-report-zone>
+            <div data-whale-report-scanmeta>
+              <span>SCAN <b>00—24</b></span><span>DEPTH <b>4,096m</b></span><span>PING <b>OK</b></span><span>NIGHT <b>{night}%</b></span>
+            </div>
+            <ActivityStrip report={report} />
+            <div data-whale-report-tokenline style={{ marginTop: 12 }}>
+              活跃 {s.activeDays} 天
+              {s.busiestDay ? <> · 最忙 <b>{s.busiestDay.date}</b>（{s.busiestDay.events} 条事件）</> : null}
+            </div>
+          </div>
+          <div data-whale-report-subsection>
+            <div data-whale-report-h2>RESOURCE / TOKEN PROFILE</div>
+            <TokenBar tokens={s.tokens} />
+            <div data-whale-report-tokenline style={{ marginTop: 14 }}>
+              共消耗 <b>{fmt(totalTokens)}</b> token；缓存命中 <b>{cacheRate(s)}%</b>。
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div data-whale-report-card>
-        <div data-whale-report-h2>Token 构成</div>
-        <TokenBar tokens={s.tokens} />
-      </div>
-
-      <div data-whale-report-card>
-        <div data-whale-report-h2>模型用量（DeepSeek 官方计价）</div>
-        <ModelTable models={s.models ?? {}} cost={report.cost} />
-        {typeof report.cost?.total === "number" && report.cost.total > 0 && (
-          <div data-whale-report-tokenline style={{ marginTop: 8 }}>
-            预估合计 <b>¥{report.cost.total.toFixed(2)}</b>
-            <span className="muted"> · {report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 以平台账单为准</span>
+      <section data-whale-report-reportsection>
+        <SectionHeader index="04" title="模型与工具" meta="ALLOCATION / INSTRUMENTATION" />
+        <div data-whale-report-reportgrid="equal">
+          <div data-whale-report-subsection>
+            <div data-whale-report-h2>MODEL ALLOCATION</div>
+            <ModelTable models={s.models ?? {}} cost={report.cost} />
+            {typeof report.cost?.total === "number" && report.cost.total > 0 && (
+              <div data-whale-report-tokenline style={{ marginTop: 10 }}>
+                预估合计 <b>¥{report.cost.total.toFixed(2)}</b>
+                <span className="muted"> · {report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 以平台账单为准</span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-
-      <div data-whale-report-card>
-        <div data-whale-report-h2>工具使用（按族）</div>
-        {toolFamilies(s.toolCalls ?? {}).length === 0 ? (
-          <div data-whale-report-tokenline>（没有调用工具）</div>
-        ) : (
-          toolFamilies(s.toolCalls ?? {}).map((fam) => (
-            <div key={fam.family} data-whale-report-tokenline>
-              <code>{fam.family}</code> × {fam.count}
-            </div>
-          ))
-        )}
-        {(s.plugins ?? []).length > 0 && (
-          <div data-whale-report-tokenline style={{ marginTop: 8 }} className="muted">
-            已安装插件：{(s.plugins ?? []).join(" · ")}
-          </div>
-        )}
-      </div>
-
-      <div data-whale-report-card>
-        <div data-whale-report-h2>危险操作（{danger.length}）</div>
-        {danger.length === 0 ? (
-          <div data-whale-report-tokenline>无危险操作</div>
-        ) : (
-          <>
-            <div data-whale-report-dangersum>{summary}</div>
-            <div data-whale-report-dangercats>
-              {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
-                .sort((a, b) => b[1] - a[1])
-                .map(([label, count]) => (
-                  <span key={label} data-whale-report-dangercat>
-                    {label} <b>{count}</b>
-                  </span>
+          <div data-whale-report-subsection>
+            <div data-whale-report-h2>TOOL CALL LEDGER</div>
+            {topTools.length === 0 ? (
+              <div data-whale-report-tokenline>（没有调用工具）</div>
+            ) : (
+              <div data-whale-report-toollist>
+                {toolFamilies(s.toolCalls ?? {}).map((fam) => (
+                  <div key={fam.family} data-whale-report-toolrow><code>{fam.family}</code><b>{fam.count}</b></div>
                 ))}
-            </div>
-            <button
-              data-whale-report-chip
-              data-whale-report-samplesbtn
-              onClick={() => {
-                setSamplesShown(!samplesShown);
-                setDangerExpanded(false);
-              }}
-            >
-              {samplesShown ? "收起样本" : `查看样本（${danger.length}）`}
-            </button>
-            {samplesShown && (
+              </div>
+            )}
+            {(s.plugins ?? []).length > 0 && (
+              <div data-whale-report-tokenline style={{ marginTop: 12 }} className="muted">
+                PLUGINS / {(s.plugins ?? []).join(" · ")}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section data-whale-report-reportsection>
+        <SectionHeader index="05" title="风险扫描" meta="RISKS / SECRET SCAN" />
+        <div data-whale-report-reportgrid="equal">
+          <div data-whale-report-risk data-severity={danger.some((d) => d.sev === "red") ? "critical" : "warning"}>
+            <div data-whale-report-h2>DANGEROUS OPERATIONS / {danger.length}</div>
+            {danger.length === 0 ? (
+              <div data-whale-report-tokenline>未检测到危险操作。STATUS / CLEAR</div>
+            ) : (
               <>
-                {shownDanger.map((d, i) => (
-                  <div key={i} data-whale-report-danger>
-                    {d.command.replace(/\s+/g, " ").slice(0, 64)}
-                    <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
-                  </div>
-                ))}
-                {danger.length > 3 && !dangerExpanded && (
-                  <button data-whale-report-chip onClick={() => setDangerExpanded(true)}>展开更多</button>
+                <div data-whale-report-dangersum>{summary}</div>
+                <div data-whale-report-dangercats>
+                  {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([label, count]) => <span key={label} data-whale-report-dangercat>{label} <b>{count}</b></span>)}
+                </div>
+                <button
+                  data-whale-report-chip data-whale-report-samplesbtn
+                  onClick={() => { setSamplesShown(!samplesShown); setDangerExpanded(false); }}
+                >
+                  {samplesShown ? "收起样本" : `查看样本（${danger.length}）`}
+                </button>
+                {samplesShown && (
+                  <>
+                    {shownDanger.map((d, i) => (
+                      <div key={i} data-whale-report-danger>
+                        {d.command.replace(/\s+/g, " ").slice(0, 64)}
+                        <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
+                      </div>
+                    ))}
+                    {danger.length > 3 && !dangerExpanded && (
+                      <button data-whale-report-chip onClick={() => setDangerExpanded(true)}>展开更多</button>
+                    )}
+                  </>
                 )}
               </>
             )}
-          </>
-        )}
-      </div>
-
-      {(s.secretHits ?? []).length > 0 && (() => {
-        const hits = s.secretHits ?? [];
-        return (
-        <div data-whale-report-card>
-          <div data-whale-report-h2>敏感信息（{hits.length}）</div>
-          <div data-whale-report-tokenline>疑似密钥/令牌出现在会话中，未展示原文。</div>
-          <div data-whale-report-dangercats>
-            {[...hits.reduce((m: Map<string, number>, h: { label: string }) => m.set(h.label, (m.get(h.label) ?? 0) + 1), new Map<string, number>()).entries()].map(([label, count]) => (
-              <span key={label} data-whale-report-secretcat>{label} <b>{count}</b></span>
-            ))}
           </div>
-          <div data-whale-report-tokenline style={{ marginTop: 6 }}>建议尽快轮换对应密钥。</div>
+          {(() => {
+            const hits = s.secretHits ?? [];
+            return (
+              <div data-whale-report-risk data-severity={hits.length > 0 ? "critical" : "warning"}>
+                <div data-whale-report-h2>SECRET SCAN / {hits.length}</div>
+                {hits.length === 0 ? (
+                  <div data-whale-report-tokenline>未发现疑似密钥或令牌。STATUS / CLEAR</div>
+                ) : (
+                  <>
+                    <div data-whale-report-tokenline>疑似密钥/令牌出现在会话中，未展示原文。</div>
+                    <div data-whale-report-dangercats style={{ marginTop: 10 }}>
+                      {[...hits.reduce((m: Map<string, number>, h: { label: string }) => m.set(h.label, (m.get(h.label) ?? 0) + 1), new Map<string, number>()).entries()].map(([label, count]) => (
+                        <span key={label} data-whale-report-secretcat>{label} <b>{count}</b></span>
+                      ))}
+                    </div>
+                    <div data-whale-report-tokenline>建议尽快轮换对应密钥。</div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
-        );
-      })()}
+      </section>
 
       {(s.sessionsDetail ?? []).length > 0 && (
-        <SessionDrilldown sessions={s.sessionsDetail ?? []} />
+        <SessionDrilldown sessions={s.sessionsDetail ?? []} totalCost={report.cost?.total} index="06" />
       )}
 
       {(s.titles ?? []).length > 0 && (
-        <div data-whale-report-card>
-          <div data-whale-report-h2>会话标题</div>
+        <section data-whale-report-reportsection>
+          <SectionHeader index="07" title="会话索引" meta="APPENDIX / TITLES" />
           <ul data-whale-report-titles>
-            {s.titles.slice(0, 8).map((t) => (
-              <li key={t}>{t}</li>
-            ))}
+            {s.titles.slice(0, 8).map((t) => <li key={t}>{t}</li>)}
           </ul>
-        </div>
+        </section>
       )}
 
-      <div data-whale-report-tokenline style={{ fontSize: 11 }} className="muted">
-        基于 {s.totalEvents} 条会话事件 · 只读 · 生成于 {dateStr(report.createdAt)}
+      <div data-whale-report-tokenline style={{ fontSize: 10, marginTop: 34, paddingTop: 12, borderTop: "1px solid var(--dt-line)" }} className="muted">
+        BASED ON {s.totalEvents} SESSION EVENTS · READ ONLY · GENERATED {dateStr(report.createdAt)}
       </div>
     </div>
   );
@@ -1159,6 +1642,10 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
         )}
         {view === "history" && history !== null && history.length > 0 && (
           <div data-whale-report-body>
+            <div data-whale-report-historyhead>
+              <div data-whale-report-overline>ARCHIVE / TRACE INDEX</div>
+              <div data-whale-report-sectiontitle style={{ marginTop: 7 }}>历史报告</div>
+            </div>
             {history.map((item) => (
               <div key={item.id} data-whale-report-hitem onClick={() => void this.openHistory(item.id)}>
                 <b>
@@ -1196,6 +1683,9 @@ function Dashboard(props: {
     .filter((i) => i.level !== "info")
     .sort((a, b) => (levelWeight[a.level] ?? 3) - (levelWeight[b.level] ?? 3));
   const totalTokens = s !== undefined ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning : 0;
+  const night = s === undefined || s.totalEvents === 0
+    ? 0
+    : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   const modelRows = (() => {
     if (s === undefined) return [];
     const entries = Object.entries(s.models ?? {}).sort(
@@ -1204,25 +1694,31 @@ function Dashboard(props: {
     const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
     return entries.map(([model, u]) => {
       const t = u.input + u.output + u.cacheRead + u.reasoning;
-      return { model, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
+      return { model, total: t, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
     });
   })();
   return (
     <div data-whale-report-body>
       <div data-whale-report-brand>
-        <img
-          src="/whale/assets/whale-hero.svg"
-          width={56}
-          height={56}
-          alt=""
-          data-whale-report-heroimg
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none";
-          }}
-        />
-        <div>
+        <div data-whale-report-brandcopy>
+          <div data-whale-report-brandkicker>{traceCode(preset, report?.to)} / DSH</div>
           <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
-          <div data-whale-report-brandtag>Your Agent, in numbers.</div>
+          <div data-whale-report-brandtag>Your Agent,<br />in numbers.</div>
+          <div data-whale-report-brandmeta aria-hidden="true">
+            <span>CONTEXT ONLINE</span><span>THINKING / READY</span>{s !== undefined && <span>CACHE HIT {cacheRate(s)}%</span>}
+          </div>
+        </div>
+        <div data-whale-report-brandvisual aria-hidden="true">
+          <div data-whale-report-sonar><i /><i /><i /></div>
+          <div data-whale-report-depthscale />
+          <img
+            src="/whale/assets/whale-hero.svg"
+            width={166}
+            height={166}
+            alt=""
+            data-whale-report-heroimg
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
         </div>
       </div>
 
@@ -1262,84 +1758,91 @@ function Dashboard(props: {
       {report !== null && s !== undefined && (
         <>
           <div data-whale-report-hero>
-            <div data-whale-report-herolabel>{HERO_LABEL[preset] ?? "Agent 消耗"}</div>
-            <div data-whale-report-heroval>¥{typeof cost === "number" ? cost.toFixed(2) : "—"}</div>
-            <div data-whale-report-herodelta2>
-              {delta === null ? (
-                <span className="muted">首次记录，下周起可对比</span>
-              ) : (
-                <>
-                  <em className={delta > 0 ? "up" : "down"}>{delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%</em>
-                  <span> vs 上周</span>
-                </>
-              )}
+            <div data-whale-report-herohead>
+              <div data-whale-report-herolabel>{HERO_LABEL[preset] ?? "Agent 消耗"} / ESTIMATED COST</div>
+              <div data-whale-report-heroval>¥{typeof cost === "number" ? cost.toFixed(2) : "—"}</div>
+              <div data-whale-report-herodelta2>
+                {delta === null ? (
+                  <span className="muted">BASELINE / 首次记录，下期起可对比</span>
+                ) : (
+                  <><em className={delta > 0 ? "up" : "down"}>{delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%</em><span> vs 上周期</span></>
+                )}
+              </div>
             </div>
             <div data-whale-report-herostat>
               <span><b>{s.sessions}</b> 会话</span>
               <span><b>{fmt(s.toolCallsTotal)}</b> 工具调用</span>
               <span><b>{fmt(totalTokens)}</b> Tokens</span>
+              <span><b>{cacheRate(s)}%</b> Cache hit</span>
             </div>
           </div>
 
           {insights.length > 0 && (
-            <>
-              <div data-whale-report-h2><WhaleFace mood={whaleMood(report)} size={16} />值得注意</div>
+            <section data-whale-report-section>
+              <SectionHeader index="01" title="值得注意" meta="FINDINGS / INVESTIGATION LOG" />
               <InsightFeed insights={insights.slice(0, 3)} stats={s} />
               {insights.length > 3 && (
                 <button data-whale-report-feedmore onClick={onOpenReport}>
                   还有 {insights.length - 3} 条洞察，见完整报告 →
                 </button>
               )}
-            </>
+            </section>
           )}
 
           {(() => {
-            const kinds = triggerNotes(report);
-            if (kinds.length === 0) return null;
+            const kinds = triggerNotes(report.stats);
+            const quote = kinds.length > 0
+              ? NOTE_TEMPLATES[kinds[0]].light[1] ?? NOTE_TEMPLATES[kinds[0]].light[0]
+              : "这期数据很干净呢，一点幺蛾子都没有。";
             return (
               <div data-whale-report-note-short onClick={onOpenReport}>
-                <WhaleFace mood={whaleMood(report)} size={30} />
+                <WhaleFace mood={whaleMood(report.stats)} size={62} />
                 <div>
+                  <div data-whale-report-notecode>WHALE NOTE / OBSERVER</div>
                   <b>本期鲸评</b>
-                  <span>“{NOTE_TEMPLATES[kinds[0]].light[1] ?? NOTE_TEMPLATES[kinds[0]].light[0]}”</span>
+                  <span>“{quote}”</span>
                 </div>
               </div>
             );
           })()}
 
-          <div data-whale-report-h2><SonarIcon />活跃</div>
-          <div data-whale-report-card>
-            <ActivityStrip report={report} />
-          </div>
+          <section data-whale-report-section>
+            <SectionHeader index="02" title="活跃扫描" meta={`SONAR / NIGHT ${night}%`} />
+            <div data-whale-report-zone>
+              <div data-whale-report-scanmeta>
+                <span>SCAN <b>00—24</b></span><span>DEPTH <b>4,096m</b></span><span>PING <b>OK</b></span><span>NIGHT <b>{night}%</b></span>
+              </div>
+              <ActivityStrip report={report} />
+            </div>
+          </section>
 
           {modelRows.length > 0 && (
-            <>
-              <div data-whale-report-h2>模型</div>
-              <div data-whale-report-card>
-                {modelRows.map((m) => (
+            <section data-whale-report-section>
+              <SectionHeader index="03" title="模型分配" meta="RESOURCE / ALLOCATION" />
+              <div data-whale-report-modeltable>
+                {modelRows.map((m, index) => (
                   <div key={m.model} data-whale-report-modelrow>
+                    <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
                     <div data-whale-report-modelhead>
                       <b>{m.model}</b>
-                      <span>{m.share}% · ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
+                      <span>{m.share}% / ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
                     </div>
                     <div data-whale-report-modelbar>
                       <i style={{ width: `${m.share}%`, background: "#4d6bfe" }} />
                     </div>
+                    <div data-whale-report-modelnums>TOTAL {fmt(m.total)} TOKEN</div>
                   </div>
                 ))}
               </div>
-            </>
+            </section>
           )}
 
           {(s.sessionsDetail ?? []).length > 0 && (
-            <>
-              <div data-whale-report-h2>会话钻取</div>
-              <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} />
-            </>
+            <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} totalCost={cost} index="04" />
           )}
 
           <button data-whale-report-btn data-whale-report-fullbtn onClick={onOpenReport}>
-            生成完整报告 →
+            Open full research report →
           </button>
         </>
       )}
@@ -1348,7 +1851,7 @@ function Dashboard(props: {
 }
 
 /** 长图导出：canvas 绘制报告为 PNG（零依赖）。 */
-function exportReportImage(report: ReportFull): void {
+export function exportReportImage(report: ReportFull): void {
   const s = report.stats;
   const scale = 2;
   const W = 720;
@@ -1358,15 +1861,22 @@ function exportReportImage(report: ReportFull): void {
   const section = (title: string) => 34;
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
   const costText = typeof report.cost?.total === "number" ? `¥${report.cost.total.toFixed(2)}` : "—";
-  const dangerLines = Math.min(s.dangerousCommands.length, 5);
   const sessions = s.sessionsDetail ?? [];
   const modelEntries = Object.entries(s.models ?? {});
+  const hist = s.dayHourSeries ?? [];
+  const cellW = (W - padding * 2 - 30) / 24;
+  // 活跃区：只画最近 7 天；行数与下方绘制循环完全一致（同一浮点累加序列），
+  // 避免画布高度按固定 4 行估算导致 weekly/custom 底部被裁切。
+  const activityRows = Math.min(hist.length, 7);
+  let activityH = 0;
+  for (let i = 0; i < activityRows; i++) activityH += cellW + 3;
+  if (hist.length > 0) activityH += 6; // 循环后的行间距（hist 非空时才绘制格子）
   let height = padding * 2 + rowH(26) + rowH(13) + 24;
   height += 40 + rowH(40) + rowH(13); // hero
-  height += section("活跃") + 24 * 4 + 20; // 方块区估算
+  height += section("活跃") + activityH;
   height += section("模型") + modelEntries.length * 34;
   height += section("会话钻取") + Math.min(sessions.length, 5) * 34;
-  height += section("危险操作") + dangerLines * 30;
+  height += section("危险操作") + Math.min(s.dangerousCommands.length, 5) * 30;
   height += 60;
   const canvas = document.createElement("canvas");
   canvas.width = W * scale;
@@ -1411,27 +1921,33 @@ function exportReportImage(report: ReportFull): void {
     ctx.stroke();
     y += 14;
   };
-  const greenCell = (level: number): string => {
+  const scanCell = (level: number): string => {
     const boosted = Math.pow(Math.min(1, Math.max(0, level)), 0.4);
-    return `rgba(34,197,94,${(0.22 + boosted * 0.78).toFixed(2)})`;
+    return `rgba(77,107,254,${(0.18 + boosted * 0.82).toFixed(2)})`;
   };
 
   title("深迹 DeepTrace", 24, navy);
   text("Your Agent, in numbers. · 只读数据报告", 12, gray);
   sep();
-  title("本周 Agent 消耗", 13, navy, 2);
+  title(HERO_LABEL[report.preset] ?? "Agent 消耗", 13, navy, 2);
   title(costText, 44, navy, 2);
   text("会话 " + s.sessions + " · 工具调用 " + fmt(s.toolCallsTotal) + " · Token " + fmt(totalTokens), 12, gray);
   sep();
   title("活跃", 14, navy);
-  const hist = s.dayHourSeries ?? [];
+  if (hist.length > activityRows) {
+    // 只展示最近 7 天时明确标注，避免误认为完整数据。
+    ctx.fillStyle = gray;
+    ctx.font = `400 11px "PingFang SC", sans-serif`;
+    ctx.textAlign = "right";
+    ctx.fillText("LAST 7 DAYS", W - padding, y - rowH(14) + 14);
+    ctx.textAlign = "left";
+  }
   if (hist.length > 0) {
     const max = Math.max(1, ...hist.flatMap((d) => d.hours));
-    const cellW = (W - padding * 2 - 30) / 24;
-    for (const day of hist.slice(-7)) {
+    for (const day of hist.slice(-activityRows)) {
       for (let h = 0; h < 24; h++) {
         const count = day.hours[h] ?? 0;
-        ctx.fillStyle = count === 0 ? "#f1f5f9" : greenCell(count / max);
+        ctx.fillStyle = count === 0 ? "#f1f5f9" : scanCell(count / max);
         ctx.fillRect(padding + h * cellW, y, cellW - 2, cellW - 2);
       }
       y += cellW + 3;
@@ -1513,16 +2029,7 @@ function WhaleFace({ mood, size = 44 }: { mood: "happy" | "angry" | "sleepy" | "
   );
 }
 
-/** 由数据驱动的心情：超支/致命操作→生气；深夜→困；重试→无语；默认→呆萌。 */
-function whaleMood(report: ReportFull): "happy" | "angry" | "sleepy" | "dazed" {
-  const s = report.stats;
-  const redDanger = (s.dangerousCommands ?? []).some((d) => d.sev === "red");
-  if (redDanger) return "angry";
-  const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
-  if (night >= 25) return "sleepy";
-  if ((s.retryBursts ?? 0) >= 5) return "dazed";
-  return "happy";
-}
+/** 表情与鲸评触发统一由 ../whale-notes.ts 的同一套规则驱动（见 triggerNotes / whaleMood）。 */
 
 /**
  * 本期鲸评：规则触发 + 模板生成（轻/毒舌双模式）。
@@ -1616,35 +2123,20 @@ const NOTE_CLOSERS = {
  * 确定性生成，绝不翻车。
  */
 
-
-type NoteKind = keyof typeof NOTE_TEMPLATES;
-
-/** 规则触发：返回命中的吐槽项（按优先级排序）。 */
-function triggerNotes(report: ReportFull): NoteKind[] {
-  const s = report.stats;
-  const hits: { kind: NoteKind; weight: number }[] = [];
-  if ((s.dangerousCommands ?? []).some((d) => d.sev === "red")) hits.push({ kind: "danger", weight: 0 });
-  else if (s.dangerousCommands.length > 0) hits.push({ kind: "danger", weight: 1 });
-  if ((s.retryBursts ?? 0) >= 3) hits.push({ kind: "retry", weight: 2 });
-  const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
-  if (night >= 15) hits.push({ kind: "night", weight: 3 });
-  if (s.sessions >= 5 && s.sessions > 0 && s.turns / s.sessions < 2) hits.push({ kind: "fragment", weight: 4 });
-  return hits.sort((a, b) => a.weight - b.weight).map((h) => h.kind);
-}
-
 /** 本期鲸评卡片（完整版，两种模式可切换）。 */
 function WhaleNote({ report }: { report: ReportFull }): ReactNode {
   const [mode, setMode] = useState<"light" | "spicy">("light");
   const s = report.stats;
-  const kinds = triggerNotes(report);
-  const mood = whaleMood(report);
+  const kinds = triggerNotes(s);
+  const mood = whaleMood(s);
   const top = kinds[0];
   return (
-    <div data-whale-report-card data-whale-report-note>
+    <aside data-whale-report-note aria-label="本期鲸评">
       <div data-whale-report-notehead>
-        <WhaleFace mood={mood} size={40} />
+        <WhaleFace mood={mood} size={64} />
         <div data-whale-report-notetitle>
-          <b>本期鲸评</b>
+          <b>WHALE NOTE / OBSERVER</b>
+          <span data-whale-report-micro>DeepTrace data observer</span>
           <span data-whale-report-noteopts>
             <button data-active={mode === "light"} onClick={() => setMode("light")}>轻</button>
             <button data-active={mode === "spicy"} onClick={() => setMode("spicy")}>毒舌</button>
@@ -1681,7 +2173,7 @@ function WhaleNote({ report }: { report: ReportFull }): ReactNode {
       </div>
       <div data-whale-report-notefoot>基于本期使用数据自动生成的风味评论，不影响正式报告结论。</div>
       {mood === "angry" && <div data-whale-report-notemore>（鲸鱼娘现在有点生气，注意安全操作。）</div>}
-    </div>
+    </aside>
   );
 }
 
@@ -1696,38 +2188,56 @@ function SonarIcon({ size = 14 }: { size?: number }): ReactNode {
   );
 }
 
-/** 会话钻取卡：按费用排序，点击展开详情，复制 Session ID。 */
-function SessionDrilldown({ sessions }: { sessions: NonNullable<StatsJson["sessionsDetail"]> }): ReactNode {
+/** 会话轨迹：按费用排序，点击展开详情，复制 Session ID。 */
+function SessionDrilldown({
+  sessions,
+  totalCost,
+  index = "04",
+}: {
+  sessions: NonNullable<StatsJson["sessionsDetail"]>;
+  totalCost?: number;
+  index?: string;
+}): ReactNode {
   const [openId, setOpenId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const resolvedTotal = typeof totalCost === "number" && totalCost > 0
+    ? totalCost
+    : sessions.reduce((sum, session) => sum + session.cost, 0);
   const copy = (id: string): void => {
     void navigator.clipboard.writeText(id);
     setCopied(id);
     window.setTimeout(() => setCopied(null), 1500);
   };
   return (
-    <div data-whale-report-card>
-      <div data-whale-report-h2><SonarIcon />会话钻取（{sessions.length}）</div>
-      {sessions.slice(0, 8).map((s) => {
+    <section data-whale-report-trace data-whale-report-reportsection>
+      <SectionHeader index={index} title="会话轨迹" meta={`TRACE LOG / ${sessions.length} TARGETS`} />
+      {sessions.slice(0, 8).map((s, rowIndex) => {
         const open = openId === s.sessionId;
+        const share = resolvedTotal > 0 ? Math.round((s.cost / resolvedTotal) * 100) : 0;
+        const sessionTokens = Object.values(s.modelTokens ?? {}).reduce(
+          (sum, token) => sum + token.input + token.output + token.cacheRead + token.reasoning,
+          0,
+        );
         return (
           <div key={s.sessionId}>
             <div data-whale-report-sessionrow onClick={() => setOpenId(open ? null : s.sessionId)}>
+              <span data-whale-report-sessionindex>T-{String(rowIndex + 1).padStart(2, "0")}</span>
               <div data-whale-report-sessionmain>
                 <b>{s.title || "（未命名会话）"}</b>
                 <span>
                   {s.redDanger > 0 && <em data-whale-report-badge-red>{s.redDanger} 致命</em>}
                   {s.retryBursts > 0 && <em data-whale-report-badge-amber>{s.retryBursts} 重试</em>}
-                  {s.toolCalls > 0 && <em data-whale-report-badge-gray>{s.toolCalls} 工具</em>}
+                  {s.toolCalls > 0 && <em data-whale-report-sessionmeta>{s.toolCalls} tool calls</em>}
                 </span>
               </div>
-              <div data-whale-report-sessioncost>¥{s.cost.toFixed(2)}</div>
+              <div data-whale-report-sessioncost>¥{s.cost.toFixed(2)}<small>{share}% OF PERIOD</small></div>
             </div>
             {open && (
               <div data-whale-report-sessiondetail>
                 <div data-whale-report-tokenline>
                   {new Date(s.firstTime).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} ~{" "}
-                  {new Date(s.lastTime).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {s.events} 事件 · {s.commands} 命令
+                  {new Date(s.lastTime).toLocaleString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {s.events} 事件 · {s.commands} 命令 · {s.toolCalls} 工具
+                  {sessionTokens > 0 ? ` · ${fmt(sessionTokens)} token` : ""}
                 </div>
                 <button data-whale-report-btn data-ghost="true" onClick={() => copy(s.sessionId)}>
                   {copied === s.sessionId ? "已复制" : "复制 Session ID"}
@@ -1737,7 +2247,7 @@ function SessionDrilldown({ sessions }: { sessions: NonNullable<StatsJson["sessi
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -1789,17 +2299,19 @@ function InsightFeed({ insights, stats }: { insights: InsightJson[]; stats: Stat
   const [openId, setOpenId] = useState<string | null>(null);
   return (
     <div data-whale-report-feed>
-      {insights.map((insight) => {
-        const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.warning;
+      {insights.map((insight, index) => {
         const open = openId === insight.id;
         const preview = insightPreview(insight, stats);
         return (
           <div
             key={insight.id}
             data-whale-report-feedrow
+            data-level={insight.level}
+            data-open={open}
             onClick={() => setOpenId(open ? null : insight.id)}
           >
-            <i data-whale-report-feeddot style={{ background: meta.color }} />
+            <span data-whale-report-feedindex>{String(index + 1).padStart(2, "0")}</span>
+            <span data-whale-report-feedcode>{insightCode(insight)}</span>
             <div data-whale-report-feedmain>
               <div data-whale-report-feedtitle>{insight.title}</div>
               {preview !== null && !open && <div data-whale-report-feedpreview>{preview}</div>}
@@ -1874,6 +2386,7 @@ class DrawerPanel extends Component<Record<string, never>, DrawerState> {
     return (
       <>
         <button data-whale-report-fab onClick={this.toggle} title="深迹 DeepTrace" aria-label="深迹 DeepTrace">
+          <ChartIcon size={20} />
         </button>
         <div data-whale-report-drawer hidden={!open}>
           <div data-whale-report-head>
@@ -1932,6 +2445,7 @@ export function apply(ctx: ClientContext): void {
       service.registerTab({
         id: "dsh-whale-report:report",
         title: "深迹 DeepTrace",
+        icon: (size) => <ChartIcon size={size} />,
         order: 90,
         single: true,
         component: () => <SidebarTab />,
