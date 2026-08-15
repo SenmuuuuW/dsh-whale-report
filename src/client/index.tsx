@@ -479,6 +479,22 @@ function EmptyActivity(): ReactNode {
   return <div data-whale-report-gridempty>该报告生成于旧版本，无逐时数据。重新生成即可。</div>;
 }
 
+/** 一行小方格：左侧行标签 + 自适应宽度方块（每格随容器伸缩、保持正方形）。 */
+function SquareRow({ label, cells }: { label: string; cells: { title: string; level: number }[] }): ReactNode {
+  return (
+    <div data-whale-report-weekrow>
+      <span data-whale-report-weekrowlabel>{label}</span>
+      <div data-whale-report-squares>
+        {cells.map((c, i) => (
+          <i key={i} title={c.title} style={{ background: c.level === 0 ? "#f1f5f9" : green(c.level) }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+
 /**
  * 活动可视化：按报告周期自适应粒度。
  *   日报 → 每格 30 分钟（48 格一行）
@@ -490,72 +506,59 @@ function EmptyActivity(): ReactNode {
 function ActivityStrip({ report }: { report: ReportFull }): ReactNode {
   const s = report.stats;
   const preset = report.preset;
+  const cell = (count: number, max: number, title: string) => ({ title, level: count === 0 ? 0 : count / max });
 
+  // 日报：每格 30 分钟（4 行 × 12 格，每行 6 小时）
   if (preset === "daily") {
     const hist = s.halfHourHistogram ?? [];
     if (hist.length === 0) return <EmptyActivity />;
     const max = Math.max(1, ...hist);
-    const labels = ["00:00", "06:00", "12:00", "18:00", "24:00"];
+    const rows = [
+      { label: "00–06", cells: hist.slice(0, 12) },
+      { label: "06–12", cells: hist.slice(12, 24) },
+      { label: "12–18", cells: hist.slice(24, 36) },
+      { label: "18–24", cells: hist.slice(36, 48) },
+    ];
     return (
       <div>
-        <div data-whale-report-strip>
-          {hist.map((count, idx) => (
-            <i
-              key={idx}
-              title={`${String(Math.floor(idx / 2)).padStart(2, "0")}:${idx % 2 ? "30" : "00"} · ${count}`}
-              style={{ background: count === 0 ? "#f1f5f9" : green(count / max) }}
-            />
-          ))}
-        </div>
-        <div data-whale-report-striplabels>
-          {labels.map((l) => (
-            <span key={l}>{l}</span>
-          ))}
-        </div>
+        {rows.map((row, ri) => (
+          <SquareRow
+            key={row.label}
+            label={row.label}
+            cells={row.cells.map((count, i) => {
+              const halfHour = ri * 360 + i * 30;
+              const h = Math.floor(halfHour / 60);
+              const m = halfHour % 60;
+              return cell(count, max, `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"} · ${count}`);
+            })}
+          />
+        ))}
         <Legend />
       </div>
     );
   }
 
+  // 周报 / 自定义：每格 1 小时（7 行 × 24 格，每行 1 天）
   if (preset === "weekly" || preset === "custom") {
     const series = s.dayHourSeries ?? [];
     if (series.length === 0) return <EmptyActivity />;
     const max = Math.max(1, ...series.flatMap((d) => d.hours));
-    const hourLabels = ["00", "06", "12", "18", "23"];
     const shown = series.slice(-30);
     return (
       <div>
-        <div data-whale-report-gridwrap>
-          <div data-whale-report-grid>
-            <div data-whale-report-gridhours>
-              {Array.from({ length: 24 }, (_, h) => (
-                <span key={h}>{hourLabels.includes(String(h).padStart(2, "0")) ? String(h).padStart(2, "0") : ""}</span>
-              ))}
-            </div>
-            {shown.map((day) => (
-              <div key={day.date} data-whale-report-gridcol>
-                {day.hours.map((count, h) => (
-                  <i
-                    key={h}
-                    title={`${day.date} ${String(h).padStart(2, "0")}:00 · ${count}`}
-                    style={{ background: count === 0 ? "#f1f5f9" : green(count / max) }}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-          <div data-whale-report-griddates>
-            {shown.map((day) => (
-              <span key={day.date}>{day.date.slice(5)}</span>
-            ))}
-          </div>
-        </div>
+        {shown.map((day) => (
+          <SquareRow
+            key={day.date}
+            label={day.date.slice(5)}
+            cells={day.hours.map((count, h) => cell(count, max, `${day.date} ${String(h).padStart(2, "0")}:00 · ${count}`))}
+          />
+        ))}
         <Legend />
       </div>
     );
   }
 
-  // monthly：每格 1 天；yearly：每格 1 周
+  // 月报：每格 1 天；年报：每格 1 周
   const series = s.dailySeries ?? [];
   if (series.length === 0) return <EmptyActivity />;
   const buckets =
@@ -566,35 +569,37 @@ function ActivityStrip({ report }: { report: ReportFull }): ReactNode {
           for (const day of series) {
             const t = Date.parse(day.date + "T00:00:00");
             const weekStart = new Date(Math.floor(t / weekMs) * weekMs);
-            const label = weekStart.toISOString().slice(5, 10);
+            const label = weekStart.toISOString().slice(0, 10);
             const last = weekly[weekly.length - 1];
             if (last !== undefined && last.label === label) last.count += day.count;
             else weekly.push({ label, count: day.count });
           }
           return weekly;
         })()
-      : series.map((d) => ({ label: d.date.slice(5), count: d.count }));
+      : series.map((d) => ({ label: d.date, count: d.count }));
   const max = Math.max(1, ...buckets.map((b) => b.count));
+  const perRow = preset === "yearly" ? 13 : 10;
+  const rows: { label: string; items: typeof buckets }[] = [];
+  for (let i = 0; i < buckets.length; i += perRow) {
+    const items = buckets.slice(i, i + perRow);
+    const from = items[0].label.slice(5);
+    const to = items[items.length - 1].label.slice(5);
+    rows.push({ label: preset === "yearly" ? `${items[0].label.slice(0, 4)}月` : `${from}–${to}`, items });
+  }
   return (
     <div>
-      <div data-whale-report-strip>
-        {buckets.map((b) => (
-          <i
-            key={b.label}
-            title={`${b.label} · ${b.count} 事件`}
-            style={{ background: b.count === 0 ? "#f1f5f9" : green(b.count / max) }}
-          />
-        ))}
-      </div>
-      <div data-whale-report-striplabels>
-        <span>{buckets[0]?.label}</span>
-        <span>{buckets[Math.floor(buckets.length / 2)]?.label}</span>
-        <span>{buckets[buckets.length - 1]?.label}</span>
-      </div>
+      {rows.map((row) => (
+        <SquareRow
+          key={row.label}
+          label={row.label}
+          cells={row.items.map((b) => cell(b.count, max, `${b.label} · ${b.count} 事件`))}
+        />
+      ))}
       <Legend />
     </div>
   );
 }
+
 
 function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
   const total = tokens.input + tokens.output + tokens.cacheRead + tokens.reasoning;
