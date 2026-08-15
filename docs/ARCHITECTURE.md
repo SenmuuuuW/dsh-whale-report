@@ -2,6 +2,7 @@
 
 > Agent 数据报告产品。只读、确定性、可复算。
 > 本文档描述宿主/浏览器两侧的模块职责、数据流、存储结构、兼容性策略与扩展点。
+> 与当前实现（v0.2.x）保持同步。
 
 ## 1. 总览
 
@@ -9,88 +10,122 @@
 宿主 half（Node / cordis 插件）              浏览器 half（React / 单文件 bundle）
 ┌────────────────────────────────┐          ┌──────────────────────────────┐
 │ src/index.ts（插件入口）        │          │ src/client/index.tsx          │
-│  ├─ 双服务名兼容注入            │◄─fetch───│  概览 / 报告 / 历史 三视图      │
-│  │  (webServer/httpServer)     │  /whale/ │  品牌头 → Hero → 洞察Feed      │
-│  ├─ /whale/api 路由（7 方法）   │   api/*  │  → 活动图 → 模型 → 会话钻取    │
-│  ├─ 共享生成管线                │          │  导出：PDF(HTML页)/PNG(canvas) │
-│  └─ whale 存储域（4 张表）      │          └──────────────────────────────┘
-└────────────────────────────────┘
+│  ├─ 四接缝：tools /            │◄─fetch───│  三视图：概览 / 报告 / 历史     │
+│  │  sessionQuery /             │  /whale/ │  概览：品牌区→Hero→洞察Feed→   │
+│  │  storageDomain / web 路由   │   api/*  │  活跃→模型→会话钻取→鲸评短卡    │
+│  ├─ /whale/api 路由（6 方法）   │          │  报告：报告头→鲸评→Findings→  │
+│  ├─ /whale/assets 素材路由      │          │  活跃/Token→模型/工具→风险→    │
+│  └─ whale 存储域（3 张表）      │          │  会话钻取→会话索引附录         │
+└────────────────────────────────┘          │  导出：PDF(HTML页)/PNG(canvas) │
+                                            └──────────────────────────────┘
 ```
 
 ## 2. 数据流（生成一次报告）
 
 ```
-请求 (preset) 
-  → presetRange()：自然周期区间（日报=今天 / 24h=滚动 / 周=本周一 / 月=1日 / 年=1月1日）
-  → summary 复用检查：同周期 key + REPORT_SEM + 5 分钟新鲜度 → 命中直接返回
+请求 (preset | custom)
+  → presetRange()：日报=今天 0:00 / 24h=滚动 / 周=本周一 0:00 / 月=1日 / 年=1月1日
+                   custom 需显式 from/to（非法区间直接拒绝）
   → collectEvents()：
-       live 会话 → readSession（内存快照）
-       持久化会话 → session_index 缓存（10 分钟 TTL）→ 未命中才 zstd 全量重建
-       每会话：bucketizeOwnEvents（10 分钟分桶，seedLength 去重，排除 whale/* 自事件）
-  → aggregateBuckets()：全局统计 + 会话级明细（按模型 token）
-  → computeCost()：官方定价页（6h 缓存，内置价兜底）→ 每模型费用 + 每会话费用
-  → 基线对比：period_stats[上一周期 key] → 涨跌
-  → computeInsights()：8 类确定性规则
-  → 落库（reports / period_stats）→ 返回
+       listSessions → 会话头（id / createdAt / cwd / delegationDepth）
+       持久化会话：session_index 命中（INDEX_VERSION 匹配 + 10 分钟 TTL）→ 复用分桶
+                   未命中 → readSession + bucketizeOwnEvents（seedLength 去重，
+                   排除 whale/* 自事件，10 分钟分桶）→ 写回索引
+       live 会话：每次直读（不落索引）
+       并发 12 读取 → aggregateBuckets(views, period, headers)
+  → computeCost()：官方定价页实时价（6h 缓存，内置价兜底）→ 每模型费用
+  → 会话钻取：sessionsDetail 按"会话 × 模型 token × 单价"折算费用 → 排序 → Top 20
+  → 插件环境清单：loader 枚举已加载第三方插件名（排除 @deepseek-ai/* 与 cordis）
+  → periodKey(preset, to) + previousPeriodKey → period_stats 上一周期基线
+  → computeInsights()：8 条确定性规则（阈值、归因、估算口径固定）
+  → 落库：reports（REPORT_SEM=3）+ period_stats（原地更新）
 ```
+
+**summary 复用（概览路径）**：同 preset + `sem === REPORT_SEM` + 同周期 key + 含 cost + 5 分钟新鲜度窗口内 → 直接返回已存报告；过期则原地重算（沿用原 id，不删历史）。custom 区间每次重新生成，不复用。
+
+**后台预热**：启动 3s 后对全部持久化会话预建索引（`warmIndex`），首次生成报告的成本移到后台，之后的重复生成命中索引（实测 0.1–0.3s）。
 
 ## 3. 模块职责
 
 | 文件 | 职责 | 关键约束 |
 | --- | --- | --- |
-| `src/stats.ts` | 聚合引擎 | 纯函数；直算/分桶两条路径等价（有不变式测试） |
-| `src/insights.ts` | 洞察规则 + 周期 key + 工具族 | 确定性，无 LLM |
-| `src/pricing.ts` | 官方计价抓取 + 费用 | 失败回退内置价 |
-| `src/tools.ts` | 共享生成管线 + 聊天工具 | 面板与对话同源 |
-| `src/api.ts` | HTTP 路由 | 本机同源围栏 |
-| `src/report.ts` / `src/html.ts` | markdown / PDF HTML | 同一数据两种呈现 |
-| `src/state.ts` | 存储域 schema | zod 边界校验 |
-| `src/client/index.tsx` | 浏览器 UI | 零依赖，模块表装配 |
+| `src/stats.ts` | 聚合引擎：事件聚合、危险分级、密钥检测、重试风暴、分桶索引、会话级明细 | 纯函数；直算/分桶两条路径等价（有不变式测试） |
+| `src/insights.ts` | 洞察规则 + 周期 key + 工具族归类 | 确定性，无 LLM |
+| `src/whale-notes.ts` | 鲸鱼娘统一规则：鲸评触发 + 表情（同一套阈值） | 客户端与 HTML 导出共用，单一阈值源 |
+| `src/pricing.ts` | 官方计价页抓取 + 费用计算（flash/pro 档位） | 失败回退内置价 |
+| `src/tools.ts` | 会话索引（10 分钟分桶/TTL/预热）+ 共享生成管线 + `whale_report` 聊天工具 | 面板与对话同源 |
+| `src/api.ts` | HTTP 路由（6 方法 + 素材白名单） | 本机同源围栏（trust-fence） |
+| `src/report.ts` / `src/html.ts` | markdown / PDF HTML 报告 | 同一数据两种呈现 |
+| `src/state.ts` | 存储域 schema（3 张表） | zod 边界校验 |
+| `src/client/index.tsx` | 浏览器 UI：三视图 + 导出（PDF/PNG） | 零依赖，模块表装配 |
 
-## 4. 存储结构（whale 域，version 1）
+## 4. 存储结构（whale 域，domain version 1）
 
 | 表 | 键 | 值要点 |
 | --- | --- | --- |
-| `reports` | `whale-<ts>-<rand>` | sem(语义版本) + stats + insights + cost + prev |
-| `session_index` | `<sessionId>` | v(版本) + builtAt + 10 分钟分桶 + titles；INDEX_VERSION=10 |
-| `period_stats` | `wk-2026-W33` 等 | 周期基线（对比用）；前缀 day-/24h-/wk-/mo-/yr- 互不冲突 |
-| `settings` | `user` | budgetWeeklyCny |
+| `reports` | `whale-<ts36>-<rand6>` | sem(REPORT_SEM) + preset/from/to + stats + cost + insights + prev + markdown |
+| `session_index` | `<sessionId>` | v(INDEX_VERSION) + builtAt + lastSeq + lastMs + 10 分钟分桶 + titles |
+| `period_stats` | `day-…` / `24h-…` / `wk-…` / `mo-…` / `yr-…` | 周期基线（对比用）；前缀隔离互不冲突 |
 
 **版本策略**：
-- `REPORT_SEM`：报告语义变更（周期定义等）时 +1，旧记录作废重建
-- `INDEX_VERSION`：分桶结构变更（新增字段）时 +1，旧索引自然失效
+- `REPORT_SEM = 3`：报告语义变更（周期定义、字段含义）时 +1，旧记录作废重建
+- `INDEX_VERSION = 10`：分桶结构变更时 +1，旧索引自然失效
 
-## 5. API（/whale/api/*，全部经本机同源围栏）
+## 5. API（`/whale/api/*`，全部经本机同源围栏）
 
 | 方法 | 说明 |
 | --- | --- |
-| POST `generate` | 生成并保存报告（含基线更新） |
-| POST `summary` | 概览数据：同周期 5 分钟内复用，过期原地重算（不删历史） |
-| GET `list` / `get` / `delete` | 历史管理 |
+| POST `generate` | 生成并保存报告（新 id；更新 period_stats 基线） |
+| POST `summary` | 概览数据：同周期 5 分钟内复用，过期原地重算（不删历史）；custom 不复用 |
+| GET `list` | 历史摘要列表（新到旧） |
+| GET `get?id=` | 单份完整报告 |
+| DELETE 由 POST `delete` 承载 | 删除指定 id |
 | GET `html?id=` | 独立可打印 HTML（导出 PDF） |
+| GET `/whale/assets/*` | 素材白名单路由（assets/whale/，仅允许清单内文件名） |
 
-## 6. 洞察规则（8 类）
+## 6. 洞察规则（8 条）
 
-见 README「洞察引擎」表。规则全部确定性：阈值、归因、估算口径固定，可复算可对质。
+| 规则 | 触发条件 | 级别 |
+| --- | --- | --- |
+| 深夜消耗 | 0–6 点事件占比 ≥15% 且费用 ≥¥3 | tip / warning(≥30%) |
+| 重试风暴 | 同一命令连续重复 ≥3 次 | tip / warning(≥10 次) |
+| 缓存命中率下降 | 命中率 <75% 且较上周期跌 ≥5pt | warning |
+| 致命级操作 | 存在红级危险命令 | critical |
+| 需留意操作 | 存在黄级危险命令（无红级） | tip |
+| 会话碎片化 | ≥5 会话且平均回合 <2 | tip |
+| 疑似密钥 | 命中 6 类密钥模式之一（只报存在性） | critical |
+| 费用趋势 | 较上周期费用涨跌 ≥20% | tip / warning |
 
-## 7. 兼容性策略（DSH preview 期生存术）
+（另有 info 级"缓存命中率良好"记录，概览不展示，仅入档。）
+
+**鲸鱼娘规则（`whale-notes.ts`，单一阈值源）**：danger（仅红级 → angry）> retry ≥3（→ dazed）> night ≥15%（→ sleepy）> fragment；表情与鲸评文案由同一函数推导，客户端与导出端一致。
+
+## 7. 导出
+
+- **PDF**：`renderHtmlReport` 独立可打印 HTML（A4，`@media print` 分页与断行保护），面板按钮 → 新页 → 浏览器打印另存 PDF。章节：报告头 / 鲸评 / Findings / 活跃+Token / 模型+工具（TOP 10 或 ALL）/ 风险（危险+重试诊断+密钥扫描）/ 会话钻取 / 页脚。
+- **PNG**：`exportReportImage` canvas 零依赖长图。内容：品牌头 / Hero 费用 / 活跃方块（最多最近 7 天，超限标注 LAST 7 DAYS）/ 模型排行 / 会话 Top5 / 危险操作 / 页脚；高度按实际绘制行数精确计算，长文本省略号截断。
+- **重试诊断**：仅存在于导出（PDF 含错误摘要样本，PNG 不含），面板不展示。
+
+## 8. 兼容性策略（DSH preview 期生存术）
 
 | 漂移点 | 策略 |
 | --- | --- |
-| 路由服务名 webServer→httpServer | 顶层 inject 只声明稳定服务；路由服务用惰性双注入 `ctx.inject(["webServer"])` + `ctx.inject(["httpServer"])`，`in` 探测避免 Proxy 抛异常 |
+| 路由服务名 webServer→httpServer | 顶层 inject 只声明稳定服务；路由服务用惰性双注入 `ctx.inject(["webServer"])` + `ctx.inject(["httpServer"])`，`in` 探测避免 Proxy 抛异常，只注册一遍 |
 | 客户端声明 dsh.client→dshClient | package.json 双写（嵌套 + 顶层） |
 | 会话查询类名 SessionQueryEngine→SessionQueryService | 结构化类型（只依赖行为面） |
 
-## 8. 隐私与安全边界
+## 9. 隐私与安全边界
 
 - 只读：绝不改写会话历史；统计排除 `whale/*` 自生事件
-- 密钥扫描：只存模式标签 + 时间 + sessionId，**不存原文**
-- 危险命令：只存命令首行（引号段剥离防 grep 误报）
-- API 围栏：仅本机 loopback + 同源标记
-- 执行联动：只输出方案与命令模板，**永不自动执行**
+- 密钥扫描：6 类常见模式（OpenAI sk- / AWS AKIA / 私钥块 / GitHub PAT / Slack Token / 配置型），只存模式标签 + 时间 + sessionId，**不存原文**；报告与导出均不重印
+- 危险命令：只存命令首行（引号段剥离防 grep 误报），红/黄两级分级
+- API 围栏：仅本机 loopback + 同源标记（`trust-fence.ts`）
+- 修复建议：只输出方案与命令模板（`FIX_SUGGESTIONS`），**永不自动执行**
+- 插件环境清单：只列插件名，非工具级归因（精确归属尚未实现）
 
-## 9. Roadmap
+## 10. Roadmap
 
-- [x] 报告引擎 / 面板 / 洞察 / 治理 / 会话钻取 / 插件环境（已加载第三方插件）/ 导出（PDF+PNG）/ 修复建议
-- [ ] 原生"打开会话"机制（待官方 client API 明确）
+- [x] 报告引擎 / 面板（三视图）/ 洞察 / 会话钻取 / 插件环境清单 / 导出（PDF+PNG）/ 修复建议 / 鲸鱼娘规则统一
+- [ ] 原生"打开会话"机制（待官方 client API 明确；当前仅复制 Session ID）
 - [ ] 长会话内存优化（LRU 化 session_index）
+- [ ] 工具调用 → 插件的精确归属（当前仅为环境清单）
