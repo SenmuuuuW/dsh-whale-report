@@ -79,7 +79,8 @@ const CSS = `
 [data-whale-report-btn][data-ghost="true"]:hover { border-color: #9ca3af; }
 
 /* ── 品牌区 ── */
-[data-whale-report-brand] { padding: 2px 2px 8px; }
+[data-whale-report-brand] { display: flex; align-items: center; gap: 12px; padding: 2px 2px 8px; }
+[data-whale-report-heroimg] { border-radius: 12px; flex-shrink: 0; }
 [data-whale-report-brandname] { font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: .01em; line-height: 1.1; }
 [data-whale-report-brandname] span { color: #4d6bfe; font-weight: 700; font-size: 17px; }
 [data-whale-report-brandtag] { font-size: 12px; color: #a3aab8; margin-top: 3px; }
@@ -1230,8 +1231,20 @@ function Dashboard(props: {
   return (
     <div data-whale-report-body>
       <div data-whale-report-brand>
-        <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
-        <div data-whale-report-brandtag>Your Agent, in numbers.</div>
+        <img
+          src="/whale/assets/whale-hero.svg"
+          width={56}
+          height={56}
+          alt=""
+          data-whale-report-heroimg
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+          }}
+        />
+        <div>
+          <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
+          <div data-whale-report-brandtag>Your Agent, in numbers.</div>
+        </div>
       </div>
 
       <div data-whale-report-chips>
