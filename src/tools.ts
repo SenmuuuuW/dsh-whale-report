@@ -57,6 +57,8 @@ export interface IndexTable {
 export interface ReportServices {
   sessionQuery: SessionQueryLike;
   index: IndexTable;
+  /** 已安装插件名列表（loader 枚举，供"插件真实归属"展示）。 */
+  plugins?: string[];
   periodStats?: {
     get(key: string): PeriodStatsRecord | undefined;
     put(key: string, value: PeriodStatsRecord): Promise<void>;
@@ -223,6 +225,7 @@ export async function generateReportData(
   }
   stats.sessionsDetail.sort((a, b) => b.cost - a.cost);
   stats.sessionsDetail = stats.sessionsDetail.slice(0, 20);
+  (stats as unknown as Record<string, unknown>).plugins = svc.plugins ?? [];
   const key = periodKey(preset, range.to);
   const prevKey = previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;

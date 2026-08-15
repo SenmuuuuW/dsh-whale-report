@@ -64,6 +64,8 @@ export interface IndexTable {
 export interface ReportServices {
     sessionQuery: SessionQueryLike;
     index: IndexTable;
+    /** 已安装插件名列表（loader 枚举，供"插件真实归属"展示）。 */
+    plugins?: string[];
     periodStats?: {
         get(key: string): PeriodStatsRecord | undefined;
         put(key: string, value: PeriodStatsRecord): Promise<void>;

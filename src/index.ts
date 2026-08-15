@@ -38,6 +38,21 @@ export function apply(ctx: Context) {
       periodStats: domain.table("period_stats"),
       settings: domain.table("settings"),
     };
+    // 插件真实归属：loader 枚举已加载插件名（失败静默，降级为空列表）。
+    ctx.inject(["loader"], (loaderCtx) => {
+      const loader = (
+        loaderCtx as Context & { loader: { entries(): Generator<{ options?: { id?: string; name?: string } }> } }
+      ).loader;
+      try {
+        const raw = [...loader.entries()].map((e) => ({ id: e.options?.id, name: e.options?.name }));
+        const names = raw
+          .map((e) => e.name ?? e.id ?? "")
+          .filter((n) => n !== "" && !n.startsWith("@deepseek-ai/") && !n.startsWith("cordis"));
+        services.plugins = [...new Set(names)];
+      } catch {
+        services.plugins = [];
+      }
+    });
     registerReportTools(ctx as unknown as ToolsHost, services);
 
     // 启动后台预热：索引建立期间不阻塞 UI，完成后生成报告秒级返回。
@@ -45,7 +60,8 @@ export function apply(ctx: Context) {
       void warmIndex(services).catch(() => {});
     }, 3000);
 
-    const apiServices: ApiServices = { domain, ...services };
+    // 同一对象挂 domain：loader 回调后续对 services.plugins 的赋值必须可见。
+    const apiServices: ApiServices = Object.assign(services, { domain }) as ApiServices;
 
     // 两个历史服务名都试一次；只注册一遍（防止未来某快照同时提供两个名字）。
     // 关键：cordis 注入上下文是 Proxy，访问不存在的服务属性会直接抛异常
