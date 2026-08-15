@@ -25,6 +25,8 @@ export interface WebServerLike {
 export interface ApiServices extends ReportServices {
     domain: Domain<typeof whaleDomain>;
 }
+/** 鲸鱼娘素材路由：白名单文件名，防路径穿越。 */
+export declare function registerAssetRoutes(ctx: Context, server: WebServerLike): void;
 /** 注册 /whale/api 路由（经 ctx.effect 挂载，卸载自动摘除）。 */
 export declare function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiServices): void;
 //# sourceMappingURL=api.d.ts.map

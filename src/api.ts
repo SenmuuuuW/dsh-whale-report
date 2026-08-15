@@ -135,7 +135,7 @@ const ASSET_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", 
 const MIME: Record<string, string> = { ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp", ".jpg": "image/jpeg" };
 
 /** 鲸鱼娘素材路由：白名单文件名，防路径穿越。 */
-function registerAssetRoutes(ctx: Context, server: WebServerLike): void {
+export function registerAssetRoutes(ctx: Context, server: WebServerLike): void {
   ctx.effect(
     () =>
       server.register({

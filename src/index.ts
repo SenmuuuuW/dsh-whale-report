@@ -16,7 +16,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { DomainFacility } from "@deepseek-ai/dsh-storage-domain";
 import { whaleDomain } from "./state.js";
-import { registerApiRoutes, type ApiServices, type WebServerLike } from "./api.js";
+import { registerApiRoutes, registerAssetRoutes, type ApiServices, type WebServerLike } from "./api.js";
 import { registerReportTools, warmIndex, type ReportServices, type SessionQueryLike, type ToolsHost } from "./tools.js";
 
 export const name = "whale-report-core";
@@ -76,6 +76,7 @@ export function apply(ctx: Context) {
       if (server === undefined) return;
       registered = true;
       registerApiRoutes(ctx, server, apiServices);
+      registerAssetRoutes(ctx, server);
     };
     ctx.inject(["webServer"], (c) => tryRegister(c as Context & { webServer?: unknown }));
     ctx.inject(["httpServer"], (c) => tryRegister(c as Context & { httpServer?: unknown }));
