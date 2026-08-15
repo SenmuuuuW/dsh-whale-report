@@ -889,25 +889,6 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         )}
       </div>
 
-      {(s.burstSamples ?? []).length > 0 && (() => {
-        const bursts = s.burstSamples ?? [];
-        return (
-        <div data-whale-report-card>
-          <div data-whale-report-h2>重试诊断（{bursts.length}）</div>
-          {bursts.slice(0, 3).map((b, i) => (
-            <div key={i} data-whale-report-danger data-sev="amber">
-              {b.cmd}
-              <em>
-                重复 {b.count} 次 · {new Date(b.time).toISOString().slice(0, 16).replace("T", " ")}
-                {b.error !== undefined ? <> · 错误：{b.error.slice(0, 90)}</> : null}
-              </em>
-            </div>
-          ))}
-          {bursts.length > 3 && <div data-whale-report-tokenline>……共 {bursts.length} 条，完整列表见导出 PDF</div>}
-        </div>
-        );
-      })()}
-
       <div data-whale-report-card>
         <div data-whale-report-h2>危险操作（{danger.length}）</div>
         {danger.length === 0 ? (
