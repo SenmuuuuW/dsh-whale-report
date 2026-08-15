@@ -18,6 +18,7 @@ import { whaleDomain, type ReportRecord, type SettingsRecord } from "./state.js"
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
+import { periodKey } from "./insights.js";
 import { computeCost } from "./pricing.js";
 import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
 
@@ -184,6 +185,57 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 "content-length": Buffer.byteLength(html),
               });
               res.end(html);
+              return;
+            }
+            if (req.method === "POST" && method === "summary") {
+              // 仪表盘数据：当前周期已有报告则复用，否则现场生成并落库。
+              const payload = (await readJsonBody(req)) as { preset?: unknown; from?: unknown; to?: unknown };
+              const preset = (payload.preset as ReportPreset) ?? "weekly";
+              const now = Date.now();
+              const range =
+                preset === "custom"
+                  ? { from: parseTime(payload.from, now - 7 * DAY_MS), to: parseTime(payload.to, now) }
+                  : presetRange(preset, now);
+              const key = periodKey(preset, range.to);
+              // 复用条件：周期匹配 + 含 cost 的新版记录（旧版缺字段，直接重建）+
+              // 取最新一条。
+              let found: ReportRecord | undefined;
+              for (const [, record] of table.entries()) {
+                if (
+                  record.preset === preset &&
+                  record.cost !== undefined &&
+                  periodKey(record.preset, record.to) === key &&
+                  (found === undefined || record.createdAt > found.createdAt)
+                ) {
+                  found = record;
+                }
+              }
+              if (found !== undefined) {
+                writeJson(res, 200, { ok: true, fresh: false, report: found });
+                return;
+              }
+              const gen = await generateReportData(svc, preset, range);
+              await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+              const record: ReportRecord = {
+                id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                preset,
+                from: range.from,
+                to: range.to,
+                createdAt: now,
+                sessions: gen.stats.sessions,
+                turns: gen.stats.turns,
+                totalEvents: gen.stats.totalEvents,
+                stats: gen.stats as unknown,
+                markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
+                cost: gen.cost,
+                insights: gen.insights,
+                prev: gen.prev
+                  ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                  : undefined,
+                budget: gen.budgetWeeklyCny,
+              };
+              await table.put(record.id, record);
+              writeJson(res, 200, { ok: true, fresh: true, report: record });
               return;
             }
             if (req.method === "GET" && method === "settings") {

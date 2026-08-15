@@ -78,6 +78,49 @@ const CSS = `
 [data-whale-report-btn][data-ghost="true"] { background: #fff; border-color: #d1d5db; color: #374151; }
 [data-whale-report-btn][data-ghost="true"]:hover { border-color: #9ca3af; }
 
+/* ── 品牌区 ── */
+[data-whale-report-brand] { padding: 8px 2px 10px; }
+[data-whale-report-brandname] { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: .01em; }
+[data-whale-report-brandname] span { color: #4d6bfe; font-weight: 700; font-size: 16px; }
+[data-whale-report-brandtag] { font-size: 12.5px; color: #64748b; margin-top: 2px; }
+[data-whale-report-brandactions] { position: absolute; right: 18px; margin-top: -34px; }
+[data-whale-report-link] { background: none; border: none; color: #64748b; font-size: 13px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+[data-whale-report-link]:hover { background: #eef2ff; color: #4d6bfe; }
+
+/* ── 仪表盘 hero ── */
+[data-whale-report-hero] {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+  padding: 16px 18px 14px; margin-bottom: 10px;
+}
+[data-whale-report-herolabel] { font-size: 13px; font-weight: 600; color: #0f172a; }
+[data-whale-report-heroval] { font-size: 44px; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; line-height: 1.15; margin: 4px 0 2px; }
+[data-whale-report-herodelta2] { font-size: 13px; display: flex; gap: 6px; align-items: baseline; }
+[data-whale-report-herodelta2] em.up { color: #dc2626; font-style: normal; font-weight: 700; }
+[data-whale-report-herodelta2] em.down { color: #16a34a; font-style: normal; font-weight: 700; }
+[data-whale-report-herodelta2] span { color: #64748b; }
+[data-whale-report-herodelta2] .muted { color: #9ca3af; }
+[data-whale-report-herostat { }] { }
+[data-whale-report-herostat] { display: flex; gap: 16px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #64748b; }
+[data-whale-report-herostat] b { color: #0f172a; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ── 洞察 Feed ── */
+[data-whale-report-feed] { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+[data-whale-report-feedrow] {
+  display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 9px 12px;
+}
+[data-whale-report-feedrow]:hover { border-color: #c7d2fe; }
+[data-whale-report-feeddot] { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+[data-whale-report-feedmain] { flex: 1; min-width: 0; }
+[data-whale-report-feedtitle] { font-size: 13.5px; font-weight: 700; color: #0f172a; }
+[data-whale-report-feedpreview] { font-size: 12.5px; color: #64748b; margin-top: 2px; font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-whale-report-feeddetail] { font-size: 13px; color: #374151; line-height: 1.7; margin-top: 5px; }
+[data-whale-report-feedaction] { font-size: 13px; color: #4d6bfe; margin-top: 4px; }
+[data-whale-report-feedestimate] { font-size: 12px; color: #6b7280; margin-top: 3px; }
+
+/* ── 完整报告按钮 ── */
+[data-whale-report-fullbtn] { width: 100%; margin: 4px 0 12px; padding: 11px; font-size: 14px; }
+
 /* ── 报告视图：紧凑头部 + 大数字统计条 ── */
 [data-whale-report-headrow] {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -824,42 +867,80 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
 // ─────────────────────────── 核心内容组件（抽屉与 Tab 共用） ───────────────────────────
 
 interface ContentState {
-  tab: "report" | "history";
+  view: "dashboard" | "report" | "history";
   preset: (typeof PRESETS)[number]["key"];
   from: string;
   to: string;
   loading: boolean;
   error: string | null;
+  dashboard: ReportFull | null;
   current: ReportFull | null;
   history: ReportMeta[] | null;
   budgetInput: string;
+  showBudgetEdit: boolean;
+}
+
+/** 洞察预览行（紧凑 Feed：标题 + 一行数据预览）。 */
+function insightPreview(insight: InsightJson, s: StatsJson): string | null {
+  switch (insight.id) {
+    case "danger-red":
+    case "danger-amber": {
+      const first = s.dangerousCommands?.[0]?.command ?? null;
+      return first !== null ? first.replace(/\s+/g, " ").slice(0, 40) : null;
+    }
+    case "retry-storm": {
+      const burst = s.burstSamples?.[0];
+      return burst !== undefined ? `连续 ${burst.count} 次：${burst.cmd.slice(0, 34)}` : null;
+    }
+    case "cache-drop":
+    case "cache-good":
+      return `命中率 ${Math.round((s.tokens.cacheRead / Math.max(1, s.tokens.input + s.tokens.cacheRead)) * 1000) / 10}%`;
+    case "night-cost":
+      return `${new Date(s.hourHistogram.indexOf(Math.max(...s.hourHistogram.slice(0, 6))) * 3600000).toISOString().slice(11, 16)} 时段`;
+    case "secret-hit":
+      return s.secretHits?.map((h) => h.label).join("、") ?? null;
+    case "budget-over":
+    case "budget-near":
+      return null;
+    case "session-fragmentation":
+      return `平均 ${s.sessions > 0 ? (s.turns / s.sessions).toFixed(1) : "0"} 回合/会话`;
+    case "cost-trend":
+      return null;
+    default:
+      return null;
+  }
 }
 
 class WhaleContent extends Component<Record<string, never>, ContentState> {
   state: ContentState = {
-    tab: "report",
+    view: "dashboard",
     preset: "weekly",
     from: dateStr(Date.now() - 7 * 86400000),
     to: dateStr(Date.now()),
     loading: false,
     error: null,
+    dashboard: null,
     current: null,
     history: null,
     budgetInput: "",
+    showBudgetEdit: false,
   };
 
   componentDidMount(): void {
-    void (async () => {
-      try {
-        const response = await fetch("/whale/api/settings");
-        const body = (await response.json()) as { ok: boolean; settings?: number | null };
-        if (response.ok && body.ok && typeof body.settings === "number") {
-          this.setState({ budgetInput: String(body.settings) });
-        }
-      } catch {
-        /* 预算加载失败不影响使用 */
+    void this.loadDashboard();
+    void this.loadBudget();
+  }
+
+  async loadBudget(): Promise<void> {
+    try {
+      const response = await fetch("/whale/api/settings");
+      const body = (await response.json()) as { ok: boolean; settings?: number | null };
+      if (response.ok && body.ok && typeof body.settings === "number") {
+        this.setState({ budgetInput: String(body.settings) });
       }
-    })();
+    } catch {
+      /* 忽略 */
+    }
   }
 
   async saveBudget(): Promise<void> {
@@ -873,9 +954,30 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       });
       const body = (await response.json()) as { ok: boolean; error?: { message?: string } };
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "保存失败");
-      this.setState({ error: null });
+      this.setState({ error: null, showBudgetEdit: false });
     } catch (error) {
       this.setState({ error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** 仪表盘：当前周期数据（有则复用，无则生成）。 */
+  async loadDashboard(): Promise<void> {
+    this.setState({ loading: true, error: null });
+    try {
+      const payload =
+        this.state.preset === "custom"
+          ? { preset: "custom", from: this.state.from, to: this.state.to }
+          : { preset: this.state.preset };
+      const response = await fetch("/whale/api/summary", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json()) as { ok: boolean; report: ReportFull; error?: { message?: string } };
+      if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
+      this.setState({ dashboard: body.report, current: body.report, loading: false, view: "dashboard" });
+    } catch (error) {
+      this.setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -888,27 +990,13 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     }
   }
 
-  async generate(): Promise<void> {
-    this.setState({ loading: true, error: null });
-    try {
-      const payload =
-        this.state.preset === "custom"
-          ? { preset: "custom", from: this.state.from, to: this.state.to }
-          : { preset: this.state.preset };
-      const body = await api<{ report: ReportFull }>("generate", payload);
-      this.setState({ current: body.report, loading: false, tab: "report" });
-    } catch (error) {
-      this.setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
   async openHistory(id: string): Promise<void> {
     this.setState({ loading: true, error: null });
     try {
       const response = await fetch(`/whale/api/get?id=${encodeURIComponent(id)}`);
       const json = (await response.json()) as { ok: boolean; report: ReportFull };
       if (!response.ok || json.ok === false) throw new Error("报告不存在");
-      this.setState({ current: json.report, loading: false, tab: "report" });
+      this.setState({ current: json.report, loading: false, view: "report" });
     } catch (error) {
       this.setState({ loading: false, error: error instanceof Error ? error.message : String(error) });
     }
@@ -917,26 +1005,28 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   async deleteReport(id: string): Promise<void> {
     try {
       await api<{ ok: boolean }>("delete", { id });
-      this.setState({ current: null, history: null });
-      if (this.state.tab === "history") void this.loadHistory();
+      this.setState({ current: null, dashboard: null, history: null, view: "dashboard" });
     } catch (error) {
       this.setState({ error: error instanceof Error ? error.message : String(error) });
     }
   }
 
   render(): ReactNode {
-    const { tab, preset, loading, error, current, history } = this.state;
+    const { view, preset, loading, error, dashboard, current, history } = this.state;
     return (
       <>
         <div data-whale-report-tabs>
-          <button data-whale-report-tab data-active={tab === "report"} onClick={() => this.setState({ tab: "report" })}>
-            新报告
+          <button data-whale-report-tab data-active={view === "dashboard"} onClick={() => this.setState({ view: "dashboard" })}>
+            概览
+          </button>
+          <button data-whale-report-tab data-active={view === "report"} onClick={() => this.setState({ view: "report" })}>
+            报告
           </button>
           <button
             data-whale-report-tab
-            data-active={tab === "history"}
+            data-active={view === "history"}
             onClick={() => {
-              this.setState({ tab: "history" });
+              this.setState({ view: "history" });
               if (history === null) void this.loadHistory();
             }}
           >
@@ -946,12 +1036,41 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
 
         {error !== null && <div data-whale-report-danger>出错了：{error}</div>}
 
-        {tab === "history" && history === null && <div data-whale-report-loading>加载中…</div>}
-        {tab === "history" && history !== null && history.length === 0 && (
+        {view === "dashboard" && (
+          <Dashboard
+            state={this.state}
+            onPreset={(p) => {
+              this.setState({ preset: p, dashboard: null });
+              void this.loadDashboard();
+            }}
+            onCustom={(from, to) => {
+              this.setState({ from, to });
+              void this.loadDashboard();
+            }}
+            onOpenReport={() => this.setState({ view: "report" })}
+            onBudgetToggle={() => this.setState({ showBudgetEdit: !this.state.showBudgetEdit })}
+            onBudgetInput={(v) => this.setState({ budgetInput: v })}
+            onSaveBudget={() => void this.saveBudget()}
+          />
+        )}
+
+        {view === "report" && current !== null && (
+          <div data-whale-report-body>
+            <ReportView report={current} onDelete={(id) => void this.deleteReport(id)} />
+          </div>
+        )}
+        {view === "report" && current === null && !loading && (
+          <div data-whale-report-body>
+            <div data-whale-report-empty>先回到概览生成一份报告</div>
+          </div>
+        )}
+
+        {view === "history" && history === null && <div data-whale-report-loading>加载中…</div>}
+        {view === "history" && history !== null && history.length === 0 && (
           <div data-whale-report-empty>暂无报告</div>
         )}
-        {tab === "history" && history !== null && history.length > 0 && (
-          <div>
+        {view === "history" && history !== null && history.length > 0 && (
+          <div data-whale-report-body>
             {history.map((item) => (
               <div key={item.id} data-whale-report-hitem onClick={() => void this.openHistory(item.id)}>
                 <b>
@@ -964,65 +1083,183 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
             ))}
           </div>
         )}
-
-        {tab === "report" && (
-          <>
-            {current === null && (
-              <>
-                <div data-whale-report-chips>
-                  {PRESETS.map((p) => (
-                    <button
-                      key={p.key}
-                      data-whale-report-chip
-                      data-active={preset === p.key}
-                      onClick={() => this.setState({ preset: p.key })}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                {preset === "custom" && (
-                  <div data-whale-report-inputs>
-                    <input
-                      type="date"
-                      value={this.state.from}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ from: e.target.value })}
-                    />
-                    <input
-                      type="date"
-                      value={this.state.to}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ to: e.target.value })}
-                    />
-                  </div>
-                )}
-                <div data-whale-report-actions>
-                  <button data-whale-report-btn onClick={() => void this.generate()} disabled={loading}>
-                    {loading ? "生成中…" : "生成报告"}
-                  </button>
-                </div>
-                {loading && <div data-whale-report-loading>正在生成报告…</div>}
-                <div data-whale-report-budgetedit>
-                  <span>周预算（¥）：</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    placeholder="如 50"
-                    value={this.state.budgetInput}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => this.setState({ budgetInput: e.target.value })}
-                  />
-                  <button data-whale-report-btn data-ghost="true" onClick={() => void this.saveBudget()}>
-                    保存
-                  </button>
-                </div>
-              </>
-            )}
-            {current !== null && <ReportView report={current} onDelete={(id) => void this.deleteReport(id)} />}
-          </>
-        )}
       </>
     );
   }
+}
+
+/** 概览（打开即报告）：Hero 大数字 + 洞察 Feed + 活跃 + 模型。 */
+function Dashboard(props: {
+  state: ContentState;
+  onPreset: (p: ContentState["preset"]) => void;
+  onCustom: (from: string, to: string) => void;
+  onOpenReport: () => void;
+  onBudgetToggle: () => void;
+  onBudgetInput: (v: string) => void;
+  onSaveBudget: () => void;
+}): ReactNode {
+  const { state, onPreset, onCustom, onOpenReport, onBudgetToggle, onBudgetInput, onSaveBudget } = props;
+  const { preset, loading, error, dashboard, showBudgetEdit, budgetInput, from, to } = state;
+  const report = dashboard;
+  const s = report?.stats;
+  const cost = report?.cost?.total;
+  const delta = report?.prev !== undefined && report.prev.cost > 0 && cost !== undefined
+    ? Math.round(((cost - report.prev.cost) / report.prev.cost) * 100)
+    : null;
+  const insights = (report?.insights ?? []).filter((i) => i.level !== "info");
+  const totalTokens = s !== undefined ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning : 0;
+  const modelRows = (() => {
+    if (s === undefined) return [];
+    const entries = Object.entries(s.models ?? {}).sort(
+      (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
+    );
+    const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
+    return entries.map(([model, u]) => {
+      const t = u.input + u.output + u.cacheRead + u.reasoning;
+      return { model, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
+    });
+  })();
+  const budgetUsed = typeof report?.budget === "number" && report.budget > 0 && cost !== undefined
+    ? Math.min(1, cost / report.budget)
+    : null;
+
+  return (
+    <div data-whale-report-body>
+      <div data-whale-report-brand>
+        <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
+        <div data-whale-report-brandtag>Your Agent, in numbers.</div>
+        <div data-whale-report-brandactions>
+          <button data-whale-report-link onClick={onBudgetToggle}>预算</button>
+        </div>
+      </div>
+
+      {showBudgetEdit && (
+        <div data-whale-report-budgetedit>
+          <span>周预算（¥）：</span>
+          <input type="number" min="0" step="1" placeholder="如 50" value={budgetInput} onChange={(e) => onBudgetInput(e.target.value)} />
+          <button data-whale-report-btn data-ghost="true" onClick={onSaveBudget}>保存</button>
+        </div>
+      )}
+
+      <div data-whale-report-chips>
+        {PRESETS.map((p) => (
+          <button key={p.key} data-whale-report-chip data-active={preset === p.key} onClick={() => onPreset(p.key)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {preset === "custom" && (
+        <div data-whale-report-inputs>
+          <input type="date" value={from} onChange={(e) => onCustom(e.target.value, to)} />
+          <input type="date" value={to} onChange={(e) => onCustom(from, e.target.value)} />
+        </div>
+      )}
+
+      {loading && report === null && <div data-whale-report-loading>生成中…</div>}
+
+      {report !== null && s !== undefined && (
+        <>
+          <div data-whale-report-hero>
+            <div data-whale-report-herolabel>本周 Agent 消耗</div>
+            <div data-whale-report-heroval>¥{typeof cost === "number" ? cost.toFixed(2) : "—"}</div>
+            <div data-whale-report-herodelta2>
+              {delta === null ? (
+                <span className="muted">首次记录，下周起可对比</span>
+              ) : (
+                <>
+                  <em className={delta > 0 ? "up" : "down"}>{delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%</em>
+                  <span> vs 上周</span>
+                </>
+              )}
+            </div>
+            <div data-whale-report-herostat>
+              <span><b>{s.sessions}</b> 会话</span>
+              <span><b>{fmt(s.toolCallsTotal)}</b> 工具调用</span>
+              <span><b>{fmt(totalTokens)}</b> Tokens</span>
+            </div>
+          </div>
+
+          {budgetUsed !== null && (
+            <div data-whale-report-budget>
+              <div data-whale-report-budgetbar>
+                <i style={{ width: `${budgetUsed * 100}%`, background: budgetUsed >= 1 ? "#dc2626" : budgetUsed >= 0.8 ? "#d97706" : "#4d6bfe" }} />
+              </div>
+              <span>¥{cost!.toFixed(2)} / ¥{report.budget!.toFixed(2)} {budgetUsed >= 1 ? "超支" : ""}</span>
+            </div>
+          )}
+
+          {insights.length > 0 && (
+            <>
+              <div data-whale-report-h2>值得注意</div>
+              <InsightFeed insights={insights} stats={s} />
+            </>
+          )}
+
+          <div data-whale-report-h2>活跃</div>
+          <div data-whale-report-card>
+            <ActivityStrip report={report} />
+          </div>
+
+          {modelRows.length > 0 && (
+            <>
+              <div data-whale-report-h2>模型</div>
+              <div data-whale-report-card>
+                {modelRows.map((m) => (
+                  <div key={m.model} data-whale-report-modelrow>
+                    <div data-whale-report-modelhead>
+                      <b>{m.model}</b>
+                      <span>{m.share}% · ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
+                    </div>
+                    <div data-whale-report-modelbar>
+                      <i style={{ width: `${m.share}%`, background: "#4d6bfe" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <button data-whale-report-btn data-whale-report-fullbtn onClick={onOpenReport}>
+            生成完整报告 →
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 洞察紧凑 Feed：色点 + 单行标题 + 预览，点击展开。 */
+function InsightFeed({ insights, stats }: { insights: InsightJson[]; stats: StatsJson }): ReactNode {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <div data-whale-report-feed>
+      {insights.map((insight) => {
+        const meta = INSIGHT_META[insight.level] ?? INSIGHT_META.warning;
+        const open = openId === insight.id;
+        const preview = insightPreview(insight, stats);
+        return (
+          <div
+            key={insight.id}
+            data-whale-report-feedrow
+            onClick={() => setOpenId(open ? null : insight.id)}
+          >
+            <i data-whale-report-feeddot style={{ background: meta.color }} />
+            <div data-whale-report-feedmain>
+              <div data-whale-report-feedtitle>{insight.title}</div>
+              {preview !== null && !open && <div data-whale-report-feedpreview>{preview}</div>}
+              {open && (
+                <>
+                  <div data-whale-report-feeddetail>{insight.detail}</div>
+                  <div data-whale-report-feedaction>{insight.action}</div>
+                  {insight.estimate !== undefined && <div data-whale-report-feedestimate>{insight.estimate}</div>}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─────────────────────────── Tab 模式标记（better-sidebar 存在时隐藏悬浮球） ───────────────────────────
