@@ -36,25 +36,25 @@ TRACE    →  Session Drilldown 追到具体会话复盘
 
 ## Product
 
-<img src="docs/images/findings-whale-note.png" alt="Findings & Whale Note" width="100%">
+<img src="docs/images/overview-detail.png" alt="DeepTrace overview" width="100%">
 
-<sub>Deterministic findings, with the whale note as reviewer — never another AI guessing.</sub>
+<sub>The sidebar overview — cost, top findings and the whale's take at a glance.</sub>
 
-<img src="docs/images/activity-resources.png" alt="Activity & Resources" width="100%">
+<img src="docs/images/whale-note.png" alt="Whale Note" width="100%">
 
-<sub>Activity scan, models and tools — where the time and tokens went.</sub>
+<sub>The whale note — a deterministic review of the period, light or spicy.</sub>
 
-<img src="docs/images/trace-log.png" alt="Trace Log" width="100%">
+<img src="docs/images/activity.png" alt="Activity scan" width="100%">
 
-<sub>From anomaly back to the exact session. Copy its Session ID, go investigate.</sub>
+<sub>Activity scan — sonar view of when your agent was actually working.</sub>
 
-<img src="docs/images/full-report.png" alt="Full report" width="100%">
+<img src="docs/images/report.png" alt="Full report" width="100%">
 
-<sub>The complete research-report view, from opening to appendix.</sub>
+<sub>The complete web report view, from opening to appendix.</sub>
 
 <img src="docs/images/export.png" alt="Export" width="100%">
 
-<sub>Same report, anywhere: web, printable PDF, PNG long image.</sub>
+<sub>Exported long image — same report, anywhere.</sub>
 
 ## What it measures
 
