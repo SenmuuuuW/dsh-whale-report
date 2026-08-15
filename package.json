@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-report",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "鲸鱼记事本 — 你的 Agent 年度/月度/周度/日报：从会话事件日志生成数据新闻官式报告，任意区间、定时生成。",
   "type": "module",
   "license": "MIT",

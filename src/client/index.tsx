@@ -1433,16 +1433,24 @@ function exportReportImage(report: ReportFull): void {
   const line = "#e5e7eb";
   let y = padding;
 
+  // 长文本截断：超出画布宽度时加省略号（中文长标题防溢出）。
+  const ellipsis = (raw: string, maxWidth: number, size: number): string => {
+    if (ctx.measureText(raw).width <= maxWidth) return raw;
+    let t = raw;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+    return t + "…";
+  };
+  const maxText = W - padding * 2;
   const title = (text: string, size: number, color: string, dy = 0): void => {
     ctx.fillStyle = color;
     ctx.font = `700 ${size}px "PingFang SC", sans-serif`;
-    ctx.fillText(text, padding, y + size + dy);
+    ctx.fillText(ellipsis(text, maxText, size), padding, y + size + dy);
     y += rowH(size);
   };
   const text = (text: string, size: number, color: string): void => {
     ctx.fillStyle = color;
     ctx.font = `400 ${size}px "PingFang SC", sans-serif`;
-    ctx.fillText(text, padding, y + size);
+    ctx.fillText(ellipsis(text, maxText, size), padding, y + size);
     y += rowH(size);
   };
   const sep = (): void => {
@@ -1567,7 +1575,7 @@ const FIX_SUGGESTIONS: Record<string, { text: string; command?: string }> = {
     command: "git reflog --oneline | head -20",
   },
   "secret-hit": {
-    text: "疑似密钥出现在会话中，立即轮换。若曾提交到 git，历史里也会残留。",
+    text: "疑似密钥出现在会话中，立即轮换。可检查相关提交历史，确认密钥是否曾进入版本库。",
     command: "git log --all --oneline | head -50",
   },
   "cache-drop": {
