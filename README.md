@@ -1,14 +1,38 @@
-# 深迹 · DeepTrace
+<p align="center">
+  <img src="assets/whale/whale-happy.svg" alt="" width="56">
+</p>
 
-> **Your Agent, in numbers.**
+<h1 align="center">深迹 · DeepTrace</h1>
 
-把 DSH 的 session、token、cost、tool call、风险与异常，转成可以真正读懂的 Agent 报告。
+<p align="center"><b>Your Agent, in numbers.</b></p>
 
-[![Version](https://img.shields.io/github/v/release/SenmuuuuW/dsh-whale-report?label=version&color=4d6bfe)](https://github.com/SenmuuuuW/dsh-whale-report/releases)
-[![CI](https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml/badge.svg)](https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-4d6bfe.svg)](LICENSE)
+<p align="center">把 DSH 的 session、token、cost、tool call、风险与异常，<br/>转成可以真正读懂的 Agent 报告。</p>
 
-<img src="docs/images/overview.png" alt="DeepTrace Overview" width="100%">
+<p align="center">
+  <a href="https://github.com/SenmuuuuW/dsh-whale-report/releases"><img src="https://img.shields.io/github/v/release/SenmuuuuW/dsh-whale-report?label=version&color=4d6bfe" alt="version"></a>
+  <a href="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml"><img src="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe.svg" alt="license"></a>
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center" style="background:#0b1733;border-radius:12px;padding:10px 30px">
+      <span style="color:#4d6bfe;font-weight:700;font-family:ui-monospace,Menlo,monospace">6 PERIODS</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">8 RULES</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">4 EXPORTS</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">READ-ONLY</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">DETERMINISTIC</span>
+    </td>
+  </tr>
+</table>
+
+<br/>
+
+<img src="docs/images/overview.png" alt="DeepTrace Overview" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 ---
 
@@ -26,33 +50,46 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 ## The loop
 
-```
-SEE      →  总览成本、调用、模型与异常
-NOTICE   →  Findings + Whale Note 指出值得看的问题
-TRACE    →  Session Drilldown 追到具体会话复盘
-```
+<table align="center">
+  <tr>
+    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+      <b style="color:#4d6bfe">SEE</b><br/>
+      <span style="color:#33445f;font-size:13px">总览成本、调用、模型与异常</span>
+    </td>
+    <td align="center" width="5%" style="color:#94a2b3">→</td>
+    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+      <b style="color:#4d6bfe">NOTICE</b><br/>
+      <span style="color:#33445f;font-size:13px">Findings + Whale Note 指出值得看的问题</span>
+    </td>
+    <td align="center" width="5%" style="color:#94a2b3">→</td>
+    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+      <b style="color:#4d6bfe">TRACE</b><br/>
+      <span style="color:#33445f;font-size:13px">Session Drilldown 追到具体会话复盘</span>
+    </td>
+  </tr>
+</table>
 
 一次报告，走完整个闭环。
 
 ## Product
 
-<img src="docs/images/overview-detail.png" alt="DeepTrace overview" width="100%">
+<img src="docs/images/overview-detail.png" alt="DeepTrace overview" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 <sub>The sidebar overview — cost, top findings and the whale's take at a glance.</sub>
 
-<img src="docs/images/whale-note.png" alt="Whale Note" width="100%">
+<img src="docs/images/whale-note.png" alt="Whale Note" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 <sub>The whale note — a deterministic review of the period, light or spicy.</sub>
 
-<img src="docs/images/activity.png" alt="Activity scan" width="100%">
+<img src="docs/images/activity.png" alt="Activity scan" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 <sub>Activity scan — sonar view of when your agent was actually working.</sub>
 
-<img src="docs/images/report.png" alt="Full report" width="100%">
+<img src="docs/images/report.png" alt="Full report" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 <sub>The complete web report view, from opening to appendix.</sub>
 
-<img src="docs/images/export.png" alt="Export" width="100%">
+<img src="docs/images/export.png" alt="Export" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 <sub>Exported long image — same report, anywhere.</sub>
 
@@ -166,7 +203,7 @@ Web / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 46 个单测：引擎 / 洞察 / 规则 / 导出
+pnpm test       # 48 个单测：引擎 / 洞察 / 规则 / 导出
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
@@ -184,8 +221,7 @@ MIT
 
 ---
 
-*DeepTrace is built to make Agent behavior inspectable, measurable, and easier to improve.*
+<p align="center"><em>DeepTrace is built to make Agent behavior inspectable, measurable, and easier to improve.</em></p>
 
-<img src="assets/whale/whale-happy.svg" alt="" width="28">
-
-<sub>…and yes, the whale is watching. She reads every report first.</sub>
+<p align="center"><img src="assets/whale/whale-happy.svg" alt="" width="28"><br/>
+<sub>…and yes, the whale is watching. She reads every report first.</sub></p>
