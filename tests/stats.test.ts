@@ -208,6 +208,48 @@ describe("索引层：bucketizeOwnEvents + aggregateBuckets 与 aggregate 等价
     expect(indexed.dayHourSeries).toEqual(direct.dayHourSeries);
     expect(indexed.titles).toEqual(direct.titles);
     expect(indexed.sessions).toBe(direct.sessions);
+    // 协作信号双路径等价（回归：aggregateBuckets 曾漏聚合 collab 字段）
+    expect(indexed.collab).toEqual(direct.collab);
+    expect(indexed.sessionsDetail[0].turns).toBe(direct.sessionsDetail[0].turns);
+    expect(indexed.sessionsDetail[0].userMessages).toBe(direct.sessionsDetail[0].userMessages);
+    expect(indexed.sessionsDetail[0].collabRevisions).toBe(direct.sessionsDetail[0].collabRevisions);
+    expect(indexed.sessionsDetail[0].collabLateConstraints).toBe(direct.sessionsDetail[0].collabLateConstraints);
+  });
+
+  it("协作信号在两条路径都正确采集（修正/迟到约束/短会话）", () => {
+    const base = new Date(2026, 7, 10, 0, 0, 0).getTime();
+    const events: RawEvent[] = [
+      ev("turn/start", base + 1),
+      ev("user/message", base + 2, { content: [{ type: "text", text: "帮我写个排序" }] }),
+      ev("assistant/message", base + 3, { usage: { inputTokens: 1, outputTokens: 1 } }),
+      ev("turn/start", base + 4),
+      ev("user/message", base + 5, { content: [{ type: "text", text: "不是这个，换一种方式" }] }),
+      ev("assistant/message", base + 6, { usage: { inputTokens: 1, outputTokens: 1 } }),
+      ev("turn/start", base + 7),
+      ev("user/message", base + 8, { content: [{ type: "text", text: "千万不要改数据库" }] }),
+    ];
+    const period = { from: base - 60_000, to: base + 3600_000 };
+    const direct = aggregate(events, period, [{ id: "s1", createdAt: base }]);
+    const built = bucketizeOwnEvents("s1", events.map((e) => ({ ...e, seq: 0 })), 0);
+    const indexed = aggregateBuckets([{ sessionId: "s1", buckets: built.buckets, titles: built.titles }], period, [
+      { id: "s1", createdAt: base },
+    ]);
+
+    // 首条消息无信号；第二条"不是这个，换一种方式" → revision；第三条"千万不要改数据库" → 迟到约束
+    expect(direct.collab.revisions).toBe(1);
+    expect(direct.collab.lateConstraints).toBe(1);
+    expect(direct.collab.sessionsWithRevision).toBe(1);
+    expect(indexed.collab).toEqual(direct.collab);
+    expect(indexed.sessionsDetail[0].collabRevisions).toBe(1);
+    expect(indexed.sessionsDetail[0].collabLateConstraints).toBe(1);
+    // 首条用户消息里的"约束"不计迟到：把"千万不要"放首条再验证
+    const firstIsConstraint = [
+      ev("user/message", base + 2, { content: [{ type: "text", text: "千万不要用 X" }] }),
+      ev("turn/start", base + 4),
+      ev("user/message", base + 5, { content: [{ type: "text", text: "再试一次" }] }),
+    ];
+    const d2 = aggregate(firstIsConstraint, period, [{ id: "s1", createdAt: base }]);
+    expect(d2.collab.lateConstraints).toBe(0);
   });
 
   it("bucketizeOwnEvents 跳过继承种子事件（seq < ownStart）", () => {
