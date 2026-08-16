@@ -77,6 +77,10 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 <sub>DeepTrace overview — hero, provider balance, cost, findings and the whale note.</sub>
 
+<img src="docs/images/report.png" alt="Full report" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
+
+<sub>The full DeepTrace report — findings, collaboration review, activity, resources, risks and session trace.</sub>
+
 ## What it measures
 
 | | |
