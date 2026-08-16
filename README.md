@@ -107,6 +107,7 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 | **Secret scan** | 6 类常见密钥模式的存在性检测，**只报有无，不存原文** |
 | **Session drilldown** | 按费用排序的会话轨迹：成本、重试、危险信号、模型 token 归因 |
 | **Baseline** | 每周期自动落库，报告带"较上周期 ▲/▼"（费用、会话、缓存命中率等） |
+| **Provider balance** | 模型平台实时余额（DeepSeek 已支持，可扩展）；key 只在本机服务端使用 |
 
 ## Deterministic insights
 
@@ -119,9 +120,13 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 8 条确定性规则：深夜消耗、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势。每条都带阈值、归因与估算口径。
 
+**协作复盘（COLLABORATION REVIEW）**：观察人机协作模式——需求漂移 / 迟到约束 / 上下文碎片化，最多 3 条，样本不足不展示；语气是"找摩擦、给可尝试的优化"，不评价人格、不把技术 retry 归因为沟通问题。
+
 鲸鱼娘的 Whale Note 也建立在同一套确定性触发规则上（`src/whale-notes.ts`，表情与文案同源）。
 
 **同一份数据 → 同一份结论。**
+
+报告本身由本地确定性代码生成——**REPORT GENERATION · 0 TOKENS · LOCAL DETERMINISTIC**，生成报告不消耗模型调用。
 
 ## Privacy / read-only
 

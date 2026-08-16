@@ -2,6 +2,32 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.3.0] - 2026-08-16
+
+### 新增
+- Provider Balance：模型平台实时余额（DeepSeek 已实现，adapter 架构可扩展 GLM 等）
+  - key 只在本机服务端读取（`~/.dsh/.credentials.yaml` 优先）+ 60s 缓存 + 手动刷新
+  - 余额查询失败/超时不影响报告加载；瞬时错误自动重试、不缓存过期状态
+- 协作复盘 COLLABORATION REVIEW：人机协作模式确定性观察（需求漂移 / 迟到约束 / 上下文碎片化）
+  - 用户消息逐条词表信号检测（方向修正 / 迟到约束），直算与分桶双路径等价
+  - 最多 3 条、样本不足不展示、不评价人格、不把技术 retry 归因为沟通问题
+- REPORT GENERATION：报告生成消耗元数据（当前全本地确定性 → 0 TOKENS · LOCAL DETERMINISTIC）
+- 编辑式研究终端 UI：报告头 / 鲸评 / Findings / 协作复盘 / 活跃 / 资源 / 风险 / 轨迹 / 索引
+- 导出四出口：图片（主报告，不含轨迹/索引）/ 会话轨迹（单独导出）/ HTML / PDF（直接打印面板，与面板逐像素一致）
+- 导出使用真实鲸鱼娘素材（png → svg 回退，缺图才手绘）
+
+### 变更
+- 会话索引 INDEX_VERSION 10 → 11（协作信号字段）
+- 导出 PNG 高度随内容预算 + 实际高度裁剪，任何周期不裁切
+- README 升级为发布级主页（截图 + 深海指标条 + The loop 卡片化）
+
+### 修复
+- balance key 读取优先级：`~/.dsh/.credentials.yaml` 优先（`.env` 可能存在无效残留）
+- 多币种余额选择：CNY 优先（官方可能同时返回 USD/CNY）
+- 余额超时 8s → 12s；瞬时错误不缓存；前端自动重试一次
+- PNG 导出底部裁切（weekly/monthly/custom 高度按实际行数计算）
+- 测试：48 → 78（balance 13 / collaboration 13 / 导出 6 / 引擎 29 / 鲸评 13）
+
 ## [0.2.0] - 2026-08-15
 
 ### 新增
