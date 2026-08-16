@@ -32,7 +32,7 @@
 
 <br/>
 
-<img src="docs/images/overview.png" alt="DeepTrace Overview" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
+<img src="docs/images/integration.png" alt="DeepTrace inside DSH" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 ---
 
@@ -73,25 +73,9 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 ## Product
 
-<img src="docs/images/overview-detail.png" alt="DeepTrace overview" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
+<img src="docs/images/overview.png" alt="DeepTrace overview" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
-<sub>The sidebar overview — cost, top findings and the whale's take at a glance.</sub>
-
-<img src="docs/images/whale-note.png" alt="Whale Note" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
-
-<sub>The whale note — a deterministic review of the period, light or spicy.</sub>
-
-<img src="docs/images/activity.png" alt="Activity scan" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
-
-<sub>Activity scan — sonar view of when your agent was actually working.</sub>
-
-<img src="docs/images/report.png" alt="Full report" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
-
-<sub>The complete web report view, from opening to appendix.</sub>
-
-<img src="docs/images/export.png" alt="Export" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
-
-<sub>Exported long image — same report, anywhere.</sub>
+<sub>DeepTrace overview — hero, provider balance, cost, findings and the whale note.</sub>
 
 ## What it measures
 
