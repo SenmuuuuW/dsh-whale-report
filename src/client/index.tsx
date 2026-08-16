@@ -128,7 +128,6 @@ const CSS = `
 [data-whale-report-herodelta2] em.down { color: #16a34a; font-style: normal; font-weight: 700; }
 [data-whale-report-herodelta2] span { color: #64748b; }
 [data-whale-report-herodelta2] .muted { color: #9ca3af; }
-[data-whale-report-herostat { }] { }
 [data-whale-report-herostat] { display: flex; gap: 16px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #64748b; }
 [data-whale-report-herostat] b { color: #0f172a; font-weight: 800; font-variant-numeric: tabular-nums; }
 
@@ -136,9 +135,11 @@ const CSS = `
 [data-whale-report-feed] { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 [data-whale-report-feedrow] {
   display: flex; gap: 9px; align-items: flex-start; cursor: pointer;
-  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 9px 12px;
+  border-left: 2px solid var(--dt-line); padding: 7px 0 7px 12px;
+  transition: border-color 120ms;
 }
-[data-whale-report-feedrow]:hover { border-color: #c7d2fe; }
+[data-whale-report-feedrow]:hover { border-left-color: var(--dt-blue); background: rgba(77,107,254,.025); border-radius: 0 4px 4px 0; }
+[data-whale-report-feedrow][data-open="true"] { border-left-color: var(--dt-blue); }
 [data-whale-report-feeddot] { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
 [data-whale-report-feedmain] { flex: 1; min-width: 0; }
 [data-whale-report-feedtitle] { font-size: 13.5px; font-weight: 700; color: #0f172a; }
@@ -340,6 +341,7 @@ const CSS = `
   --dt-line-strong: #b9c9d3;
   --dt-blue: #4d6bfe;
   --dt-cyan: #36b9d1;
+  --dt-cyan-deep: #147a92;
   --dt-abyss: #07162f;
   --dt-red: #c83a48;
   --dt-amber: #b87519;
@@ -347,8 +349,11 @@ const CSS = `
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
   font-feature-settings: "tnum" 1, "ss01" 1;
 }
-[data-whale-report] button, [data-whale-report-drawer] button, [data-whale-report-tabhost] button,
-[data-whale-report] input, [data-whale-report-drawer] input, [data-whale-report-tabhost] input { font: inherit; }
+/* :where() keeps this reset at zero specificity so the per-control rules below
+ * (all single attribute selectors) can actually win. */
+:where([data-whale-report], [data-whale-report-drawer], [data-whale-report-tabhost]) :where(button, input) {
+  font: inherit;
+}
 [data-whale-report-drawer], [data-whale-report-tabhost] { container: dtrace / inline-size; }
 [data-whale-report-drawer] {
   width: 680px; max-width: 94vw; background: var(--dt-paper); border-left-color: var(--dt-line);
@@ -429,6 +434,30 @@ const CSS = `
 [data-whale-report-depthscale] { position: absolute; right: 10px; top: 18px; height: 82px; padding-right: 14px; border-right: 1px solid var(--dt-line-strong); color: var(--dt-faint); font: 9px/1.1 ui-monospace, monospace; letter-spacing: .08em; }
 [data-whale-report-depthscale]::after { content: "4096m\\A 3072\\A 2048\\A 1024\\A 0000"; white-space: pre; display: block; line-height: 18px; text-align: right; }
 
+/* Hero sonar: slow scan sweep + faint pings, no glow. */
+[data-whale-report-heroimg] { animation: dt-float 8.5s ease-in-out infinite; }
+[data-whale-report-sonar] i:nth-child(1) { width: 46%; height: 46%; border-color: rgba(77, 107, 254, .16); }
+[data-whale-report-sonar] i:nth-child(2) { width: 72%; height: 72%; border-color: rgba(77, 107, 254, .13); }
+[data-whale-report-sweep] {
+  position: absolute; right: 14px; bottom: 19px; width: 160px; aspect-ratio: 1;
+  border-radius: 50%; overflow: hidden; opacity: .5;
+}
+[data-whale-report-sweep] i {
+  position: absolute; inset: 0; border-radius: 50%; transform-origin: 50% 50%;
+  background: conic-gradient(from 0deg, rgba(77, 107, 254, .17) 0deg, rgba(77, 107, 254, .05) 26deg, transparent 62deg);
+  animation: dt-sweep 13s linear infinite;
+}
+[data-whale-report-ping] { position: absolute; right: 14px; bottom: 19px; width: 160px; aspect-ratio: 1; }
+[data-whale-report-ping] i {
+  position: absolute; width: 3px; height: 3px; background: var(--dt-cyan); border-radius: 50%;
+  animation: dt-ping 13s linear infinite;
+}
+[data-whale-report-ping] i:nth-child(1) { top: 34%; left: 27%; animation-delay: 1.1s; }
+[data-whale-report-ping] i:nth-child(2) { top: 61%; left: 62%; animation-delay: 5.4s; }
+[data-whale-report-ping] i:nth-child(3) { top: 24%; left: 68%; animation-delay: 9.2s; }
+/* Telemetry readout: live dot on the first item only. */
+[data-whale-report-brandmeta] span[data-live="true"]::before { animation: dt-live 2.6s ease-in-out infinite; }
+
 /* Period selector reads like a report index, not pills. */
 [data-whale-report-chips] {
   gap: 0; margin: 0; padding: 0; flex-wrap: nowrap; overflow-x: auto; border-bottom: 1px solid var(--dt-line);
@@ -475,8 +504,14 @@ const CSS = `
 [data-whale-report-sectionindex] { color: var(--dt-blue); font: 700 10px/1 ui-monospace, monospace; letter-spacing: .12em; }
 [data-whale-report-sectiontitle] { color: var(--dt-ink); font-size: 17px; font-weight: 760; line-height: 1.15; letter-spacing: -.018em; }
 [data-whale-report-sectionmeta] { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; text-align: right; }
+/* Subsection labels are instrument captions, not headlines: mono, small, with a short rule. */
 [data-whale-report-h2] {
-  margin: 0 0 10px; color: var(--dt-ink); font-size: 14px; font-weight: 720; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: 9px; margin: 0 0 12px;
+  color: var(--dt-ink-soft); font: 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 750;
+  letter-spacing: .15em; text-transform: uppercase;
+}
+[data-whale-report-h2]::after {
+  content: ""; flex: 1; height: 1px; background: var(--dt-line);
 }
 [data-whale-report-card] { position: relative; margin: 0; padding: 0; background: transparent; border: 0; border-radius: 0; }
 [data-whale-report-card]::after { display: none; }
@@ -516,7 +551,12 @@ const CSS = `
 [data-whale-report-feedmore]:hover { background: transparent; border-color: var(--dt-line-strong); }
 [data-whale-report-feeddot] { display: none; }
 [data-whale-report-insighthead] { display: flex; justify-content: space-between; gap: 12px; }
-[data-whale-report-insighthead] span { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; text-transform: uppercase; }
+[data-whale-report-insighthead] span {
+  color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace;
+  letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; transition: color .18s ease;
+}
+[data-whale-report-insight]:hover [data-whale-report-insightopen],
+[data-whale-report-insight][data-open="true"] [data-whale-report-insightopen] { color: var(--dt-blue); }
 [data-whale-report-fix] {
   margin-top: 12px; padding: 10px 0 2px 12px; background: transparent; border: 0; border-left: 1px solid var(--dt-blue);
   border-radius: 0; color: var(--dt-ink-soft); font-size: 11.5px;
@@ -541,14 +581,32 @@ const CSS = `
 [data-whale-report-note] { margin: 30px -12px 0; padding: 20px 22px 18px 92px; min-height: 132px; }
 [data-whale-report-note] > [data-whale-report-notehead] > img { position: absolute; left: 14px; top: 18px; width: 64px !important; height: 64px !important; image-rendering: pixelated; }
 [data-whale-report-notehead] { margin: 0 0 9px; align-items: center; }
-[data-whale-report-notetitle] { display: block; }
-[data-whale-report-notetitle] b { display: block; color: var(--dt-blue); font: 750 10px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
-[data-whale-report-noteopts] { display: inline-flex; gap: 12px; margin-top: 7px; padding: 0; background: transparent; border-radius: 0; }
+/* Label block left, tone switch pinned right on the same optical line. */
+[data-whale-report-notetitle] {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; flex: 1;
+}
+[data-whale-report-notetitle] b {
+  grid-column: 1; color: var(--dt-blue); font: 10px/1.4 ui-monospace, monospace; font-weight: 750;
+  letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-notetitle] > [data-whale-report-micro] { grid-column: 1; margin-top: 2px; }
+[data-whale-report-noteopts] {
+  grid-row: 1 / span 2; grid-column: 2; display: inline-flex; gap: 12px; margin: 0;
+  padding: 0; background: transparent; border-radius: 0;
+}
 [data-whale-report-noteopts] button { padding: 0 0 3px; color: var(--dt-muted); border-bottom: 1px solid transparent; border-radius: 0; font-size: 10px; }
 [data-whale-report-noteopts] button[data-active="true"] { color: var(--dt-ink); background: transparent; border-bottom-color: var(--dt-blue); }
 [data-whale-report-noteline] { padding: 0; color: var(--dt-ink); font-family: ui-serif, Georgia, "Songti SC", serif; font-size: 14px; }
 [data-whale-report-notelineitem] { padding: 0; line-height: 1.75; }
-[data-whale-report-notemore] { color: var(--dt-muted); font-size: 11.5px; }
+/* Lead line carries the note; the rest settles into the body voice. */
+[data-whale-report-noteline] > [data-whale-report-notelineitem]:first-child {
+  margin-bottom: 3px; color: var(--dt-abyss); font-size: 15.5px; line-height: 1.6;
+}
+[data-whale-report-noteline] > [data-whale-report-notelineitem]:not(:first-child) { color: var(--dt-ink-soft); }
+[data-whale-report-notemore] {
+  margin-top: 8px; padding-left: 11px; border-left: 1px solid var(--dt-line-strong);
+  color: var(--dt-muted); font-size: 11.5px;
+}
 [data-whale-report-notefoot] { color: var(--dt-faint); border-top-color: #ccd9e3; font: 9px/1.6 ui-monospace, monospace; letter-spacing: .04em; }
 
 /* Activity and token scan. */
@@ -558,8 +616,18 @@ const CSS = `
 [data-whale-report-squares] i { border-radius: 1px; outline: 1px solid rgba(11, 23, 51, .025); }
 [data-whale-report-legend] { color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace; }
 [data-whale-report-legend] i { width: 10px; height: 10px; border-radius: 1px; }
-[data-whale-report-tokenbar] { height: 6px; margin: 10px 0; border-radius: 0; background: var(--dt-line); }
-[data-whale-report-tokenlegend] { gap: 7px 18px; color: var(--dt-muted); font: 10px/1.6 ui-monospace, monospace; }
+/* Token flow reads as a measured band on a ruled baseline, not a progress bar:
+ * thin body, hairline gaps between segments, tick scale underneath. */
+[data-whale-report-tokenbar] {
+  position: relative; height: 4px; margin: 12px 0 0; border-radius: 0; background: var(--dt-line);
+}
+[data-whale-report-tokenbar] i + i { box-shadow: -1px 0 0 var(--dt-paper); }
+[data-whale-report-tokenbar]::after {
+  content: ""; position: absolute; right: 0; bottom: -6px; left: 0; height: 3px;
+  background-image: linear-gradient(to right, var(--dt-line-strong) 0 1px, transparent 1px);
+  background-size: 10% 3px; opacity: .55; pointer-events: none;
+}
+[data-whale-report-tokenlegend] { gap: 7px 18px; margin-top: 14px; color: var(--dt-muted); font: 10px/1.6 ui-monospace, monospace; }
 [data-whale-report-tokenlegend] i { width: 5px; height: 5px; border-radius: 0; }
 
 /* Model allocation ledger. */
@@ -584,9 +652,16 @@ const CSS = `
 }
 [data-whale-report-reportopening] [data-whale-report-actions] { position: relative; z-index: 2; }
 [data-whale-report-reportopening] [data-whale-report-btn] {
-  padding: 8px 12px; color: #fff; background: var(--dt-blue); border-color: var(--dt-blue); white-space: nowrap;
+  padding: 7px 13px; color: #cfdcf2; background: transparent;
+  border: 1px solid rgba(198, 211, 229, .3); white-space: nowrap;
+  font: 700 9.5px/1.4 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase;
 }
-[data-whale-report-reportopening] [data-whale-report-btn]:hover { background: #627cff; border-color: #627cff; }
+[data-whale-report-reportopening] [data-whale-report-btn]:hover {
+  color: #fff; background: rgba(77, 107, 254, .16); border-color: var(--dt-blue);
+}
+[data-whale-report-reportopening] [data-whale-report-btn][aria-expanded="true"] {
+  color: #fff; border-color: var(--dt-blue);
+}
 [data-whale-report-reportopening] [data-whale-report-btn][data-ghost="true"] {
   color: #c6d3e5; background: transparent; border-color: rgba(198, 211, 229, .28);
 }
@@ -618,24 +693,47 @@ const CSS = `
 [data-whale-report-tokenline] .muted, [data-whale-report-tokenline].muted { color: var(--dt-faint); }
 
 /* Risk log and tools ledger. */
-[data-whale-report-risk] { padding-left: 14px; border-left: 2px solid var(--dt-amber); }
-[data-whale-report-risk][data-severity="critical"] { border-left-color: var(--dt-red); }
+/* Risk is the cooled-down zone: a hairline gutter carries the severity, and the
+ * saturated marker is a short cap at the top rather than a full-height red rail. */
+[data-whale-report-risk] { position: relative; padding-left: 14px; border-left: 1px solid var(--dt-line-strong); }
+[data-whale-report-risk]::before {
+  content: ""; position: absolute; top: 0; left: -1px; width: 1px; height: 22px; background: var(--dt-amber);
+}
+[data-whale-report-risk][data-severity="critical"]::before { background: var(--dt-red); }
 [data-whale-report-dangersum] { margin: 0 0 12px; padding: 0; background: transparent; border: 0; border-radius: 0; color: var(--dt-ink-soft); }
 [data-whale-report-dangercats] { gap: 6px 14px; margin-bottom: 11px; }
 [data-whale-report-dangercat], [data-whale-report-secretcat],
 [data-whale-report-badge-red], [data-whale-report-badge-amber], [data-whale-report-badge-gray] {
   padding: 0; background: transparent; border: 0; border-radius: 0; font: 9px/1.5 ui-monospace, monospace; letter-spacing: .05em; text-transform: uppercase;
 }
-[data-whale-report-dangercat], [data-whale-report-badge-red] { color: var(--dt-red); }
-[data-whale-report-secretcat] { color: #6750a4; }
+/* Red is reserved for the genuinely fatal category; everything else cools to amber. */
+[data-whale-report-dangercat] { color: var(--dt-amber); }
+[data-whale-report-dangercat][data-sev="red"], [data-whale-report-badge-red] { color: var(--dt-red); }
+[data-whale-report-secretcat] { color: var(--dt-cyan-deep, #147a92); }
 [data-whale-report-badge-amber] { color: var(--dt-amber); }
 [data-whale-report-badge-gray] { color: var(--dt-muted); }
+/* Forensic log line: timestamp + severity marker above, command verbatim below.
+ * No red field, only a hairline tick carrying the severity. */
 [data-whale-report-danger] {
-  margin: 0; padding: 10px 0; background: transparent !important; border: 0; border-bottom: 1px solid #ead9dc !important;
-  border-radius: 0; color: #9f2e3a !important; font-size: 11px;
+  position: relative; margin: 0; padding: 10px 0 10px 11px;
+  background: transparent !important; border: 0; border-bottom: 1px solid var(--dt-line) !important;
+  border-radius: 0; color: var(--dt-ink) !important; font-size: 11px; word-break: break-all;
 }
-[data-whale-report-danger] em { color: var(--dt-muted) !important; }
-[data-whale-report-samplesbtn] { padding-left: 0; color: var(--dt-blue); }
+[data-whale-report-danger]::before {
+  content: ""; position: absolute; top: 13px; left: 0; width: 2px; height: 9px; background: var(--dt-amber);
+}
+[data-whale-report-danger][data-sev="red"]::before { background: var(--dt-red); }
+[data-whale-report-danger] em {
+  display: block; margin: 0 0 4px; color: var(--dt-faint) !important;
+  font: 9px/1.5 ui-monospace, monospace; font-style: normal; letter-spacing: .1em; text-transform: uppercase;
+}
+[data-whale-report-danger][data-sev="red"] em { color: var(--dt-red) !important; }
+/* Sample disclosure is an instrument action, not a tab. */
+[data-whale-report-samplesbtn] {
+  padding: 6px 0 4px; color: var(--dt-blue); border-bottom: 1px solid transparent;
+  font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 750; letter-spacing: .15em; text-transform: uppercase;
+}
+[data-whale-report-samplesbtn]:hover { color: var(--dt-blue); border-bottom-color: var(--dt-blue); }
 [data-whale-report-toollist] { border-top: 1px solid var(--dt-line); }
 [data-whale-report-toolrow] { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--dt-line); color: var(--dt-ink-soft); font-size: 12px; }
 [data-whale-report-toolrow] code { color: var(--dt-ink); font-family: ui-monospace, monospace; }
@@ -653,7 +751,7 @@ const CSS = `
 [data-whale-report-sessionmain] b { color: var(--dt-ink); font-size: 13px; }
 [data-whale-report-sessionmain] span { gap: 6px 12px; flex-wrap: wrap; margin-top: 6px; }
 [data-whale-report-sessionmeta] { color: var(--dt-muted); font: 9px/1.5 ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
-[data-whale-report-sessioncost] { color: var(--dt-blue); font: 750 13px/1.4 ui-monospace, monospace; text-align: right; }
+[data-whale-report-sessioncost] { color: var(--dt-blue); font: 13px/1.4 ui-monospace, monospace; font-weight: 750; text-align: right; }
 [data-whale-report-sessioncost] small { display: block; margin-top: 3px; color: var(--dt-faint); font-size: 8.5px; font-weight: 500; }
 [data-whale-report-sessiondetail] { margin-left: 48px; padding: 11px 0 14px; border-bottom: 1px solid var(--dt-line); }
 [data-whale-report-btn] { border-radius: 3px; background: var(--dt-abyss); font-size: 11.5px; letter-spacing: .02em; }
@@ -674,14 +772,90 @@ const CSS = `
 @keyframes dt-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes dt-pulse { 50% { opacity: .52; } }
 @keyframes dt-sonar { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.62); } 28% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
+@keyframes dt-sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes dt-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes dt-live { 0%, 100% { opacity: 1; } 50% { opacity: .32; } }
+@keyframes dt-ping { 0%, 72%, 100% { opacity: 0; } 12%, 40% { opacity: .85; } }
+
+/* ── Deep-sea instrument substrate: faint, non-competing measurement traces ── */
+/* Substrate stays at the threshold of visibility: horizontal depth rules only,
+ * so it never reads as a table behind the content. */
+[data-whale-report-body] {
+  position: relative;
+  background-image: linear-gradient(to bottom, rgba(11, 23, 51, .014) 0 1px, transparent 1px);
+  background-size: 100% 88px;
+}
+/* Measurement ticks hanging off each section rule. */
+[data-whale-report-sectionhead] { position: relative; }
+[data-whale-report-sectionhead]::after {
+  content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 3px;
+  background-image: linear-gradient(to right, var(--dt-line-strong) 0 1px, transparent 1px);
+  background-size: 13px 3px; opacity: .5; pointer-events: none;
+}
+/* Corner crosshair marker used by instrumented zones. */
+[data-whale-report-xhair] {
+  position: absolute; width: 9px; height: 9px; pointer-events: none;
+  border-top: 1px solid var(--dt-line-strong); border-left: 1px solid var(--dt-line-strong); opacity: .75;
+}
+[data-whale-report-xhair][data-corner="tr"] { transform: rotate(90deg); }
+[data-whale-report-xhair][data-corner="br"] { transform: rotate(180deg); }
+[data-whale-report-xhair][data-corner="bl"] { transform: rotate(270deg); }
+
+/* ── Investigation affordance: severity tick + OPEN reveal on hover ── */
+[data-whale-report-feedrow]::before, [data-whale-report-insight]::before {
+  content: ""; position: absolute; top: 17px; left: 0; width: 2px; height: 10px;
+  background: var(--dt-level, var(--dt-line-strong)); opacity: 0; transition: opacity .18s ease;
+}
+/* Keep the index clear of the severity tick. */
+[data-whale-report-feedindex], [data-whale-report-insight] > [data-whale-report-feedindex] { padding-left: 8px; }
+[data-whale-report-feedrow][data-level]::before, [data-whale-report-insight][data-level]::before { opacity: .85; }
+/* Out of flow so revealing it never reflows the row or pads its height;
+ * the row keeps a small right gutter so long titles can't run under it. */
+[data-whale-report-feedrow] { padding-right: 46px; }
+[data-whale-report-feedopen] {
+  position: absolute; top: 15px; right: 0; color: var(--dt-blue);
+  font: 700 9px/1.4 ui-monospace, monospace;
+  letter-spacing: .14em; text-transform: uppercase; opacity: 0; transition: opacity .18s ease;
+}
+[data-whale-report-feedrow]:hover [data-whale-report-feedopen],
+[data-whale-report-feedrow][data-open="true"] [data-whale-report-feedopen] { opacity: 1; }
+[data-whale-report-feedrow]:hover [data-whale-report-feedindex],
+[data-whale-report-sessionrow]:hover [data-whale-report-sessionindex] { color: var(--dt-muted); }
+
+/* ── Trace log: a faint vertical investigation line ── */
+[data-whale-report-trace] { position: relative; }
+[data-whale-report-trace]::before {
+  content: ""; position: absolute; top: 74px; bottom: 12px; left: 15px; width: 1px;
+  background: var(--dt-line); opacity: .8; pointer-events: none;
+}
+[data-whale-report-sessionrow] { position: relative; }
+[data-whale-report-sessionrow]::before {
+  content: ""; position: absolute; top: 21px; left: 15px; width: 9px; height: 1px; background: var(--dt-line-strong);
+}
+[data-whale-report-sessionindex] { position: relative; z-index: 1; background: var(--dt-paper); }
+[data-whale-report-traceorigin] {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin-bottom: 12px;
+  color: var(--dt-muted); font: 9px/1.6 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-traceorigin] b { color: var(--dt-ink-soft); font-weight: 750; }
+
+/* ── Activity scan: hover locator, no contribution-graph feel ── */
+[data-whale-report-weekrow] { position: relative; padding: 1px 0; }
+[data-whale-report-weekrow]:hover { background: rgba(255, 255, 255, .5); }
+[data-whale-report-weekrow]:hover [data-whale-report-weekrowlabel] { color: var(--dt-muted); }
+[data-whale-report-squares] i { transition: outline-color .16s ease; }
+[data-whale-report-squares] i:hover { outline: 1px solid var(--dt-blue) !important; }
 
 @container dtrace (max-width: 620px) {
   [data-whale-report-body] { padding-right: 18px; padding-left: 18px; }
   [data-whale-report-brand], [data-whale-report-reportopening] { margin-right: -18px; margin-left: -18px; padding-right: 18px; padding-left: 18px; }
   [data-whale-report-hero] { grid-template-columns: 1fr; gap: 18px; }
-  [data-whale-report-herostat] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Four hero stats: one measured row, never a 3 + 1 orphan. */
+  [data-whale-report-herostat] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   [data-whale-report-herostat] span { min-height: 48px; padding-left: 9px; border-left: 1px solid var(--dt-line); border-right: 0 !important; }
   [data-whale-report-herostat] span:first-child { padding-left: 0; border-left: 0; }
+  [data-whale-report-herostat] b { font-size: 16.5px; letter-spacing: -.02em; }
+  [data-whale-report-zone] { margin: 0 -18px; padding-right: 18px; padding-left: 18px; }
   [data-whale-report-reportgrid], [data-whale-report-reportgrid="equal"] { grid-template-columns: 1fr; gap: 28px; }
   [data-whale-report-headrow] { display: block; }
   [data-whale-report-actions] { margin-top: 16px; flex-wrap: wrap; }
@@ -691,6 +865,7 @@ const CSS = `
   [data-whale-report-body] { padding-right: 14px; padding-left: 14px; }
   [data-whale-report-tabs] { padding: 0 14px; }
   [data-whale-report-brand], [data-whale-report-reportopening] { margin-right: -14px; margin-left: -14px; padding-right: 14px; padding-left: 14px; }
+  [data-whale-report-zone] { margin: 0 -14px; padding-right: 14px; padding-left: 14px; }
   [data-whale-report-brand] { min-height: 205px; }
   [data-whale-report-brandcopy] { max-width: 68%; }
   [data-whale-report-brandname] { font-size: 34px; }
@@ -720,6 +895,9 @@ const CSS = `
   [data-whale-report-sessiondetail] button { margin-top: 9px; }
   [data-whale-report-weekrowlabel] { width: 36px; }
   [data-whale-report-squares] { gap: 2px; }
+  [data-whale-report-balancehead] { row-gap: 4px; }
+  [data-whale-report-balancestatus] { flex: 1 0 100%; margin-left: 0; }
+  [data-whale-report-balancefoot] { flex-wrap: wrap; row-gap: 5px; letter-spacing: .07em; }
 }
 @container dtrace (max-width: 360px) {
   [data-whale-report-chips] {
@@ -727,8 +905,66 @@ const CSS = `
     margin-right: -14px; margin-left: -14px; padding-left: 0; overflow: visible;
   }
   [data-whale-report-chip] { min-width: 0; width: 100%; padding: 10px 3px 9px; text-align: center; }
+  [data-whale-report-feedrow] { padding-right: 28px; }
   [data-whale-report-sessionmain] { min-width: 0; overflow: hidden; }
   [data-whale-report-sessionmain] b { max-width: 100%; }
+  [data-whale-report-collabobs], [data-whale-report-collabtip] { grid-template-columns: 1fr; gap: 2px; }
+  [data-whale-report-repmeta] { grid-template-columns: 1fr; gap: 5px; }
+  [data-whale-report-repmeta] i { display: none; }
+  [data-whale-report-repmeta] span { text-align: left; }
+}
+/* 280px: the narrowest supported instrument. Nothing may overflow. */
+@container dtrace (max-width: 300px) {
+  [data-whale-report-body] { padding-right: 10px; padding-left: 10px; background-size: 54px 100%, 100% 54px; }
+  [data-whale-report-tabs] { gap: 16px; padding: 0 10px; }
+  [data-whale-report-brand], [data-whale-report-reportopening] {
+    margin-right: -10px; margin-left: -10px; padding-right: 10px; padding-left: 10px;
+  }
+  [data-whale-report-brand] { min-height: 0; padding-top: 22px; padding-bottom: 18px; }
+  [data-whale-report-brandcopy] { max-width: 100%; }
+  [data-whale-report-brandname] { font-size: 30px; }
+  [data-whale-report-brandtag] { margin-top: 15px; }
+  [data-whale-report-brandvisual] { position: relative; height: 92px; margin-top: 12px; }
+  [data-whale-report-heroimg] { right: 0; bottom: 0; width: 88px; }
+  [data-whale-report-sonar], [data-whale-report-sweep], [data-whale-report-ping] { width: 92px; right: -2px; bottom: 0; }
+  [data-whale-report-heroval] { font-size: 40px; }
+  [data-whale-report-herostat] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-whale-report-herostat] span { min-height: 0; padding: 8px 0 !important; border-left: 0 !important; border-right: 0 !important; }
+  [data-whale-report-herostat] span:nth-child(even) { padding-left: 9px !important; border-left: 1px solid var(--dt-line) !important; }
+  [data-whale-report-herostat] b { font-size: 16px; }
+  [data-whale-report-statgrid] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-whale-report-stat] { padding-left: 0 !important; border-left: 0 !important; }
+  [data-whale-report-stat]:nth-child(even) { padding-left: 9px !important; border-left: 1px solid rgba(207, 222, 245, .16) !important; }
+  [data-whale-report-chips] { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-right: -10px; margin-left: -10px; }
+  [data-whale-report-feedrow], [data-whale-report-insight] { grid-template-columns: 22px minmax(0, 1fr); gap: 5px; }
+  [data-whale-report-feedrow] { padding-right: 0; }
+  [data-whale-report-feedopen] { display: none; }
+  [data-whale-report-feedcode] { grid-column: 2; }
+  [data-whale-report-feedmain] { grid-column: 2; }
+  [data-whale-report-collab] { grid-template-columns: 1fr; gap: 4px; }
+  [data-whale-report-collabrail] { grid-template-columns: 1fr; gap: 4px; }
+  [data-whale-report-collabrail] i { display: none; }
+  [data-whale-report-balanceval] { font-size: 24px; }
+  [data-whale-report-balancestatus] { flex: 1 0 100%; margin-left: 0; }
+  [data-whale-report-balancefoot] { flex-wrap: wrap; row-gap: 5px; }
+  [data-whale-report-balancefoot] span { flex: 1 0 100%; }
+  [data-whale-report-feedindex] { padding-left: 7px; }
+  [data-whale-report-note] { margin: 24px -6px 0; padding: 58px 12px 14px 12px; }
+  [data-whale-report-note] > [data-whale-report-notehead] > img { left: 12px; top: 14px; width: 40px !important; height: 40px !important; }
+  [data-whale-report-note-short] { grid-template-columns: 40px minmax(0, 1fr); gap: 9px; padding: 14px 12px 14px 6px; }
+  [data-whale-report-note-short] img { width: 40px !important; height: 40px !important; }
+  [data-whale-report-sessionrow] { grid-template-columns: 22px minmax(0, 1fr); gap: 6px; }
+  [data-whale-report-sessioncost] { grid-column: 2; text-align: left; }
+  [data-whale-report-sessiondetail] { margin-left: 22px; }
+  [data-whale-report-trace]::before, [data-whale-report-sessionrow]::before { display: none; }
+  [data-whale-report-actions] { gap: 9px; }
+  [data-whale-report-danger-action] { margin-left: 0; }
+  [data-whale-report-toolrow] { grid-template-columns: 20px minmax(0, 1fr); gap: 6px; }
+  [data-whale-report-toolrow] b { grid-column: 2; }
+  [data-whale-report-reporthero] { display: none; }
+  /* Zone bleed must match this tier's 10px body padding exactly. */
+  [data-whale-report-zone] { margin: 0 -10px; padding-right: 10px; padding-left: 10px; }
+  [data-whale-report-weekrowlabel] { width: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-whale-report] *, [data-whale-report] *::before, [data-whale-report] *::after,
@@ -740,39 +976,187 @@ const CSS = `
 
 /* ── Provider Balance：live instrumentation module ── */
 [data-whale-report-balance] {
-  margin: 0 0 14px; padding: 10px 14px 9px;
-  border: 1px solid var(--dt-line); border-radius: 10px;
-  background: var(--dt-paper-deep);
+  position: relative; overflow: hidden; margin: 0 0 4px; padding: 15px 0 12px;
+  border: 0; border-top: 1px solid var(--dt-line); border-bottom: 1px solid var(--dt-line);
+  border-radius: 0; background: transparent;
 }
-[data-whale-report-balancehead] { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-[data-whale-report-balancelabel] { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); letter-spacing: .1em; }
-[data-whale-report-balancename] { font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-blue); }
-[data-whale-report-balancestatus] { font: 400 9px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-muted); }
-[data-whale-report-balanceval] { font: 700 26px var(--dt-sans, ui-sans-serif, system-ui, sans-serif); color: var(--dt-ink); margin-top: 3px; }
-[data-whale-report-balanceval] small { font: 400 10px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-left: 8px; }
-[data-whale-report-balancebreak] { font: 400 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-muted); margin-top: 2px; }
+[data-whale-report-balance]::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%;
+  background: linear-gradient(90deg, transparent, rgba(77, 107, 254, .05), transparent);
+  animation: dt-scanx 9s ease-in-out infinite; pointer-events: none;
+}
+@keyframes dt-scanx { 0%, 100% { transform: translateX(-40%); } 50% { transform: translateX(320%); } }
+[data-whale-report-balancehead] { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+[data-whale-report-balancelabel],
+[data-whale-report-balancename],
+[data-whale-report-balancestatus] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-balancelabel] { font-size: 9px; font-weight: 700; color: var(--dt-faint); }
+[data-whale-report-balancename] { font-size: 10px; font-weight: 750; color: var(--dt-ink); }
+[data-whale-report-balancestatus] { margin-left: auto; font-size: 9px; color: var(--dt-muted); }
+[data-whale-report-balancestatus] i {
+  display: inline-block; width: 4px; height: 4px; margin: 0 6px 1px 0; border-radius: 50%;
+  background: var(--dt-muted); vertical-align: baseline;
+}
+[data-whale-report-balance][data-state="ok"] [data-whale-report-balancestatus] { color: var(--dt-blue); }
+[data-whale-report-balance][data-state="ok"] [data-whale-report-balancestatus] i {
+  background: var(--dt-blue); animation: dt-live 2.4s ease-in-out infinite;
+}
+[data-whale-report-balance][data-state="warn"] [data-whale-report-balancestatus] { color: var(--dt-amber); }
+[data-whale-report-balance][data-state="warn"] [data-whale-report-balancestatus] i { background: var(--dt-amber); }
+[data-whale-report-balance][data-state="bad"] [data-whale-report-balancestatus] { color: var(--dt-red); }
+[data-whale-report-balance][data-state="bad"] [data-whale-report-balancestatus] i { background: var(--dt-red); }
+[data-whale-report-balanceval] {
+  margin-top: 9px; color: var(--dt-ink); font-size: 30px; font-weight: 800; line-height: 1;
+  letter-spacing: -.045em; font-variant-numeric: tabular-nums;
+}
+[data-whale-report-balanceval] small {
+  display: block; margin: 7px 0 0; color: var(--dt-faint); font: 9px/1.4 ui-monospace, monospace;
+  letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-balance][data-stale="true"] [data-whale-report-balanceval] { color: var(--dt-muted); }
+[data-whale-report-balancebreak] {
+  margin-top: 8px; color: var(--dt-muted); font: 9.5px/1.6 ui-monospace, monospace; letter-spacing: .06em;
+}
 [data-whale-report-balancefoot] {
-  display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; padding-top: 6px;
-  border-top: 1px dashed var(--dt-line); font: 400 8.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 11px;
+  padding-top: 8px; border-top: 1px solid var(--dt-line);
+  font: 8.5px/1.4 ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; text-transform: uppercase;
 }
 [data-whale-report-balancebtn] {
-  background: transparent; border: 1px solid var(--dt-line-strong); border-radius: 6px;
-  padding: 2px 9px; font: 600 10px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink-soft); cursor: pointer;
+  flex: 0 0 auto; padding: 3px 0; background: transparent; border: 0; border-bottom: 1px solid transparent;
+  border-radius: 0; color: var(--dt-ink-soft); cursor: pointer;
+  font: 700 9px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase;
 }
-[data-whale-report-balancebtn]:hover { border-color: var(--dt-blue); color: var(--dt-blue); }
-[data-whale-report-balancebtn]:disabled { opacity: .5; cursor: default; }
-[data-whale-report-balancebtn][data-live="true"] { border-color: var(--dt-blue); color: var(--dt-blue); }
+[data-whale-report-balancebtn]:hover { color: var(--dt-blue); border-bottom-color: var(--dt-blue); }
+[data-whale-report-balancebtn]:disabled { opacity: .45; cursor: default; }
+[data-whale-report-balancebtn][data-live="true"] { color: var(--dt-blue); }
+/* Loading skeleton — measurement bars, not gray blobs. */
+[data-whale-report-balancesk] { margin-top: 10px; height: 30px; display: flex; align-items: center; gap: 4px; }
+[data-whale-report-balancesk] i {
+  display: block; width: 4px; background: var(--dt-line-strong); animation: dt-pulse 1.15s ease-in-out infinite;
+}
+[data-whale-report-balancesk] i:nth-child(odd) { height: 15px; }
+[data-whale-report-balancesk] i:nth-child(even) { height: 25px; animation-delay: .18s; }
 
 /* ── 协作复盘章节行 ── */
-[data-whale-report-collab] { border-left: 2px solid var(--dt-cyan); padding-left: 12px; margin: 10px 0; }
-[data-whale-report-collabcode] { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-cyan); letter-spacing: .08em; }
-[data-whale-report-collabtitle] { font: 600 12.5px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink); margin-top: 2px; }
-[data-whale-report-collabobs] { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--dt-muted); margin-top: 2px; }
-[data-whale-report-collabtip] { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink-soft); margin-top: 2px; }
-[data-whale-report-collabtip] b { color: var(--dt-blue); font-weight: 700; }
+/* Human × Harness relation rail — a restrained instrument, not chat bubbles. */
+[data-whale-report-collabrail] {
+  display: grid; grid-template-columns: auto minmax(24px, 1fr) auto; align-items: center; gap: 10px;
+  margin: 0 0 16px; padding-bottom: 13px; border-bottom: 1px solid var(--dt-line);
+  font: 9px/1.4 ui-monospace, monospace; letter-spacing: .15em; text-transform: uppercase; color: var(--dt-muted);
+}
+[data-whale-report-collabrail] b { color: var(--dt-ink); font-weight: 750; }
+[data-whale-report-collabrail] i {
+  position: relative; height: 1px; background: var(--dt-line-strong);
+}
+[data-whale-report-collabrail] i::before,
+[data-whale-report-collabrail] i::after {
+  content: ""; position: absolute; top: -2px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--dt-paper);
+}
+[data-whale-report-collabrail] i::before { left: 0; border: 1px solid var(--dt-blue); }
+[data-whale-report-collabrail] i::after { right: 0; border: 1px solid var(--dt-cyan); }
+[data-whale-report-collabrail] em {
+  color: var(--dt-faint); font-style: normal; font-size: 8.5px; letter-spacing: .1em;
+}
+[data-whale-report-collab] {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; align-items: start;
+  margin: 0; padding: 15px 0; border: 0; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-collab]:first-of-type { border-top: 1px solid var(--dt-line); }
+[data-whale-report-collab]:hover { background: rgba(255, 255, 255, .38); }
+[data-whale-report-collabindex] {
+  color: var(--dt-faint); font: 10px/1.5 ui-monospace, monospace; letter-spacing: .12em; padding-top: 2px;
+}
+[data-whale-report-collabbody] { min-width: 0; }
+[data-whale-report-collabcode] {
+  font: 9px/1.5 ui-monospace, monospace; font-weight: 750; color: var(--dt-cyan); letter-spacing: .15em; text-transform: uppercase;
+}
+[data-whale-report-collabtitle] { margin-top: 4px; color: var(--dt-ink); font-size: 13.5px; font-weight: 720; line-height: 1.45; }
+[data-whale-report-collabobs], [data-whale-report-collabtip] {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; margin-top: 9px;
+  color: var(--dt-ink-soft); font-size: 12px; line-height: 1.7;
+}
+[data-whale-report-collabobs]::before, [data-whale-report-collabtip]::before {
+  font: 700 8.5px/1.9 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--dt-faint);
+}
+[data-whale-report-collabobs]::before { content: "observation"; }
+[data-whale-report-collabtip]::before { content: "try"; color: var(--dt-blue); }
+[data-whale-report-collabobs] { color: var(--dt-muted); }
+[data-whale-report-collabtip] b { color: var(--dt-ink); font-weight: 700; }
 
-/* ── 报告 footer 元数据 ── */
-[data-whale-report-repmeta] { font: 400 9px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-top: 14px; }
+/* ── Export cluster: one primary disclosure + separated destructive action ── */
+[data-whale-report-actions] { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+[data-whale-report-exportwrap] { position: relative; }
+[data-whale-report-exportmenu] {
+  display: grid; gap: 0; margin-top: 10px; padding: 4px 0 0;
+  border-top: 1px solid rgba(198, 211, 229, .28);
+}
+[data-whale-report-exportmenu] button {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 8px 0; background: transparent; border: 0; border-bottom: 1px solid rgba(198, 211, 229, .16);
+  border-radius: 0; color: #c6d3e5; cursor: pointer; text-align: left;
+  font: 700 9.5px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-exportmenu] button:hover { color: #fff; }
+[data-whale-report-exportmenu] button em { color: #7f93af; font-style: normal; font-size: 8.5px; letter-spacing: .1em; }
+[data-whale-report-exportmenu] button:hover em { color: #9fb1ca; }
+[data-whale-report-actions] i {
+  width: 1px; height: 11px; background: rgba(198, 211, 229, .3);
+}
+[data-whale-report-danger-action] {
+  padding: 3px 0; background: transparent; border: 0; border-bottom: 1px solid transparent;
+  border-radius: 0; color: #8698b3; cursor: pointer;
+  font: 700 9px/1.4 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase;
+}
+[data-whale-report-danger-action]:hover { color: #ff8e98; border-bottom-color: #ff8e98; }
+
+/* ── Report generation: a stated guarantee, not a gray footnote ── */
+[data-whale-report-repmeta] {
+  display: grid; grid-template-columns: auto minmax(14px, 1fr) auto; align-items: center; gap: 12px;
+  margin-top: 30px; padding-top: 13px; border-top: 1px solid var(--dt-line);
+  font: 9px/1.5 ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .14em; text-transform: uppercase;
+}
+[data-whale-report-repmeta] b { color: var(--dt-ink-soft); font-weight: 750; }
+[data-whale-report-repmeta] i { height: 1px; background: var(--dt-line); }
+[data-whale-report-repmeta] span { color: var(--dt-muted); text-align: right; }
+[data-whale-report-repmeta] span em { color: var(--dt-blue); font-style: normal; font-weight: 750; }
+[data-whale-report-repfine] {
+  margin-top: 9px; color: var(--dt-faint); font: 8.5px/1.7 ui-monospace, monospace; letter-spacing: .08em;
+}
+
+/* ── Tool call trace: ranked measurement rows ── */
+[data-whale-report-toollist] { border-top: 0; }
+[data-whale-report-toolrow] {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+  padding: 9px 0; border-bottom: 1px solid var(--dt-line); color: var(--dt-ink-soft); font-size: 12px;
+}
+[data-whale-report-toolrow]:first-child { border-top: 1px solid var(--dt-line); }
+[data-whale-report-toolrow]:hover { background: rgba(255, 255, 255, .38); }
+[data-whale-report-toolrow] i {
+  color: var(--dt-faint); font: 9.5px/1.5 ui-monospace, monospace; font-style: normal; letter-spacing: .1em;
+}
+[data-whale-report-toolrow] code { color: var(--dt-ink); font-family: ui-monospace, monospace; font-size: 11.5px; }
+[data-whale-report-toolrow] b {
+  color: var(--dt-muted); font: 600 9.5px/1.5 ui-monospace, monospace; letter-spacing: .06em; white-space: nowrap;
+}
+[data-whale-report-toolrow] b em { color: var(--dt-blue); font-style: normal; font-weight: 750; }
+/* Raw call names under the family rollup: keeps the trace dense without
+ * touching the family caliber that insights.ts / the exports agree on. */
+[data-whale-report-toolraw] {
+  display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px;
+  color: var(--dt-muted); font: 9.5px/1.6 ui-monospace, monospace; letter-spacing: .04em;
+}
+[data-whale-report-toolraw] span { display: inline-flex; align-items: baseline; gap: 6px; }
+[data-whale-report-toolraw] code {
+  color: var(--dt-ink-soft); font-family: inherit; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+}
+[data-whale-report-toolfine] {
+  margin-top: 13px; padding-top: 9px; border-top: 1px solid var(--dt-line);
+  color: var(--dt-faint); font: 9px/1.6 ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase;
+}
 
 /* 打印 = 面板报告（克隆到 body 顶层后 window.print）：
  * body 其它直接子级全部隐藏（不占位、无空白页），报告独占 A4。 */
@@ -780,12 +1164,29 @@ const CSS = `
   @page { size: A4; margin: 10mm 8mm; }
   html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
   body > *:not([data-whale-report-print-root]) { display: none !important; }
+  /* 面板里报告用负 margin 向 body padding 出血（opening -24px / zone·note -12px）。
+   * 打印根没有那层 padding，若不补上，两侧会被裁掉，所以这里补最大出血量。 */
   [data-whale-report-print-root] {
     display: block !important; width: auto !important; margin: 0 !important;
+    padding: 0 24px !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   [data-whale-report-card], [data-whale-report-section],
   [data-whale-report-reportsection], [data-whale-report-note] { break-inside: avoid; }
+  /* Decoration is screen-only: no animation, no substrate, no sonar in print. */
+  [data-whale-report-print-root] *,
+  [data-whale-report-print-root] *::before,
+  [data-whale-report-print-root] *::after { animation: none !important; transition: none !important; }
+  [data-whale-report-print-root] [data-whale-report-body] { background-image: none !important; }
+  [data-whale-report-sonar], [data-whale-report-sweep], [data-whale-report-ping],
+  [data-whale-report-xhair], [data-whale-report-feedopen], [data-whale-report-balancesk],
+  [data-whale-report-insightopen], [data-whale-report-samplesbtn],
+  [data-whale-report-exportmenu], [data-whale-report-danger-action],
+  [data-whale-report-noteopts] { display: none !important; }
+  [data-whale-report-balance]::before { display: none !important; }
+  [data-whale-report-sectionhead]::after { display: none !important; }
+  [data-whale-report-trace]::before, [data-whale-report-sessionrow]::before { display: none !important; }
+  [data-whale-report-sessionindex] { background: transparent !important; }
 }
 `;
 
@@ -1008,12 +1409,22 @@ function Heatmap({ histogram }: { histogram: number[] }): ReactNode {
 /** 每日事件趋势：纯 CSS 柱状图。 */
 /** 四段式 token 构成条（输入/输出/缓存命中/思考）。 */
 /** 声呐蓝强度。低值用幂放大：count 只是峰值 1% 的方块也要肉眼可见。 */
+/**
+ * 深度色阶：冰蓝 → DeepSeek 蓝，单一冷色梯度（不换色相，避免出现紫/青突变）。
+ * 只有最深的一档朝 cyan 微偏，作为「触底」标记。纯呈现，不影响任何数据口径。
+ */
 function green(level: number): string {
-  const boosted = Math.pow(Math.min(1, Math.max(0, level)), 0.4);
-  const alpha = 0.2 + boosted * 0.8;
-  return boosted > 0.72
-    ? `rgba(54,185,209,${alpha.toFixed(2)})`
-    : `rgba(77,107,254,${alpha.toFixed(2)})`;
+  const boosted = Math.pow(Math.min(1, Math.max(0, level)), 0.55);
+  // 冰蓝 (222,236,246) → DeepSeek 蓝 (77,107,254)
+  const mix = (from: number, to: number): number => Math.round(from + (to - from) * boosted);
+  const r = mix(222, 77);
+  const g = mix(236, 107);
+  const b = mix(246, 254);
+  if (boosted > 0.88) {
+    // 触底档：向 cyan 轻微偏移，作为峰值标记。
+    return `rgb(${Math.round(r * 0.72)},${Math.round(g * 1.06)},${Math.round(b * 0.94)})`;
+  }
+  return `rgb(${r},${g},${b})`;
 }
 
 /** 图例：少 → 多。 */
@@ -1183,14 +1594,14 @@ function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
       <div data-whale-report-tokenbar>
         {seg(tokens.input, "#4d6bfe", "输入")}
         {seg(tokens.output, "#36b9d1", "输出")}
-        {seg(tokens.cacheRead, "#9aaaba", "缓存命中")}
-        {seg(tokens.reasoning, "#0b1733", "思考")}
+        {seg(tokens.cacheRead, "#aec0d8", "缓存命中")}
+        {seg(tokens.reasoning, "#26406e", "思考")}
       </div>
       <div data-whale-report-tokenlegend>
         <span><i style={{ background: "#4d6bfe" }} />输入 {fmt(tokens.input)}</span>
         <span><i style={{ background: "#36b9d1" }} />输出 {fmt(tokens.output)}</span>
-        <span><i style={{ background: "#9aaaba" }} />缓存 {fmt(tokens.cacheRead)}</span>
-        <span><i style={{ background: "#0b1733" }} />思考 {fmt(tokens.reasoning)}</span>
+        <span><i style={{ background: "#aec0d8" }} />缓存 {fmt(tokens.cacheRead)}</span>
+        <span><i style={{ background: "#26406e" }} />思考 {fmt(tokens.reasoning)}</span>
       </div>
     </div>
   );
@@ -1256,7 +1667,7 @@ function InsightsSection({ insights }: { insights: InsightJson[] }): ReactNode {
             <div data-whale-report-feedmain>
               <div data-whale-report-insighthead>
                 <b>{insight.title}</b>
-                <span>{open ? "CLOSE" : "OPEN"}</span>
+                <span data-whale-report-insightopen>{open ? "close ↑" : "open →"}</span>
               </div>
               {open && (
                 <>
@@ -1295,6 +1706,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
   const [dangerExpanded, setDangerExpanded] = useState(false);
   const [samplesShown, setSamplesShown] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const danger = (s.dangerousCommands ?? []).map((d) => ({ ...d, label: d.label ?? "未分类", sev: d.sev ?? "amber" }));
   const shownDanger = dangerExpanded ? danger.slice(0, 30) : danger.slice(0, 3);
   const summary = dangerSummary(danger);
@@ -1332,41 +1744,45 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
             <div data-whale-report-repsub>{dateStr(report.from)} — {dateStr(report.to)} / CONTEXT ONLINE</div>
           </div>
           <div data-whale-report-actions>
-            <button data-whale-report-btn data-ghost="true" onClick={() => onDelete(report.id)}>删除</button>
+            <button data-whale-report-btn onClick={() => setExportOpen(!exportOpen)} aria-expanded={exportOpen}>
+              EXPORT {exportOpen ? "↑" : "↓"}
+            </button>
+            <i aria-hidden="true" />
+            <button data-whale-report-danger-action onClick={() => onDelete(report.id)}>删除报告</button>
+          </div>
+        </div>
+        {exportOpen && (
+          <div data-whale-report-exportmenu>
             <button
-              data-whale-report-btn
-              data-ghost="true"
               onClick={() => {
                 void exportReportImage(report, "main").catch((err: unknown) => {
                   window.alert(`导出图片失败：${err instanceof Error ? err.message : String(err)}`);
                 });
               }}
             >
-              图片
+              PNG report <em>整份报告长图</em>
             </button>
             <button
-              data-whale-report-btn
-              data-ghost="true"
               onClick={() => {
                 void exportReportImage(report, "trace").catch((err: unknown) => {
                   window.alert(`导出会话轨迹失败：${err instanceof Error ? err.message : String(err)}`);
                 });
               }}
             >
-              会话轨迹
+              Trace PNG <em>会话轨迹 + 索引</em>
             </button>
             <button
-              data-whale-report-btn
-              data-ghost="true"
               onClick={() => {
                 window.open(`/whale/api/html?id=${encodeURIComponent(report.id)}`, "_blank");
               }}
             >
-              HTML
+              HTML <em>独立静态页</em>
             </button>
-            <button data-whale-report-btn onClick={exportPdf}>导出 PDF</button>
+            <button onClick={exportPdf}>
+              PDF <em>打印当前面板 · A4</em>
+            </button>
           </div>
-        </div>
+        )}
         <div data-whale-report-openingcost>¥{typeof report.cost?.total === "number" ? report.cost.total.toFixed(2) : "—"}</div>
         <div data-whale-report-herodelta2>
           {delta === null ? (
@@ -1402,12 +1818,20 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         return (
           <section data-whale-report-reportsection>
             <SectionHeader index="03" title="协作复盘" meta="HUMAN × HARNESS / COLLABORATION REVIEW" />
-            {collab.map((item) => (
+            <div data-whale-report-collabrail aria-hidden="true">
+              <b>User · {fmt(report.stats.collab?.userMessages ?? 0)} 轮</b>
+              <i />
+              <b>Harness · {fmt(report.stats.sessions)} 会话</b>
+            </div>
+            {collab.map((item, i) => (
               <div key={item.code} data-whale-report-collab>
-                <div data-whale-report-collabcode>{item.code}</div>
-                <div data-whale-report-collabtitle>{item.title}</div>
-                <div data-whale-report-collabobs>观察：{item.observation}</div>
-                <div data-whale-report-collabtip><b>建议</b>：{item.suggestion}</div>
+                <div data-whale-report-collabindex>{String(i + 1).padStart(2, "0")}</div>
+                <div data-whale-report-collabbody>
+                  <div data-whale-report-collabcode>{item.code}</div>
+                  <div data-whale-report-collabtitle>{item.title}</div>
+                  <div data-whale-report-collabobs><span>{item.observation}</span></div>
+                  <div data-whale-report-collabtip><span>{item.suggestion}</span></div>
+                </div>
               </div>
             ))}
           </section>
@@ -1451,18 +1875,32 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
             )}
           </div>
           <div data-whale-report-subsection>
-            <div data-whale-report-h2>TOOL CALL LEDGER</div>
+            <div data-whale-report-h2>TOOL CALL TRACE</div>
             {topTools.length === 0 ? (
               <div data-whale-report-tokenline>（没有调用工具）</div>
             ) : (
               <div data-whale-report-toollist>
-                {toolFamilies(s.toolCalls ?? {}).map((fam) => (
-                  <div key={fam.family} data-whale-report-toolrow><code>{fam.family}</code><b>{fam.count}</b></div>
+                {toolFamilies(s.toolCalls ?? {}).map((fam, i) => {
+                  const share = s.toolCallsTotal > 0 ? Math.round((fam.count / s.toolCallsTotal) * 100) : 0;
+                  return (
+                    <div key={fam.family} data-whale-report-toolrow>
+                      <i>{String(i + 1).padStart(2, "0")}</i>
+                      <code>{fam.family}</code>
+                      <b><em>{share}%</em> · {fmt(fam.count)}</b>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {topTools.length > 0 && (
+              <div data-whale-report-toolraw>
+                {topTools.map(([name, count]) => (
+                  <span key={name}><code>{name}</code>{fmt(count)}</span>
                 ))}
               </div>
             )}
             {(s.plugins ?? []).length > 0 && (
-              <div data-whale-report-tokenline style={{ marginTop: 12 }} className="muted">
+              <div data-whale-report-toolfine>
                 PLUGINS / {(s.plugins ?? []).join(" · ")}
               </div>
             )}
@@ -1481,9 +1919,17 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
               <>
                 <div data-whale-report-dangersum>{summary}</div>
                 <div data-whale-report-dangercats>
-                  {[...danger.reduce((m, d) => m.set(d.label, (m.get(d.label) ?? 0) + 1), new Map<string, number>()).entries()]
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([label, count]) => <span key={label} data-whale-report-dangercat>{label} <b>{count}</b></span>)}
+                  {[...danger
+                    .reduce((m, d) => {
+                      const cur = m.get(d.label);
+                      // 只做展示分组：保留该类别中最高的严重度，红色仅留给真正致命的一类。
+                      return m.set(d.label, { count: (cur?.count ?? 0) + 1, sev: cur?.sev === "red" ? "red" : d.sev });
+                    }, new Map<string, { count: number; sev: string }>())
+                    .entries()]
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .map(([label, agg]) => (
+                      <span key={label} data-whale-report-dangercat data-sev={agg.sev}>{label} <b>{agg.count}</b></span>
+                    ))}
                 </div>
                 <button
                   data-whale-report-chip data-whale-report-samplesbtn
@@ -1494,13 +1940,15 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
                 {samplesShown && (
                   <>
                     {shownDanger.map((d, i) => (
-                      <div key={i} data-whale-report-danger>
+                      <div key={i} data-whale-report-danger data-sev={d.sev}>
+                        <em>{new Date(d.time).toISOString().slice(0, 16).replace("T", " ")} · {d.label}</em>
                         {d.command.replace(/\s+/g, " ").slice(0, 64)}
-                        <em>{d.label} · {new Date(d.time).toISOString().slice(0, 16).replace("T", " ")}</em>
                       </div>
                     ))}
                     {danger.length > 3 && !dangerExpanded && (
-                      <button data-whale-report-chip onClick={() => setDangerExpanded(true)}>展开更多</button>
+                      <button data-whale-report-chip data-whale-report-samplesbtn onClick={() => setDangerExpanded(true)}>
+                        展开更多 ↓
+                      </button>
                     )}
                   </>
                 )}
@@ -1544,14 +1992,19 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
         </section>
       )}
 
-      <div data-whale-report-tokenline style={{ fontSize: 10, marginTop: 34, paddingTop: 12, borderTop: "1px solid var(--dt-line)" }} className="muted">
-        {report.reportGeneration !== undefined && (
-          <div data-whale-report-repmeta>
-            REPORT GENERATION · {fmt(report.reportGeneration.totalTokens)} TOKENS ·{" "}
-            {report.reportGeneration.mode === "local" ? "LOCAL DETERMINISTIC" : `MODEL${report.reportGeneration.model !== undefined ? ` · ${report.reportGeneration.model}` : ""}`}
-          </div>
-        )}
-        BASED ON {s.totalEvents} SESSION EVENTS · READ ONLY · GENERATED {dateStr(report.createdAt)}
+      <div data-whale-report-repmeta>
+        <b>Report generation</b>
+        <i />
+        <span>
+          <em>{report.reportGeneration === undefined ? 0 : fmt(report.reportGeneration.totalTokens)} tokens</em>
+          {" / "}
+          {report.reportGeneration === undefined || report.reportGeneration.mode === "local"
+            ? "local · deterministic · read only"
+            : `model${report.reportGeneration.model !== undefined ? ` · ${report.reportGeneration.model}` : ""}`}
+        </span>
+      </div>
+      <div data-whale-report-repfine>
+        BASED ON {fmt(s.totalEvents)} SESSION EVENTS · GENERATED {dateStr(report.createdAt)}
       </div>
     </div>
   );
@@ -1812,43 +2265,51 @@ function ProviderBalanceCard(): ReactNode {
     return () => window.clearTimeout(timer);
   }, [data]);
   const money = (n: number | undefined): string => (n === undefined ? "—" : `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-  const liveTime = data !== null ? new Date(data.checkedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "——";
+  const liveTime = data !== null
+    ? new Date(data.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })
+    : "--:--:--";
+  const ok = data !== null && data.status === "connected";
+  const state: "ok" | "warn" | "bad" | "idle" =
+    data === null ? "idle" : ok ? "ok" : data.status === "invalid-key" || data.status === "unavailable" ? "bad" : "warn";
+  // 状态行只用固定文案（balance.ts 保证 error 不含 key），不回显任何凭据。
+  const statusText = data === null
+    ? "CONNECTING"
+    : `${BALANCE_STATUS_LABEL[data.status]} · ${data.status.toUpperCase().replace(/-/g, " ")}`;
   return (
-    <div data-whale-report-balance>
+    <div data-whale-report-balance data-state={state} data-stale={loading && data !== null}>
       <div data-whale-report-balancehead>
-        <span data-whale-report-balancelabel>PROVIDER BALANCE / 模型余额</span>
-        <button
-          data-whale-report-balancebtn
-          data-live={!loading}
-          disabled={loading}
-          onClick={() => load(true)}
-        >
-          {loading ? "检查中…" : "刷新"}
-        </button>
-      </div>
-      <div data-whale-report-balancehead style={{ marginTop: 5 }}>
+        <span data-whale-report-balancelabel>Provider</span>
         <span data-whale-report-balancename>{data?.name ?? "DeepSeek"}</span>
-        <span data-whale-report-balancestatus>
-          {data === null ? "CONNECTING…" : `${BALANCE_STATUS_LABEL[data.status]} · ${data.status.toUpperCase()}`}
-        </span>
+        <span data-whale-report-balancestatus><i />{statusText}</span>
       </div>
-      {data !== null && data.status === "connected" && data.balance !== undefined ? (
+      {data === null ? (
+        <div data-whale-report-balancesk aria-label="读取中"><i /><i /><i /><i /><i /><i /><i /></div>
+      ) : ok && data.balance !== undefined ? (
         <>
           <div data-whale-report-balanceval>
-            {money(data.balance.total)}<small>{data.balance.currency}{data.isAvailable === false ? " · 余额不足" : ""}</small>
+            {money(data.balance.total)}
+            <small>Available balance · {data.balance.currency}{data.isAvailable === false ? " · 余额不足" : ""}</small>
           </div>
           <div data-whale-report-balancebreak>
-            充值余额 {money(data.balance.toppedUp)} · 赠送余额 {money(data.balance.granted)}
+            充值 {money(data.balance.toppedUp)} &nbsp;/&nbsp; 赠送 {money(data.balance.granted)}
           </div>
         </>
       ) : (
-        <div data-whale-report-balanceval>
-          —<small>{data === null ? "CONNECTING" : (data.error ?? "UNAVAILABLE")}</small>
-        </div>
+        <>
+          <div data-whale-report-balanceval>
+            ——<small>{data.error ?? "UNAVAILABLE"}</small>
+          </div>
+          <div data-whale-report-balancebreak>{BALANCE_STATUS_LABEL[data.status]}，本期费用仍按本地事件估算。</div>
+        </>
       )}
       <div data-whale-report-balancefoot>
-        <span>LIVE · {liveTime} · READ ONLY</span>
-        <span>KEY NEVER LEAVES LOCAL HOST</span>
+        <span>Last check {liveTime}{loading && data !== null ? " · 检查中" : ""}</span>
+        <button data-whale-report-balancebtn data-live={!loading} disabled={loading} onClick={() => load(true)}>
+          {loading ? "checking" : "refresh"}
+        </button>
+      </div>
+      <div data-whale-report-balancefoot style={{ marginTop: 4, paddingTop: 0, borderTop: 0 }}>
+        <span>Key never leaves local host · read only</span>
       </div>
     </div>
   );
@@ -1896,11 +2357,16 @@ function Dashboard(props: {
           <div data-whale-report-brandname>深迹 <span>DeepTrace</span></div>
           <div data-whale-report-brandtag>Your Agent,<br />in numbers.</div>
           <div data-whale-report-brandmeta aria-hidden="true">
-            <span>CONTEXT ONLINE</span><span>THINKING / READY</span>{s !== undefined && <span>CACHE HIT {cacheRate(s)}%</span>}
+            <span data-live="true">CONTEXT ONLINE</span>
+            {s !== undefined && <span>CACHE {cacheRate(s)}%</span>}
+            {s !== undefined && <span>{fmt(s.totalEvents)} EVENTS</span>}
+            <span>LOCAL / READY</span>
           </div>
         </div>
         <div data-whale-report-brandvisual aria-hidden="true">
           <div data-whale-report-sonar><i /><i /><i /></div>
+          <div data-whale-report-sweep><i /></div>
+          <div data-whale-report-ping><i /><i /><i /></div>
           <div data-whale-report-depthscale />
           <img
             src="/whale/assets/whale-hero.svg"
@@ -2121,7 +2587,8 @@ function prepareExportClone(source: HTMLElement): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   clone.setAttribute("data-whale-report", ""); // 继承 DeepTrace 变量与字体
   clone.style.backgroundColor = "var(--dt-paper)"; // 与抽屉底色一致
-  clone.querySelectorAll("[data-whale-report-actions]").forEach((el) => el.remove());
+  // 交互控件不进纸：导出按钮组与其展开菜单一并移除（@media print 也有兜底）。
+  clone.querySelectorAll("[data-whale-report-actions], [data-whale-report-exportmenu]").forEach((el) => el.remove());
   // 打印页面内相对 URL 无法解析？打印走真实页面（body 顶层），相对路径仍可用，这里仅兜底转绝对。
   clone.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src");
@@ -2905,6 +3372,10 @@ function SessionDrilldown({
   return (
     <section data-whale-report-trace data-whale-report-reportsection>
       <SectionHeader index={index} title="会话轨迹" meta={`TRACE LOG / ${sessions.length} TARGETS`} />
+      <div data-whale-report-traceorigin aria-hidden="true">
+        <span>↓</span>
+        <span>Findings traced to <b>{Math.min(sessions.length, 8)} sessions</b> · 按费用排序</span>
+      </div>
       {sessions.slice(0, 8).map((s, rowIndex) => {
         const open = openId === s.sessionId;
         const share = resolvedTotal > 0 ? Math.round((s.cost / resolvedTotal) * 100) : 0;
@@ -3019,6 +3490,7 @@ function InsightFeed({ insights, stats }: { insights: InsightJson[]; stats: Stat
                   )}
                 </>
               )}
+              <div data-whale-report-feedopen aria-hidden="true">{open ? "close ↑" : "open →"}</div>
             </div>
           </div>
         );
