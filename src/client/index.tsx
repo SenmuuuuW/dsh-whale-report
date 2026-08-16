@@ -16,6 +16,7 @@ import { Component, useEffect, useState, useSyncExternalStore, type ChangeEvent,
 import { toolFamilies } from "../insights.js";
 import { triggerNotes, whaleMood } from "../whale-notes.js";
 import { computeCollaborationInsights } from "../collaboration.js";
+import { splitModelKey } from "./model-key.js";
 import { createRoot, type Root } from "react-dom/client";
 
 export const name = "whale-report-client";
@@ -280,6 +281,9 @@ const CSS = `
 [data-whale-report-modeltable] { display: flex; flex-direction: column; gap: 7px; }
 [data-whale-report-modelrow] { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 9px 11px; }
 [data-whale-report-modelhead] { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+[data-whale-report-modelname] { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+[data-whale-report-modelname] b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+[data-whale-report-modelprov] { font: 700 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #9ca3af; letter-spacing: .06em; flex-shrink: 0; white-space: nowrap; }
 [data-whale-report-modelhead] b { font-size: 13.5px; font-weight: 700; color: #111827; }
 [data-whale-report-modelhead] span { font-size: 12.5px; font-weight: 700; color: #4d6bfe; font-variant-numeric: tabular-nums; }
 [data-whale-report-modelbar] { display: flex; height: 9px; border-radius: 4px; overflow: hidden; background: #f3f4f6; }
@@ -640,6 +644,7 @@ const CSS = `
 [data-whale-report-modelrank] { grid-row: 1 / span 3; color: var(--dt-faint); padding-top: 2px; }
 [data-whale-report-modelhead] { margin: 0; }
 [data-whale-report-modelhead] b { color: var(--dt-ink); font-size: 13.5px; }
+[data-whale-report-modelprov] { color: var(--dt-faint); }
 [data-whale-report-modelhead] span { color: var(--dt-blue); font: 700 11px/1.5 ui-monospace, monospace; }
 [data-whale-report-modelbar] { height: 2px; margin-top: 9px; border-radius: 0; background: var(--dt-line); overflow: visible; }
 [data-whale-report-modelbar] i { min-width: 2px; }
@@ -1623,7 +1628,10 @@ function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: Repo
           <div key={model} data-whale-report-modelrow>
             <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
             <div data-whale-report-modelhead>
-              <b>{model}</b>
+              <div data-whale-report-modelname>
+                <b>{splitModelKey(model).model}</b>
+                {splitModelKey(model).provider !== null && <em data-whale-report-modelprov>{splitModelKey(model).provider!.toUpperCase()}</em>}
+              </div>
               <span>{share}%{typeof cost?.perModel[model] === "number" ? ` / ¥${cost.perModel[model].toFixed(2)}` : ""}</span>
             </div>
             <div data-whale-report-modelbar>
@@ -2346,7 +2354,8 @@ function Dashboard(props: {
     const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
     return entries.map(([model, u]) => {
       const t = u.input + u.output + u.cacheRead + u.reasoning;
-      return { model, total: t, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
+      const { provider, model: modelName } = splitModelKey(model);
+      return { model, modelName, provider, total: t, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
     });
   })();
   return (
@@ -2483,7 +2492,10 @@ function Dashboard(props: {
                   <div key={m.model} data-whale-report-modelrow>
                     <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
                     <div data-whale-report-modelhead>
-                      <b>{m.model}</b>
+                      <div data-whale-report-modelname>
+                        <b>{m.modelName}</b>
+                        {m.provider !== null && <em data-whale-report-modelprov>{m.provider.toUpperCase()}</em>}
+                      </div>
                       <span>{m.share}% / ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
                     </div>
                     <div data-whale-report-modelbar>
@@ -2963,7 +2975,16 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     ctx.fillRect(P, y + 4, barW, 8);
     ctx.fillStyle = C.blue;
     ctx.fillRect(P, y + 4, barW * share, 8);
-    paint(`${model}  ${Math.round(share * 100)}%  ${fmt(tot(u))} tok`, 12, C.ink, "sans", 600);
+    const { provider, model: modelName } = splitModelKey(model);
+    if (provider !== null) {
+      // provider 作为小号 mono meta（如 OPENCODE-GO），主模型名不被污染。
+      ctx.font = `700 9px ${EXPORT_MONO}`;
+      ctx.fillStyle = C.faint;
+      ctx.fillText(provider.toUpperCase(), P, y + 10);
+      paint(`${modelName}  ${Math.round(share * 100)}%  ${fmt(tot(u))} tok`, 12, C.ink, "sans", 600, W - P * 2 - 130);
+    } else {
+      paint(`${modelName}  ${Math.round(share * 100)}%  ${fmt(tot(u))} tok`, 12, C.ink, "sans", 600);
+    }
   }
   if (families.length > 0) {
     paint(families.map((f) => `${f.family} × ${f.count}`).join(" · "), 10, C.muted, "sans", 400);
