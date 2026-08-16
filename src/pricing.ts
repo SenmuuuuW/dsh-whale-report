@@ -34,16 +34,24 @@ export const BUILTIN_PRICES: Record<"flash" | "pro", Prices> = {
  *   OPENCODE_GO_INPUT_PRICE_PER_M
  *   OPENCODE_GO_OUTPUT_PRICE_PER_M
  */
+/** 读取价格环境变量：非法（非有限数 / 负数 / NaN）一律回退默认值，绝不产生 NaN 价格。 */
+export function priceEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export const OPENCODE_GO_PRICES: Record<"flash" | "pro", Prices> = {
   flash: {
-    cacheReadPerMillion: Number(process.env.OPENCODE_GO_CACHE_READ_PRICE_PER_M ?? 0.02),
-    inputPerMillion: Number(process.env.OPENCODE_GO_INPUT_PRICE_PER_M ?? 1),
-    outputPerMillion: Number(process.env.OPENCODE_GO_OUTPUT_PRICE_PER_M ?? 2),
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.02),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 1),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 2),
   },
   pro: {
-    cacheReadPerMillion: Number(process.env.OPENCODE_GO_CACHE_READ_PRICE_PER_M ?? 0.025),
-    inputPerMillion: Number(process.env.OPENCODE_GO_INPUT_PRICE_PER_M ?? 3),
-    outputPerMillion: Number(process.env.OPENCODE_GO_OUTPUT_PRICE_PER_M ?? 6),
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.025),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 3),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 6),
   },
 };
 

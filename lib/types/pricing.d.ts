@@ -27,6 +27,8 @@ export declare const BUILTIN_PRICES: Record<"flash" | "pro", Prices>;
  *   OPENCODE_GO_INPUT_PRICE_PER_M
  *   OPENCODE_GO_OUTPUT_PRICE_PER_M
  */
+/** 读取价格环境变量：非法（非有限数 / 负数 / NaN）一律回退默认值，绝不产生 NaN 价格。 */
+export declare function priceEnv(name: string, fallback: number): number;
 export declare const OPENCODE_GO_PRICES: Record<"flash" | "pro", Prices>;
 /** 模型名 → 档位（v4 系列按 flash/pro 识别，未知回退 flash；兼容 provider/ 前缀）。 */
 export declare function modelTier(model: string): "flash" | "pro";

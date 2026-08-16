@@ -99,7 +99,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 11;
+export const INDEX_VERSION = 12;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -286,7 +286,7 @@ export function registerReportTools(ctx: ToolsHost, svc: ReportServices): void {
   ctx.tools.register(whaleReportTool(svc));
 }
 
-function whaleReportTool(svc: ReportServices): ToolDefinition {
+export function whaleReportTool(svc: ReportServices): ToolDefinition {
   return defineTool({
     name: "whale_report",
     description:
@@ -329,7 +329,9 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
             required: true,
             additionalProperties: false,
             properties: {
-              perModel: { type: "object", required: true, additionalProperties: false, properties: {} },
+              // DSH 校验器只支持 boolean additionalProperties（不支持对象形式），
+              // 动态模型键（provider/model）只能以 additionalProperties: true 放行。
+              perModel: { type: "object", required: true, additionalProperties: true },
               total: { type: "number", required: true },
               currency: { type: "string", required: true },
               source: { type: "string", required: true },

@@ -269,19 +269,26 @@ function usageOf(data: unknown): Partial<TokenTotals> | null {
 }
 
 /**
- * provider 别名映射：包装型 provider 归一化到实际流量出口。
- * modlens（@liustack/modlens）注册 `deepseek-modlens` 包装 provider，
- * 但请求实际转发给其 upstream（本机配置为 opencode-go 订阅），
- * 所以 `deepseek-modlens` 的用量应归属 opencode-go 统计与计价。
- * 可通过环境变量 `WHALE_PROVIDER_ALIASES`（逗号分隔的 provider 列表）
- * 把其他包装 provider 也归一到 opencode-go。
+ * provider 归一化与别名映射。
+ *
+ * 归一化：trim + lowercase（OpenCode-Go / OPENCODE-GO → opencode-go）。
+ * 别名：默认**不做任何假设**（不含 deepseek-modlens 等本机环境）；
+ * 由用户通过环境变量 `WHALE_PROVIDER_ALIASES`（逗号分隔的 provider 列表）
+ * 显式声明哪些包装 provider 应归一到 opencode-go。模块加载时读取一次。
  */
-const OPENCODE_ALIASES = new Set(
-  ["deepseek-modlens", ...(process.env.WHALE_PROVIDER_ALIASES ?? "").split(",").map((s) => s.trim()).filter(Boolean)],
+export function normalizeProvider(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+const OPENCODE_ALIASES: ReadonlySet<string> = new Set(
+  (process.env.WHALE_PROVIDER_ALIASES ?? "")
+    .split(",")
+    .map((s) => normalizeProvider(s))
+    .filter(Boolean),
 );
 
 /** 从 request/header 事件里尽量识别 provider；识别不到返回 unknown。 */
-function providerOf(data: unknown): string {
+export function providerOf(data: unknown): string {
   if (typeof data !== "object" || data === null) return "unknown";
   const d = data as Record<string, unknown>;
   const header = (d.header ?? {}) as Record<string, unknown>;
@@ -290,9 +297,10 @@ function providerOf(data: unknown): string {
     (config.upstream as string) ?? (config.route as string) ?? (config.provider as string) ??
     (header.route as string) ?? (header.provider as string) ?? (d.route as string) ?? (d.provider as string) ?? (d.source as string);
   if (typeof direct === "string" && direct !== "") {
-    // 包装 provider 归一化：deepseek-modlens 等别名 → opencode-go（实际流量出口）。
-    if (OPENCODE_ALIASES.has(direct)) return "opencode-go";
-    return direct;
+    const normalized = normalizeProvider(direct);
+    // 用户显式声明的包装 provider → opencode-go（实际流量出口）。
+    if (OPENCODE_ALIASES.has(normalized)) return "opencode-go";
+    return normalized;
   }
   const base =
     (config.baseURL as string) ?? (config.endpoints as Record<string, unknown> | undefined)?.baseURL as string | undefined ??
@@ -305,7 +313,7 @@ function providerOf(data: unknown): string {
 }
 
 /** 模型统计键：优先带上 provider，方便区分官方与 opencode-go 订阅。 */
-function modelKey(provider: string, model: string): string {
+export function modelKey(provider: string, model: string): string {
   if (provider !== "unknown" && provider !== "" && provider !== null) return `${provider}/${model}`;
   return model;
 }

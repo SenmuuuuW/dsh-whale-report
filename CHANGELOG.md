@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 修复（PR review 轮）
+- whale_report output.schema：cost.perModel 改 `additionalProperties: true`
+  （DSH 校验器仅支持 boolean additionalProperties；动态 provider/model 键不再校验失败）
+- provider 归一化：trim + lowercase（OpenCode-Go → opencode-go）
+- 删除默认 `deepseek-modlens → opencode-go` 本机假设；别名仅由 `WHALE_PROVIDER_ALIASES` 显式配置
+- 价格环境变量非法值（NaN/负数/空）一律回退默认，绝不产生 NaN 费用
+- INDEX_VERSION 11 → 12（provider-aware model 键语义变化）
+- 新增 src/client/model-key.ts（splitModelKey 纯函数）与 docs/ui-provider-prefix-note.md（UI 集成说明）
+- 新增回归测试 22 个（schema 校验 / providerOf / 计价 / 双路径等价 / whale_report 不写会话日志 / model-key）
+
+
+
 ### 新增
 - 多来源模型计价：识别 request/header 中的 provider（upstream/route/baseURL 启发式，支持 opencode-go 订阅）
   - `OPENCODE_GO_PRICES` 订阅价（环境变量 `OPENCODE_GO_CACHE_READ_PRICE_PER_M` / `OPENCODE_GO_INPUT_PRICE_PER_M` / `OPENCODE_GO_OUTPUT_PRICE_PER_M` 可覆盖，默认 DeepSeek 官方价）
