@@ -382,18 +382,9 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
       }
       const report = renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights);
 
-      // 报告本身也写进会话日志 —— 鲸鱼记事本记下它自己写的账。
-      // （读与写同源：下次报告会数到这一次。）
-      if (exec.agent) {
-        exec.agent.session.append("whale/report", {
-          preset,
-          from: range.from,
-          to: range.to,
-          sessions: gen.stats.sessions,
-          turns: gen.stats.turns,
-          totalEvents: gen.stats.totalEvents,
-        });
-      }
+      // 不再把 whale/report 写进会话日志：核心 harness 的 KNOWN_SESSION_EVENT_TYPES
+      // 不认插件自定义事件，且当前 Session.append 不支持 ignorable 标记，写入会让
+      // 旧版本（含 rc.6）拒绝加载整个会话历史。报告数据由 periodStats 持久化。
 
       return {
         preset,
