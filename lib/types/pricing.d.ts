@@ -20,7 +20,15 @@ export interface Prices {
 export declare const PRICING_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/";
 /** 内置回退价（官方当前价，CNY / 1M）。 */
 export declare const BUILTIN_PRICES: Record<"flash" | "pro", Prices>;
-/** 模型名 → 档位（v4 系列按 flash/pro 识别，未知回退 flash）。 */
+/**
+ * opencode-go 订阅的计价（CNY / 1M token）。
+ * 默认先用 DeepSeek 官方价作为估算；可通过环境变量覆盖为订阅实际单价：
+ *   OPENCODE_GO_CACHE_READ_PRICE_PER_M
+ *   OPENCODE_GO_INPUT_PRICE_PER_M
+ *   OPENCODE_GO_OUTPUT_PRICE_PER_M
+ */
+export declare const OPENCODE_GO_PRICES: Record<"flash" | "pro", Prices>;
+/** 模型名 → 档位（v4 系列按 flash/pro 识别，未知回退 flash；兼容 provider/ 前缀）。 */
 export declare function modelTier(model: string): "flash" | "pro";
 export interface CostBreakdown {
     perModel: Record<string, number>;

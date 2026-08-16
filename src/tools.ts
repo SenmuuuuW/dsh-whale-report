@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
-import { computeCost, getPrices, modelCost, modelTier, type CostBreakdown } from "./pricing.js";
+import { computeCost, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
@@ -226,7 +226,9 @@ export async function generateReportData(
   for (const detail of stats.sessionsDetail) {
     let total = 0;
     for (const [model, usage] of Object.entries(detail.modelTokens)) {
-      total += modelCost(usage, prices[modelTier(model)]);
+      const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
+      const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : prices;
+      total += modelCost(usage, priceSet[modelTier(model)]);
     }
     detail.cost = total;
   }
@@ -322,6 +324,34 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
           turns: { type: "integer", required: true },
           totalEvents: { type: "integer", required: true },
           report: { type: "string", required: true },
+          cost: {
+            type: "object",
+            required: true,
+            additionalProperties: false,
+            properties: {
+              perModel: { type: "object", required: true, additionalProperties: false, properties: {} },
+              total: { type: "number", required: true },
+              currency: { type: "string", required: true },
+              source: { type: "string", required: true },
+            },
+          },
+          insights: {
+            type: "array",
+            required: true,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string", required: true },
+                level: { type: "string", required: true },
+                title: { type: "string", required: true },
+                detail: { type: "string", required: true },
+                action: { type: "string", required: true },
+                estimate: { type: "string" },
+              },
+            },
+          },
+          prevCost: { oneOf: [{ type: "number" }, { type: "null" }], required: true },
         },
       },
       render: (_args, value) => [

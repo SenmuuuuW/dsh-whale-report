@@ -2,6 +2,19 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [Unreleased]
+
+### 新增
+- 多来源模型计价：识别 request/header 中的 provider（upstream/route/baseURL 启发式，支持 opencode-go 订阅）
+  - `OPENCODE_GO_PRICES` 订阅价（环境变量 `OPENCODE_GO_CACHE_READ_PRICE_PER_M` / `OPENCODE_GO_INPUT_PRICE_PER_M` / `OPENCODE_GO_OUTPUT_PRICE_PER_M` 可覆盖，默认 DeepSeek 官方价）
+  - 模型用量键带 provider 前缀（`opencode-go/deepseek-v4-flash`），报告按来源分列展示与费用分组
+  - 识别不到 provider 时回退官方 deepseek 价，行为与之前完全一致
+- provider 归一化：modlens 包装 provider（`deepseek-modlens`）归一到实际流量出口 `opencode-go` 统计与计价
+  - 可通过环境变量 `WHALE_PROVIDER_ALIASES`（逗号分隔）扩展更多包装 provider 别名
+
+### 修复
+- `whale_report` 工具输出 schema 未声明 `cost` / `insights` / `prevCost` 字段，导致严格校验（additionalProperties: false）下工具调用失败
+
 ## [0.3.0] - 2026-08-16
 
 ### 新增
