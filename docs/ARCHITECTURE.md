@@ -33,7 +33,10 @@
                    排除 whale/* 自事件，10 分钟分桶；user/message 逐条做协作信号\n                   检测：方向修正 / 迟到约束，确定性词表）→ 写回索引
        live 会话：每次直读（不落索引）
        并发 12 读取 → aggregateBuckets(views, period, headers)
-  → computeCost()：官方定价页实时价（6h 缓存，内置价兜底）→ 每模型费用
+  → computeCost()：官方定价页实时价（6h 缓存，内置价兜底）→ 每模型费用；
+       provider-aware：request/header 识别 provider（upstream/route/baseURL 启发式，
+       归一化 trim/lowercase），opencode-go 流量走订阅价（OPENCODE_GO_PRICES，env 可覆盖），
+       模型键带 provider 前缀（opencode-go/deepseek-v4-flash），无前缀历史键回退官方价
   → 会话钻取：sessionsDetail 按"会话 × 模型 token × 单价"折算费用 → 排序 → Top 20
   → 插件环境清单：loader 枚举已加载第三方插件名（排除 @deepseek-ai/* 与 cordis）
   → periodKey(preset, to) + previousPeriodKey → period_stats 上一周期基线
@@ -74,7 +77,7 @@
 
 **版本策略**：
 - `REPORT_SEM = 3`：报告语义变更（周期定义、字段含义）时 +1，旧记录作废重建
-- `INDEX_VERSION = 11`：分桶结构变更时 +1，旧索引自然失效
+- `INDEX_VERSION = 12`：分桶结构变更时 +1，旧索引自然失效
 
 ## 5. API（`/whale/api/*`，全部经本机同源围栏）
 
