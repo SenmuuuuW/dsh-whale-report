@@ -181,11 +181,14 @@ export function renderReport(
   if (modelEntries.length > 0) {
     lines.push("## 模型用量");
     lines.push("");
-    lines.push("| 模型 | 输入 | 输出 | 缓存命中 | 思考 |");
-    lines.push("| --- | --- | --- | --- | --- |");
-    for (const [model, usage] of modelEntries.slice(0, 8)) {
+    lines.push("| 来源 | 模型 | 输入 | 输出 | 缓存命中 | 思考 |");
+    lines.push("| --- | --- | --- | --- | --- | --- |");
+    for (const [key, usage] of modelEntries.slice(0, 8)) {
+      const idx = key.indexOf("/");
+      const provider = idx >= 0 ? key.slice(0, idx) : "deepseek";
+      const model = idx >= 0 ? key.slice(idx + 1) : key;
       lines.push(
-        `| ${model} | ${formatTokens(usage.input)} | ${formatTokens(usage.output)} | ${formatTokens(usage.cacheRead)} | ${formatTokens(usage.reasoning)} |`,
+        `| ${provider} | ${model} | ${formatTokens(usage.input)} | ${formatTokens(usage.output)} | ${formatTokens(usage.cacheRead)} | ${formatTokens(usage.reasoning)} |`,
       );
     }
     lines.push("");
@@ -199,6 +202,20 @@ export function renderReport(
   lines.push(`- 活跃天数 **${stats.activeDays}**，凌晨活跃度 **${night}%**（${nightLabel(night)}）`);
   if (cost !== undefined && cost.total > 0) {
     lines.push(`- 预估费用约 **¥${cost.total.toFixed(2)}**（${cost.source === "official-page" ? "官方定价页实时价" : "内置价"}）`);
+    const byProvider: Record<string, number> = {};
+    for (const [key, c] of Object.entries(cost.perModel ?? {})) {
+      const idx = key.indexOf("/");
+      const p = idx >= 0 ? key.slice(0, idx) : "deepseek";
+      byProvider[p] = (byProvider[p] ?? 0) + c;
+    }
+    const providerEntries = Object.entries(byProvider).sort((a, b) => b[1] - a[1]);
+    if (providerEntries.length > 0) {
+      lines.push("");
+      lines.push("**费用按来源：**");
+      for (const [p, c] of providerEntries) {
+        lines.push(`- ${p}：¥${c.toFixed(2)}`);
+      }
+    }
   }
   if (stats.busiestDay) {
     lines.push(`- 最忙的一天：**${stats.busiestDay.date}**（${stats.busiestDay.events} 条事件）`);

@@ -268,6 +268,56 @@ function usageOf(data: unknown): Partial<TokenTotals> | null {
   };
 }
 
+/**
+ * provider 归一化与别名映射。
+ *
+ * 归一化：trim + lowercase（OpenCode-Go / OPENCODE-GO → opencode-go）。
+ * 别名：默认**不做任何假设**（不含 deepseek-modlens 等本机环境）；
+ * 由用户通过环境变量 `WHALE_PROVIDER_ALIASES`（逗号分隔的 provider 列表）
+ * 显式声明哪些包装 provider 应归一到 opencode-go。模块加载时读取一次。
+ */
+export function normalizeProvider(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+const OPENCODE_ALIASES: ReadonlySet<string> = new Set(
+  (process.env.WHALE_PROVIDER_ALIASES ?? "")
+    .split(",")
+    .map((s) => normalizeProvider(s))
+    .filter(Boolean),
+);
+
+/** 从 request/header 事件里尽量识别 provider；识别不到返回 unknown。 */
+export function providerOf(data: unknown): string {
+  if (typeof data !== "object" || data === null) return "unknown";
+  const d = data as Record<string, unknown>;
+  const header = (d.header ?? {}) as Record<string, unknown>;
+  const config = (header.config ?? {}) as Record<string, unknown>;
+  const direct =
+    (config.upstream as string) ?? (config.route as string) ?? (config.provider as string) ??
+    (header.route as string) ?? (header.provider as string) ?? (d.route as string) ?? (d.provider as string) ?? (d.source as string);
+  if (typeof direct === "string" && direct !== "") {
+    const normalized = normalizeProvider(direct);
+    // 用户显式声明的包装 provider → opencode-go（实际流量出口）。
+    if (OPENCODE_ALIASES.has(normalized)) return "opencode-go";
+    return normalized;
+  }
+  const base =
+    (config.baseURL as string) ?? (config.endpoints as Record<string, unknown> | undefined)?.baseURL as string | undefined ??
+    (header.baseURL as string);
+  if (typeof base === "string") {
+    if (/opencode/i.test(base)) return "opencode-go";
+    if (/api\.deepseek\.com/i.test(base) || /deepseek/i.test(base)) return "deepseek";
+  }
+  return "unknown";
+}
+
+/** 模型统计键：优先带上 provider，方便区分官方与 opencode-go 订阅。 */
+export function modelKey(provider: string, model: string): string {
+  if (provider !== "unknown" && provider !== "" && provider !== null) return `${provider}/${model}`;
+  return model;
+}
+
 /** 从 tool/call 的 arguments（JSON 字符串）里抽出 bash 命令本体。 */
 function commandOf(data: unknown): string | null {
   if (typeof data !== "object" || data === null) return null;
@@ -320,6 +370,7 @@ export function aggregate(
   const stats = emptyStats(period);
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
+  const currentProvider = new Map<string, string>();
   const dayHourMap = new Map<string, number[]>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
@@ -430,12 +481,14 @@ export function aggregate(
           stats.tokens.cacheRead += usage.cacheRead ?? 0;
           stats.tokens.reasoning += usage.reasoning ?? 0;
           const model = currentModel.get(sessionId) ?? "unknown";
-          const m = (stats.models[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          const provider = currentProvider.get(sessionId) ?? "unknown";
+          const key = modelKey(provider, model);
+          const m = (stats.models[key] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
           m.input += usage.input ?? 0;
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
-          const sm = (aggOf(sessionId, event.time).modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          const sm = (aggOf(sessionId, event.time).modelTokens[key] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
           sm.input += usage.input ?? 0;
           sm.output += usage.output ?? 0;
           sm.cacheRead += usage.cacheRead ?? 0;
@@ -447,7 +500,10 @@ export function aggregate(
         const config = (data?.header as Record<string, unknown> | undefined)?.config as
           | Record<string, unknown>
           | undefined;
-        if (typeof config?.model === "string") currentModel.set(sessionId, config.model);
+        if (typeof config?.model === "string") {
+          currentModel.set(sessionId, config.model);
+          currentProvider.set(sessionId, providerOf(data));
+        }
         break;
       }
       case "tool/call": {
@@ -700,6 +756,7 @@ export function bucketizeOwnEvents(
   const byHour = new Map<number, HourBucket>();
   const titles: string[] = [];
   let currentModel = "unknown";
+  let currentProvider = "unknown";
   let lastSeq = 0;
   let lastMs = 0;
   let lastCommand = "";
@@ -755,7 +812,8 @@ export function bucketizeOwnEvents(
           bucket.output += usage.output ?? 0;
           bucket.cacheRead += usage.cacheRead ?? 0;
           bucket.reasoning += usage.reasoning ?? 0;
-          const m = (bucket.modelUsage[currentModel] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          const key = modelKey(currentProvider, currentModel);
+          const m = (bucket.modelUsage[key] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
           m.input += usage.input ?? 0;
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
@@ -767,7 +825,10 @@ export function bucketizeOwnEvents(
         const config = (data?.header as Record<string, unknown> | undefined)?.config as
           | Record<string, unknown>
           | undefined;
-        if (typeof config?.model === "string") currentModel = config.model;
+        if (typeof config?.model === "string") {
+          currentModel = config.model;
+          currentProvider = providerOf(data);
+        }
         break;
       }
       case "tool/call": {

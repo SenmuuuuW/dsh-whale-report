@@ -27,9 +27,38 @@ export const BUILTIN_PRICES: Record<"flash" | "pro", Prices> = {
   pro: { cacheReadPerMillion: 0.025, inputPerMillion: 3, outputPerMillion: 6 },
 };
 
-/** 模型名 → 档位（v4 系列按 flash/pro 识别，未知回退 flash）。 */
+/**
+ * opencode-go 订阅的计价（CNY / 1M token）。
+ * 默认先用 DeepSeek 官方价作为估算；可通过环境变量覆盖为订阅实际单价：
+ *   OPENCODE_GO_CACHE_READ_PRICE_PER_M
+ *   OPENCODE_GO_INPUT_PRICE_PER_M
+ *   OPENCODE_GO_OUTPUT_PRICE_PER_M
+ */
+/** 读取价格环境变量：非法（非有限数 / 负数 / NaN）一律回退默认值，绝不产生 NaN 价格。 */
+export function priceEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export const OPENCODE_GO_PRICES: Record<"flash" | "pro", Prices> = {
+  flash: {
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.02),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 1),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 2),
+  },
+  pro: {
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.025),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 3),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 6),
+  },
+};
+
+/** 模型名 → 档位（v4 系列按 flash/pro 识别，未知回退 flash；兼容 provider/ 前缀）。 */
 export function modelTier(model: string): "flash" | "pro" {
-  return /pro/i.test(model) ? "pro" : "flash";
+  const base = typeof model === "string" && model.includes("/") ? model.slice(model.indexOf("/") + 1) : model;
+  return /pro/i.test(base) ? "pro" : "flash";
 }
 
 export interface CostBreakdown {
@@ -126,7 +155,9 @@ export async function computeCost(models: Record<string, ModelUsage>): Promise<C
   const perModel: Record<string, number> = {};
   let total = 0;
   for (const [model, usage] of Object.entries(models)) {
-    const cost = modelCost(usage, prices[modelTier(model)]);
+    const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
+    const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : prices;
+    const cost = modelCost(usage, priceSet[modelTier(model)]);
     perModel[model] = cost;
     total += cost;
   }

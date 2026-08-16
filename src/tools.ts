@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
-import { computeCost, getPrices, modelCost, modelTier, type CostBreakdown } from "./pricing.js";
+import { computeCost, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
@@ -99,7 +99,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 11;
+export const INDEX_VERSION = 12;
 
 /**
  * 收集区间统计。两条数据路径：
@@ -226,7 +226,9 @@ export async function generateReportData(
   for (const detail of stats.sessionsDetail) {
     let total = 0;
     for (const [model, usage] of Object.entries(detail.modelTokens)) {
-      total += modelCost(usage, prices[modelTier(model)]);
+      const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
+      const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : prices;
+      total += modelCost(usage, priceSet[modelTier(model)]);
     }
     detail.cost = total;
   }
@@ -284,7 +286,7 @@ export function registerReportTools(ctx: ToolsHost, svc: ReportServices): void {
   ctx.tools.register(whaleReportTool(svc));
 }
 
-function whaleReportTool(svc: ReportServices): ToolDefinition {
+export function whaleReportTool(svc: ReportServices): ToolDefinition {
   return defineTool({
     name: "whale_report",
     description:
@@ -322,6 +324,36 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
           turns: { type: "integer", required: true },
           totalEvents: { type: "integer", required: true },
           report: { type: "string", required: true },
+          cost: {
+            type: "object",
+            required: true,
+            additionalProperties: false,
+            properties: {
+              // DSH 校验器只支持 boolean additionalProperties（不支持对象形式），
+              // 动态模型键（provider/model）只能以 additionalProperties: true 放行。
+              perModel: { type: "object", required: true, additionalProperties: true },
+              total: { type: "number", required: true },
+              currency: { type: "string", required: true },
+              source: { type: "string", required: true },
+            },
+          },
+          insights: {
+            type: "array",
+            required: true,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string", required: true },
+                level: { type: "string", required: true },
+                title: { type: "string", required: true },
+                detail: { type: "string", required: true },
+                action: { type: "string", required: true },
+                estimate: { type: "string" },
+              },
+            },
+          },
+          prevCost: { oneOf: [{ type: "number" }, { type: "null" }], required: true },
         },
       },
       render: (_args, value) => [
@@ -352,18 +384,9 @@ function whaleReportTool(svc: ReportServices): ToolDefinition {
       }
       const report = renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights);
 
-      // 报告本身也写进会话日志 —— 鲸鱼记事本记下它自己写的账。
-      // （读与写同源：下次报告会数到这一次。）
-      if (exec.agent) {
-        exec.agent.session.append("whale/report", {
-          preset,
-          from: range.from,
-          to: range.to,
-          sessions: gen.stats.sessions,
-          turns: gen.stats.turns,
-          totalEvents: gen.stats.totalEvents,
-        });
-      }
+      // 不再把 whale/report 写进会话日志：核心 harness 的 KNOWN_SESSION_EVENT_TYPES
+      // 不认插件自定义事件，且当前 Session.append 不支持 ignorable 标记，写入会让
+      // 旧版本（含 rc.6）拒绝加载整个会话历史。报告数据由 periodStats 持久化。
 
       return {
         preset,

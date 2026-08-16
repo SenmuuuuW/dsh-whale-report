@@ -179,6 +179,19 @@ export declare const DANGEROUS_PATTERNS: {
 }[];
 export declare function emptyStats(period: Period): ReportStats;
 /**
+ * provider 归一化与别名映射。
+ *
+ * 归一化：trim + lowercase（OpenCode-Go / OPENCODE-GO → opencode-go）。
+ * 别名：默认**不做任何假设**（不含 deepseek-modlens 等本机环境）；
+ * 由用户通过环境变量 `WHALE_PROVIDER_ALIASES`（逗号分隔的 provider 列表）
+ * 显式声明哪些包装 provider 应归一到 opencode-go。模块加载时读取一次。
+ */
+export declare function normalizeProvider(value: string): string;
+/** 从 request/header 事件里尽量识别 provider；识别不到返回 unknown。 */
+export declare function providerOf(data: unknown): string;
+/** 模型统计键：优先带上 provider，方便区分官方与 opencode-go 订阅。 */
+export declare function modelKey(provider: string, model: string): string;
+/**
  * 聚合一个时间区间内的事件。
  * @param events - 任意顺序的原始事件（可以是多个 session 拼起来的）。
  * @param period - 时间区间（半开区间 [from, to)）。
