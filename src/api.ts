@@ -191,6 +191,49 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
           const method = pathname.startsWith("/whale/api/") ? pathname.slice("/whale/api/".length) : "";
           const table = svc.domain.table("reports");
           try {
+            if (req.method === "GET" && method === "trends") {
+              // 历史趋势：读 period_stats，按 preset 前缀过滤并取最近 N 个周期。
+              const url = new URL(req.url ?? "/", "http://dsh.internal");
+              const preset = url.searchParams.get("preset") ?? "weekly";
+              const limit = Math.min(24, Math.max(2, Number(url.searchParams.get("limit") ?? 8)));
+              const prefixes: Record<string, string> = {
+                daily: "day-", "24h": "24h-", weekly: "wk-", monthly: "mo-", yearly: "yr-", custom: "",
+              };
+              const prefix = prefixes[preset] ?? "wk-";
+              // 当前进行中周期（确定性判定：key 等于当前自然周期 key）。
+              // 仅用于 LIVE 展示语义，不参与任何统计。
+              let currentKey: string | null = null;
+              try {
+                currentKey = periodKey(preset, Date.now());
+              } catch {
+                currentKey = null;
+              }
+              const table = svc.domain.table("period_stats");
+              const rows = [...table.entries()]
+                .map(([, record]) => ({
+                  key: record.key,
+                  preset: record.preset,
+                  from: record.from,
+                  to: record.to,
+                  cost: record.cost,
+                  sessions: record.sessions,
+                  turns: record.turns,
+                  totalEvents: record.totalEvents,
+                  nightRatio: record.nightRatio,
+                  cacheHitRate: record.cacheHitRate,
+                  dangerCount: record.dangerCount,
+                  redDanger: record.redDanger,
+                  retryBursts: record.retryBursts,
+                  activeDays: record.activeDays,
+                  // 进行中周期：key 命中当前自然周期。custom 无自然周期 → 恒 false。
+                  isCurrent: currentKey !== null && record.key === currentKey,
+                }))
+                .filter((r) => prefix === "" || r.key.startsWith(prefix))
+                .sort((a, b) => (a.key < b.key ? -1 : 1))
+                .slice(-limit);
+              writeJson(res, 200, { ok: true, trends: rows });
+              return;
+            }
             if (req.method === "GET" && method === "balance") {
               // Provider 余额：服务端发起的只读探针。key 永不出宿主进程。
               const url = new URL(req.url ?? "/", "http://dsh.internal");

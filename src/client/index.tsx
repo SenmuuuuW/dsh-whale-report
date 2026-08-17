@@ -12,7 +12,7 @@
  * cordis 客户端内核负责装配；betterSidebar 服务用惰性注入消费
  * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
-import { Component, useEffect, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
 import { toolFamilies } from "../insights.js";
 import { triggerNotes, whaleMood } from "../whale-notes.js";
 import { computeCollaborationInsights } from "../collaboration.js";
@@ -979,6 +979,56 @@ const CSS = `
   }
 }
 
+/* ── 活跃图扫描线（SCAN 仪器感；纯色细线，无渐变）── */
+@keyframes dt-scan {
+  0% { left: -3px; opacity: 0; }
+  10% { opacity: .85; }
+  88% { opacity: .85; }
+  100% { left: calc(100% - 3px); opacity: 0; }
+}
+[data-whale-report-scanwrap] { position: relative; }
+[data-whale-report-scanline] {
+  position: absolute; top: 0; bottom: 0; width: 3px;
+  background: var(--dt-blue); opacity: 0;
+  animation: dt-scan 4.5s ease-in-out infinite;
+  pointer-events: none; z-index: 1;
+}
+
+/* ── Balance 动效：呼吸 LIVE 点 + 刷新差值 ── */
+@keyframes dt-breathe {
+  0%, 100% { opacity: .3; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+[data-whale-report-live-dot] {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dt-safe, #31765a); margin-right: 6px; vertical-align: 1px;
+  animation: dt-breathe 2.4s ease-in-out infinite;
+}
+[data-whale-report-balance][data-state="warn"] [data-whale-report-live-dot],
+[data-whale-report-balance][data-state="bad"] [data-whale-report-live-dot],
+[data-whale-report-balance][data-state="idle"] [data-whale-report-live-dot] {
+  background: var(--dt-faint); animation: none;
+}
+[data-whale-report-balancedelta] {
+  font: 600 9.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dt-faint); margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 历史趋势 TRENDS ── */
+[data-whale-report-trendlive] {
+  font: 700 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dt-faint); border: 1px solid var(--dt-line-strong);
+  border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 2px;
+  letter-spacing: .08em;
+}
+[data-whale-report-trendgrid] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+[data-whale-report-trendchart] { border: 1px solid var(--dt-line); border-radius: 8px; padding: 8px 10px; background: var(--dt-paper-deep); min-width: 0; }
+[data-whale-report-trendhead] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+[data-whale-report-trendhead] b { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); letter-spacing: .08em; }
+[data-whale-report-trendhead] span { font: 700 12.5px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink); font-variant-numeric: tabular-nums; }
+[data-whale-report-trendkeys] { font: 400 8.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-top: 3px; display: flex; justify-content: space-between; }
+
 /* ── Provider Balance：live instrumentation module ── */
 [data-whale-report-balance] {
   position: relative; overflow: hidden; margin: 0 0 4px; padding: 15px 0 12px;
@@ -1455,7 +1505,8 @@ function SquareRow({ label, cells }: { label: string; cells: { title: string; le
   return (
     <div data-whale-report-weekrow>
       <span data-whale-report-weekrowlabel>{label}</span>
-      <div data-whale-report-squares>
+      <div data-whale-report-squares data-whale-report-scanwrap>
+        <i data-whale-report-scanline aria-hidden="true" />
         {cells.map((c, i) => (
           <i key={i} title={c.title} style={{ background: c.level === 0 ? "#dce7ec" : green(c.level) }} />
         ))}
@@ -2230,6 +2281,140 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   }
 }
 
+/** 历史趋势：读 period_stats 的多周期曲线（零依赖 SVG 折线）。 */
+interface TrendPoint {
+  key: string;
+  cost: number;
+  sessions: number;
+  totalEvents: number;
+  nightRatio: number;
+  cacheHitRate: number;
+  dangerCount: number;
+  redDanger: number;
+  retryBursts: number;
+  activeDays: number;
+  /** 进行中周期（服务端确定性判定）：展示语义，不参与统计。 */
+  isCurrent?: boolean;
+}
+
+function TrendChart({
+  label,
+  values,
+  color,
+  unit,
+  keys,
+  liveLast,
+}: {
+  label: string;
+  values: number[];
+  color: string;
+  unit: string;
+  keys: string[];
+  /** 最后一个点是否为进行中周期（空心 + 虚线连接，不抢眼）。 */
+  liveLast?: boolean;
+}): ReactNode {
+  const W = 220;
+  const H = 64;
+  const P = 4;
+  if (values.length < 2) return null;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const range = Math.max(max - min, max * 0.2, 1);
+  const pts = values.map((v, i) => {
+    const x = P + (i / (values.length - 1)) * (W - P * 2);
+    const y = H - P - ((v - min) / range) * (H - P * 2 - 10);
+    return [x, y] as const;
+  });
+  const last = values[values.length - 1];
+  const lastIdx = pts.length - 1;
+  return (
+    <div data-whale-report-trendchart>
+      <div data-whale-report-trendhead>
+        <b>{label}</b>
+        <span>
+          {fmt(last)}
+          {unit}
+          {liveLast === true && <em data-whale-report-trendlive>LIVE</em>}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`${label} 趋势`}>
+        <line x1={P} y1={H - P} x2={W - P} y2={H - P} stroke="var(--dt-line)" strokeWidth="1" />
+        {pts.map(([x, y], i) => (
+          <g key={i}>
+            {i > 0 && (
+              <line
+                x1={pts[i - 1][0]}
+                y1={pts[i - 1][1]}
+                x2={x}
+                y2={y}
+                stroke={color}
+                strokeWidth="1.8"
+                strokeDasharray={liveLast === true && i === lastIdx ? "3 3" : undefined}
+              />
+            )}
+            {liveLast === true && i === lastIdx ? (
+              <circle cx={x} cy={y} r="2.6" fill="var(--dt-paper-deep)" stroke={color} strokeWidth="1.4" />
+            ) : (
+              <circle cx={x} cy={y} r="2.4" fill={color} />
+            )}
+          </g>
+        ))}
+      </svg>
+      <div data-whale-report-trendkeys>
+        <span>{keys[0]}</span>
+        <span>{liveLast === true ? `${keys[keys.length - 1]} · LIVE` : keys[keys.length - 1]}</span>
+      </div>
+    </div>
+  );
+}
+
+function TrendSection({ preset }: { preset: string }): ReactNode {
+  const [trends, setTrends] = useState<TrendPoint[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setTrends(null);
+    fetch(`/whale/api/trends?preset=${encodeURIComponent(preset)}&limit=8`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; trends: TrendPoint[] }>) : Promise.reject(new Error("HTTP"))))
+      .then((json) => {
+        if (alive && Array.isArray(json.trends)) setTrends(json.trends);
+      })
+      .catch(() => {
+        if (alive) setTrends([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [preset]);
+  if (trends === null || trends.length < 2) return null;
+  const liveCount = trends.filter((t) => t.isCurrent === true).length;
+  const completeCount = trends.length - liveCount;
+  const keys = trends.map((t) => t.key.replace(/^(?:day|24h|wk|mo|yr)-/, "").replace(/-W/, "·W"));
+  const liveLast = liveCount > 0;
+  const chart = (
+    label: string,
+    values: number[],
+    color: string,
+    unit: string,
+  ) => (
+    <TrendChart label={label} values={values} color={color} unit={unit} keys={keys} liveLast={liveLast} />
+  );
+  return (
+    <section data-whale-report-section>
+      <SectionHeader
+        index="—"
+        title="历史趋势"
+        meta={`HISTORY / ${completeCount} COMPLETE${liveCount > 0 ? ` · ${liveCount} LIVE` : ""}`}
+      />
+      <div data-whale-report-trendgrid>
+        {chart("COST", trends.map((t) => t.cost), "var(--dt-blue)", "")}
+        {chart("SESSIONS", trends.map((t) => t.sessions), "var(--dt-cyan)", "")}
+        {chart("CACHE HIT", trends.map((t) => t.cacheHitRate), "var(--dt-safe, #31765a)", "%")}
+        {chart("NIGHT", trends.map((t) => t.nightRatio), "var(--dt-amber)", "%")}
+      </div>
+    </section>
+  );
+}
+
 /** Provider Balance：模型平台余额（live instrumentation module）。
  * 服务端只读探针：key 永不出宿主进程；余额查询失败绝不影响报告加载。 */
 interface BalanceJson {
@@ -2253,8 +2438,10 @@ const BALANCE_STATUS_LABEL: Record<BalanceJson["status"], string> = {
 function ProviderBalanceCard(): ReactNode {
   const [data, setData] = useState<BalanceJson | null>(null);
   const [loading, setLoading] = useState(false);
-  const load = (refresh: boolean): void => {
-    setLoading(true);
+  const [displayTotal, setDisplayTotal] = useState<number | null>(null);
+  const prevTotalRef = useRef<number | null>(null);
+  const load = (refresh: boolean, silent = false): void => {
+    if (!silent) setLoading(true);
     fetch(`/whale/api/balance${refresh ? "?refresh=1" : ""}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; balance: BalanceJson }>) : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((json) => setData(json.balance))
@@ -2266,12 +2453,46 @@ function ProviderBalanceCard(): ReactNode {
   useEffect(() => {
     load(false);
   }, []);
+  // 60s 自动静默刷新（服务端缓存 TTL 同 60s）：余额变化时数字滚动展示。
+  useEffect(() => {
+    const timer = window.setInterval(() => load(false, true), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   // 瞬时错误（超时/网络）自动重试一次，避免用户手动点刷新。
   useEffect(() => {
     if (data === null || data.status === "connected" || data.status === "invalid-key" || data.status === "unavailable") return;
     const timer = window.setTimeout(() => load(false), 3000);
     return () => window.clearTimeout(timer);
   }, [data]);
+  // 余额数字滚动（count-up，600ms ease-out；不改变任何数据语义）。
+  useEffect(() => {
+    const target = data?.balance?.total;
+    if (target === undefined) return;
+    if (displayTotal === null) {
+      setDisplayTotal(target);
+      return;
+    }
+    if (target === displayTotal) return;
+    const from = displayTotal;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (): void => {
+      const t = Math.min(1, (performance.now() - start) / 600);
+      setDisplayTotal(from + (target - from) * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [data?.balance?.total]);
+  // 刷新间余额变动差值（±，仅显示量级，不涉及凭据）。
+  useEffect(() => {
+    if (data?.balance === undefined) return;
+    if (prevTotalRef.current !== null) {
+      setDelta(prevTotalRef.current !== data.balance.total ? data.balance.total - prevTotalRef.current : null);
+    }
+    prevTotalRef.current = data.balance.total;
+  }, [data]);
+  const [delta, setDelta] = useState<number | null>(null);
   const money = (n: number | undefined): string => (n === undefined ? "—" : `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   const liveTime = data !== null
     ? new Date(data.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })
@@ -2295,7 +2516,13 @@ function ProviderBalanceCard(): ReactNode {
       ) : ok && data.balance !== undefined ? (
         <>
           <div data-whale-report-balanceval>
-            {money(data.balance.total)}
+            {money(displayTotal ?? data.balance.total)}
+            {delta !== null && delta !== 0 && (
+              <em data-whale-report-balancedelta>
+                Δ {delta > 0 ? "+" : ""}
+                {delta.toFixed(2)}
+              </em>
+            )}
             <small>Available balance · {data.balance.currency}{data.isAvailable === false ? " · 余额不足" : ""}</small>
           </div>
           <div data-whale-report-balancebreak>
@@ -2311,7 +2538,7 @@ function ProviderBalanceCard(): ReactNode {
         </>
       )}
       <div data-whale-report-balancefoot>
-        <span>Last check {liveTime}{loading && data !== null ? " · 检查中" : ""}</span>
+        <span><i data-whale-report-live-dot />Last check {liveTime}{loading && data !== null ? " · 检查中" : ""}</span>
         <button data-whale-report-balancebtn data-live={!loading} disabled={loading} onClick={() => load(true)}>
           {loading ? "checking" : "refresh"}
         </button>
@@ -2346,6 +2573,26 @@ function Dashboard(props: {
   const night = s === undefined || s.totalEvents === 0
     ? 0
     : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
+  // 动效 C：成本大数字滚动（count-up，600ms；纯展示，不改数据语义）。
+  const [displayCost, setDisplayCost] = useState<number | null>(null);
+  useEffect(() => {
+    if (cost === undefined) return;
+    if (displayCost === null) {
+      setDisplayCost(cost);
+      return;
+    }
+    if (cost === displayCost) return;
+    const from = displayCost;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (): void => {
+      const t = Math.min(1, (performance.now() - start) / 600);
+      setDisplayCost(from + (cost - from) * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cost]);
   const modelRows = (() => {
     if (s === undefined) return [];
     const entries = Object.entries(s.models ?? {}).sort(
@@ -2428,7 +2675,7 @@ function Dashboard(props: {
           <div data-whale-report-hero>
             <div data-whale-report-herohead>
               <div data-whale-report-herolabel>{HERO_LABEL[preset] ?? "Agent 消耗"} / ESTIMATED COST</div>
-              <div data-whale-report-heroval>¥{typeof cost === "number" ? cost.toFixed(2) : "—"}</div>
+              <div data-whale-report-heroval>¥{displayCost !== null ? displayCost.toFixed(2) : "—"}</div>
               <div data-whale-report-herodelta2>
                 {delta === null ? (
                   <span className="muted">BASELINE / 首次记录，下期起可对比</span>
@@ -2444,6 +2691,8 @@ function Dashboard(props: {
               <span><b>{cacheRate(s)}%</b> Cache hit</span>
             </div>
           </div>
+
+          <TrendSection preset={preset} />
 
           {insights.length > 0 && (
             <section data-whale-report-section>
