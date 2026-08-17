@@ -121,6 +121,8 @@ export interface ReportStats {
   sessionsDetail: SessionDetail[];
   /** 协作信号（协作复盘用；确定性规则，不改任何既有口径）。 */
   collab: CollabSignals;
+  /** 工具健康（按工具名聚合；确定性配对 call→result）。 */
+  toolHealth: ToolHealth[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -187,6 +189,80 @@ export function userMessageSignals(text: string): UserMessageSignals {
   };
 }
 
+/** 工具健康（Tool Health）：按工具名聚合的确定性统计。 */
+export interface ToolHealth {
+  name: string;
+  calls: number;
+  completed: number;
+  failed: number;
+  incomplete: number;
+  /** 0..1；calls 为 0 时记 0。 */
+  successRate: number;
+  /** 0..1。 */
+  failureRate: number;
+  /** 平均耗时 ms（仅配对成功的 call→result）。 */
+  avgDurationMs: number;
+  p50DurationMs: number;
+  p95DurationMs: number;
+  /** 失败原因分布（只存 error code 枚举，不存 error body）。 */
+  errorCodes: Record<string, number>;
+}
+
+/** 工具健康内部聚合态（统计过程用）。 */
+interface ToolHealthAcc {
+  name: string;
+  calls: number;
+  completed: number;
+  failed: number;
+  incomplete: number;
+  durations: number[];
+  errorCodes: Record<string, number>;
+}
+
+function newToolHealthAcc(name: string): ToolHealthAcc {
+  return { name, calls: 0, completed: 0, failed: 0, incomplete: 0, durations: [], errorCodes: {} };
+}
+
+/** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
+export function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth {
+  const sorted = [...acc.durations].sort((a, b) => a - b);
+  const p = (q: number): number => {
+    if (sorted.length === 0) return 0;
+    const idx = Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1);
+    return sorted[Math.max(0, idx)];
+  };
+  const calls = acc.calls;
+  return {
+    name: acc.name,
+    calls,
+    completed: acc.completed,
+    failed: acc.failed,
+    incomplete: acc.incomplete,
+    successRate: calls > 0 ? Math.max(0, calls - acc.failed - acc.incomplete) / calls : 0,
+    failureRate: calls > 0 ? acc.failed / calls : 0,
+    avgDurationMs: acc.durations.length > 0 ? acc.durations.reduce((a, b) => a + b, 0) / acc.durations.length : 0,
+    p50DurationMs: p(0.5),
+    p95DurationMs: p(0.95),
+    errorCodes: { ...acc.errorCodes },
+  };
+}
+
+/** 全量固化：按名称排序保证确定性（展示层再按关注度排序）。 */
+export function finalizeAllToolHealth(accs: Map<string, ToolHealthAcc>): ToolHealth[] {
+  return [...accs.values()].map(finalizeToolHealth).sort((a, b) => (a.name < b.name ? -1 : 1));
+}
+
+/** 错误 code 提取（只存枚举，不存 body）：data.error.code ?? data.error.name。 */
+function errorCodeOf(data: Record<string, unknown>): string {
+  const err = data.error;
+  if (typeof err === "object" && err !== null) {
+    const e = err as Record<string, unknown>;
+    if (typeof e.code === "string" && e.code !== "") return e.code;
+    if (typeof e.name === "string" && e.name !== "") return e.name;
+  }
+  return "UNKNOWN";
+}
+
 /** 协作信号聚合（报告级）。 */
 export interface CollabSignals {
   /** 用户消息总数。 */
@@ -251,6 +327,7 @@ export function emptyStats(period: Period): ReportStats {
     secretHits: [],
     sessionsDetail: [],
     collab: { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 },
+    toolHealth: [],
   };
 }
 
@@ -371,6 +448,9 @@ export function aggregate(
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
   const currentProvider = new Map<string, string>();
+  // 工具健康：callId → call 元信息（配对后即删，无 O(N²) 扫描）。
+  const toolPending = new Map<string, { name: string; time: number }>();
+  const toolHealthAcc = new Map<string, ToolHealthAcc>();
   const dayHourMap = new Map<string, number[]>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
@@ -511,6 +591,16 @@ export function aggregate(
         aggOf(sessionId, event.time).toolCalls += 1;
         const name = typeof data?.name === "string" ? data.name : "(unknown)";
         stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + 1;
+        // 工具健康：记录 pending（callId → 元信息），结果到达时配对。
+        {
+          const callId = (data as Record<string, unknown>)?.callId;
+          if (typeof callId === "string" && callId !== "") {
+            toolPending.set(callId, { name, time: event.time });
+            const acc = toolHealthAcc.get(name) ?? newToolHealthAcc(name);
+            acc.calls += 1;
+            toolHealthAcc.set(name, acc);
+          }
+        }
         const command = commandOf(data);
         if (command) {
           stats.commands += 1;
@@ -563,6 +653,26 @@ export function aggregate(
       case "tool/result": {
         const failed = resultIsError(data);
         if (failed) stats.toolErrors += 1;
+        // 工具健康：按 callId 配对（确定性；只配对同会话同 callId）。
+        {
+          const msg = (data?.message as Record<string, unknown> | undefined) ?? {};
+          const source = msg.source as Record<string, unknown> | undefined;
+          const callId = typeof source?.callId === "string" ? source.callId : "";
+          const pair = callId !== "" ? toolPending.get(callId) : undefined;
+          if (pair !== undefined) {
+            toolPending.delete(callId);
+            const acc = toolHealthAcc.get(pair.name) ?? newToolHealthAcc(pair.name);
+            acc.completed += 1;
+            if (failed) {
+              acc.failed += 1;
+              const code = errorCodeOf(data as Record<string, unknown>);
+              acc.errorCodes[code] = (acc.errorCodes[code] ?? 0) + 1;
+            }
+            const duration = event.time - pair.time;
+            if (duration >= 0) acc.durations.push(duration);
+            toolHealthAcc.set(pair.name, acc);
+          }
+        }
         // 记录错误摘要供重试诊断（只保留前 120 字符）。
         const content = (data?.message as Record<string, unknown> | undefined)?.content;
         let snippet: string | undefined;
@@ -643,6 +753,13 @@ export function aggregate(
     sessionsWithRevision,
     shortSessions,
   };
+  // 工具健康：未配对的 pending 按其 name 记为 incomplete，然后固化。
+  for (const pending of toolPending.values()) {
+    const acc = toolHealthAcc.get(pending.name) ?? newToolHealthAcc(pending.name);
+    acc.incomplete += 1;
+    toolHealthAcc.set(pending.name, acc);
+  }
+  stats.toolHealth = finalizeAllToolHealth(toolHealthAcc);
 
   return stats;
 }
@@ -705,6 +822,8 @@ export interface HourBucket {
   secretHits: { label: string; time: number; source: "user" | "tool"; sessionId: string }[];
   /** 协作信号（确定性词表检测；协作复盘用）。 */
   collab: { revisions: number; lateConstraints: number };
+  /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
+  toolHealth: Record<string, ToolHealthAcc>;
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -737,6 +856,7 @@ function newBucket(h: number): HourBucket {
     burstSamples: [],
     secretHits: [],
     collab: { revisions: 0, lateConstraints: 0 },
+    toolHealth: {},
   };
 }
 
@@ -765,6 +885,8 @@ export function bucketizeOwnEvents(
   let lastError: string | undefined;
   // 协作信号：该会话已出现的用户消息数（首条消息内的约束不算"迟到"）。
   const sessionUserMsgs = new Map<string, number>();
+  // 工具健康：会话级 pending（跨 10 分钟分桶配对；事件顺序处理，无 O(N²)）。
+  const toolPending = new Map<string, { name: string; time: number }>();
   for (const event of events) {
     if (event.seq < ownStart) continue;
     if (stopAfter !== undefined && event.time >= stopAfter) break;
@@ -833,8 +955,17 @@ export function bucketizeOwnEvents(
       }
       case "tool/call": {
         bucket.toolCallsTotal += 1;
-        const name = typeof data?.name === "string" ? data.name : "(unknown)";
-        bucket.toolCalls[name] = (bucket.toolCalls[name] ?? 0) + 1;
+        const tname = typeof data?.name === "string" ? data.name : "(unknown)";
+        bucket.toolCalls[tname] = (bucket.toolCalls[tname] ?? 0) + 1;
+        // 工具健康：记录 pending，result 到达时配对。
+        {
+          const callId = (data as Record<string, unknown>)?.callId;
+          if (typeof callId === "string" && callId !== "") {
+            toolPending.set(callId, { name: tname, time: event.time });
+            const acc = (bucket.toolHealth[tname] ??= newToolHealthAcc(tname));
+            acc.calls += 1;
+          }
+        }
         const command = commandOf(data);
         if (command) {
           bucket.commands += 1;
@@ -876,6 +1007,25 @@ export function bucketizeOwnEvents(
       case "tool/result": {
         const failed = resultIsError(data);
         if (failed) bucket.toolErrors += 1;
+        // 工具健康：按 callId 配对（跨桶由会话级 pending 完成）。
+        {
+          const msg = (data?.message as Record<string, unknown> | undefined) ?? {};
+          const source = msg.source as Record<string, unknown> | undefined;
+          const callId = typeof source?.callId === "string" ? source.callId : "";
+          const pair = callId !== "" ? toolPending.get(callId) : undefined;
+          if (pair !== undefined) {
+            toolPending.delete(callId);
+            const acc = (bucket.toolHealth[pair.name] ??= newToolHealthAcc(pair.name));
+            acc.completed += 1;
+            if (failed) {
+              acc.failed += 1;
+              const code = errorCodeOf(data as Record<string, unknown>);
+              acc.errorCodes[code] = (acc.errorCodes[code] ?? 0) + 1;
+            }
+            const duration = event.time - pair.time;
+            if (duration >= 0) acc.durations.push(duration);
+          }
+        }
         const content = (data?.message as Record<string, unknown> | undefined)?.content;
         let snippet: string | undefined;
         if (failed) {
@@ -905,6 +1055,14 @@ export function bucketizeOwnEvents(
     }
   }
   const buckets = [...byHour.values()].sort((a, b) => a.h - b.h);
+  // 工具健康：未配对的 pending 记为 incomplete（归入最后一个分桶，保证聚合端可见）。
+  if (toolPending.size > 0 && byHour.size > 0) {
+    const lastBucket = [...byHour.values()].sort((a, b) => a.h - b.h)[byHour.size - 1];
+    for (const pending of toolPending.values()) {
+      const acc = (lastBucket.toolHealth[pending.name] ??= newToolHealthAcc(pending.name));
+      acc.incomplete += 1;
+    }
+  }
   return { buckets, titles, lastSeq, lastMs };
 }
 
@@ -1062,6 +1220,26 @@ export function aggregateBuckets(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  // 工具健康：合并各分桶的聚合态（ToolHealthAcc merge），再固化。
+  const toolHealthMerged = new Map<string, ToolHealthAcc>();
+  for (const view of views) {
+    for (const bucket of view.buckets) {
+      for (const [name, acc] of Object.entries(bucket.toolHealth ?? {})) {
+        const target = toolHealthMerged.get(name) ?? newToolHealthAcc(name);
+        target.calls += acc.calls;
+        target.completed += acc.completed;
+        target.failed += acc.failed;
+        target.incomplete += acc.incomplete;
+        target.durations.push(...acc.durations);
+        for (const [code, n] of Object.entries(acc.errorCodes ?? {})) {
+          target.errorCodes[code] = (target.errorCodes[code] ?? 0) + n;
+        }
+        toolHealthMerged.set(name, target);
+      }
+    }
+  }
+  stats.toolHealth = finalizeAllToolHealth(toolHealthMerged);
+
   let sessionsWithRevision = 0;
   let shortSessions = 0;
   for (const [sid, a] of sessionAgg) {

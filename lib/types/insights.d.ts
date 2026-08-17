@@ -31,6 +31,30 @@ export declare function nightRatio(stats: ReportStats): number;
 /** 费用涨跌（相对上一周期），百分比。prev 缺失时返回 null。 */
 export declare function costDeltaPct(input: InsightInput): number | null;
 export declare function computeInsights(input: InsightInput): Insight[];
+/**
+ * 工具健康门槛（确定性）：
+ * - 样本：calls >= 5（小样本不制造"最不稳定"假象）
+ * - 失败：failed >= 3 且失败率 >= 15%
+ * 关注度 = failed × (1 + failureRate)：绝对失败数 + 比例加权（2/5 与 40/100 不等同）。
+ */
+/**
+ * 门槛（基于真实周报数据校准）：高频线 30 次、失败 ≥5、失败率 ≥8%。
+ * 真实数据参考：edit 543/53/9.8% 应触发；write 350/11/3.1% 与
+ * bash 3506/13/0.4% 不应触发——8% 明显高于其余高频工具（≤3.1%）。
+ */
+export declare const TOOL_HEALTH_MIN_CALLS = 30;
+export declare const TOOL_HEALTH_MIN_FAILED = 5;
+export declare const TOOL_HEALTH_MIN_FAILURE_RATE = 0.08;
+export declare function toolHealthAttention(t: ToolHealthLike): number;
+interface ToolHealthLike {
+    name: string;
+    calls: number;
+    failed: number;
+    failureRate: number;
+    avgDurationMs: number;
+}
+/** 第 9 条确定性洞察：最值得关注的一个工具（最多一条，避免噪音）。 */
+export declare function toolHealthInsight(health: readonly ToolHealthLike[] | undefined): Insight | null;
 /** 周期 key：dy-YYYY-MM-DD / wk-YYYY-Www / mo-YYYY-MM / yr-YYYY（按"结束时刻"归属）。 */
 /**
  * 周期 key（自然周期语义，前缀互不冲突）：
@@ -48,4 +72,5 @@ export declare function toolFamilies(toolCalls: Record<string, number>): {
     family: string;
     count: number;
 }[];
+export {};
 //# sourceMappingURL=insights.d.ts.map

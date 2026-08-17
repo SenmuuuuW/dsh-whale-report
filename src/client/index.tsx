@@ -13,7 +13,7 @@
  * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
  */
 import { Component, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type ReactNode } from "react";
-import { toolFamilies } from "../insights.js";
+import { toolFamilies, TOOL_HEALTH_MIN_CALLS, TOOL_HEALTH_MIN_FAILED, TOOL_HEALTH_MIN_FAILURE_RATE } from "../insights.js";
 import { triggerNotes, whaleMood } from "../whale-notes.js";
 import { computeCollaborationInsights } from "../collaboration.js";
 import { splitModelKey } from "./model-key.js";
@@ -1015,6 +1015,28 @@ const CSS = `
   font-variant-numeric: tabular-nums;
 }
 
+/* ── TOOL HEALTH（Full Report）── */
+[data-whale-report-toolhealth-row] {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-toolhealth-index] { color: var(--dt-faint); font: 400 10px ui-monospace, monospace; padding-top: 1px; }
+[data-whale-report-toolhealth-main] { min-width: 0; }
+[data-whale-report-toolhealth-head] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+[data-whale-report-toolhealth-head] b { color: var(--dt-ink); font: 600 12.5px ui-sans-serif, system-ui, sans-serif; }
+[data-whale-report-toolhealth-rate] { color: var(--dt-faint); font: 700 9.5px ui-monospace, monospace; }
+[data-whale-report-toolhealth-rate][data-abnormal="true"] { color: var(--dt-red); }
+[data-whale-report-toolhealth-bar] {
+  height: 2px; margin-top: 6px; border-radius: 0; background: var(--dt-line); overflow: hidden;
+}
+[data-whale-report-toolhealth-bar] i { display: block; height: 100%; background: var(--dt-safe, #31765a); min-width: 2px; }
+[data-whale-report-toolhealth-row][data-abnormal="true"] [data-whale-report-toolhealth-bar] i { background: var(--dt-red); }
+[data-whale-report-toolhealth-nums] {
+  margin-top: 5px; color: var(--dt-muted); font: 400 9px/1.5 ui-monospace, monospace;
+}
+[data-whale-report-toolhealth-nums] em { font-style: normal; color: var(--dt-faint); }
+[data-whale-report-toolhealth-nums] em[data-abnormal="true"] { color: var(--dt-red); font-weight: 700; }
+
 /* ── 历史趋势 TRENDS ── */
 [data-whale-report-trendlive] {
   font: 700 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1326,6 +1348,19 @@ interface StatsJson {
   secretHits?: { label: string; time: number; source: string; sessionId?: string }[];
   plugins?: string[];
   collab?: { userMessages: number; revisions: number; lateConstraints: number; sessionsWithRevision: number; shortSessions: number };
+  toolHealth?: {
+    name: string;
+    calls: number;
+    completed: number;
+    failed: number;
+    incomplete: number;
+    successRate: number;
+    failureRate: number;
+    avgDurationMs: number;
+    p50DurationMs: number;
+    p95DurationMs: number;
+    errorCodes: Record<string, number>;
+  }[];
   sessionsDetail?: {
     sessionId: string;
     title: string;
@@ -1664,6 +1699,65 @@ function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
 }
 
 /** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
+/** 工具健康确定性排序：异常工具（失败明显）优先，健康工具按调用次数。 */
+export function sortToolHealth(
+  health: NonNullable<StatsJson["toolHealth"]>,
+): { tool: NonNullable<StatsJson["toolHealth"]>[number]; abnormal: boolean }[] {
+  return health
+    .map((tool) => ({ tool, abnormal: tool.calls >= TOOL_HEALTH_MIN_CALLS && tool.failed >= TOOL_HEALTH_MIN_FAILED && tool.failureRate >= TOOL_HEALTH_MIN_FAILURE_RATE }))
+    .sort((a, b) => {
+      if (a.abnormal !== b.abnormal) return a.abnormal ? -1 : 1;
+      if (a.abnormal && b.abnormal) return b.tool.failureRate - a.tool.failureRate;
+      return b.tool.calls - a.tool.calls;
+    });
+}
+
+function fmtDur(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+/** Full Report：TOOL HEALTH 区块（研究终端风格，异常优先展示）。 */
+function ToolHealthBlock({ health }: { health: NonNullable<StatsJson["toolHealth"]> }): ReactNode {
+  const rows = sortToolHealth(health);
+  if (rows.length === 0) return <div data-whale-report-tokenline>（无工具调用数据）</div>;
+  return (
+    <div data-whale-report-toollist style={{ marginTop: 12 }}>
+      <div data-whale-report-h2>TOOL HEALTH</div>
+      {rows.slice(0, 10).map(({ tool, abnormal }, index) => {
+        const successPct = Math.round(tool.successRate * 1000) / 10;
+        const failedPct = Math.round(tool.failureRate * 1000) / 10;
+        const errText = Object.entries(tool.errorCodes)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 2)
+          .map(([code, n]) => `${code} ×${n}`)
+          .join(" · ");
+        return (
+          <div key={tool.name} data-whale-report-toolhealth-row data-abnormal={abnormal}>
+            <span data-whale-report-toolhealth-index>{String(index + 1).padStart(2, "0")}</span>
+            <div data-whale-report-toolhealth-main>
+              <div data-whale-report-toolhealth-head>
+                <b>{tool.name}</b>
+                <span data-whale-report-toolhealth-rate data-abnormal={abnormal}>
+                  {successPct}% SUCCESS
+                </span>
+              </div>
+              <div data-whale-report-toolhealth-bar>
+                <i style={{ width: `${Math.max(1, Math.round(tool.successRate * 100))}%` }} />
+              </div>
+              <div data-whale-report-toolhealth-nums>
+                {tool.calls} CALLS · {fmtDur(tool.avgDurationMs)} AVG
+                {tool.failed > 0 && <em data-abnormal={abnormal}> · {tool.failed} FAILED{failedPct > 0 ? ` (${failedPct}%)` : ""}</em>}
+                {tool.incomplete > 0 && <span> · {tool.incomplete} INCOMPLETE</span>}
+                {errText !== "" && <span className="muted"> · {errText}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: ReportFull["cost"] }): ReactNode {
   const entries = Object.entries(models).sort(
     (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
@@ -1926,6 +2020,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           <div data-whale-report-subsection>
             <div data-whale-report-h2>MODEL ALLOCATION</div>
             <ModelTable models={s.models ?? {}} cost={report.cost} />
+            {(s.toolHealth ?? []).length > 0 && <ToolHealthBlock health={s.toolHealth ?? []} />}
             {typeof report.cost?.total === "number" && report.cost.total > 0 && (
               <div data-whale-report-tokenline style={{ marginTop: 10 }}>
                 预估合计 <b>¥{report.cost.total.toFixed(2)}</b>
@@ -2812,7 +2907,9 @@ export function budgetExportHeight(report: ReportFull, sections: ExportSections 
   const collabShort = computeCollaborationInsights({ ...(s.collab ?? { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 }), sessions: s.sessions });
   h += collabShort.length > 0 ? 18 + 26 + 12 + collabShort.length * 36 + 8 : 0; // 协作复盘（简短）
   h += 18 + 26 + 12 + 16 + (activityRows > 0 ? activityRows * (cellW + 3) + 6 : 0) + 18 + 26 + 16 + 12; // 03 活跃 + TokenBar
+  const healthRows = (s.toolHealth ?? []).filter((t) => t.calls >= 5).slice(0, 5).length;
   h += 18 + 26 + 12 + modelEntries.length * 26 + families.length * 18 + 18 + toolEntries.length * 19 + 12; // 04 模型与工具
+  h += (healthRows > 0 ? 18 + healthRows * 21 + 6 : 0); // 04 工具健康（简版）
   h += 18 + 26 + 12 + danger.length * 21 + 18 + (bursts.length > 0 ? bursts.length * 19 : 18) + 18 + 12; // 05 风险
   h += 26 + 16; // 页脚（含 REPORT GENERATION 行）
   return Math.min(Math.ceil(h * 1.12) + 140, 32000);
@@ -3247,6 +3344,41 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     paint(`${name}`, 11, C.inkSoft, "sans", 400, W - P * 2 - 120);
     right(`${Math.round((count / toolTotal) * 100)}% · ${count}`, 10, C.muted, "mono");
   });
+
+  // ── 工具健康（简版：异常优先，最多 5 个，样本 ≥5）──
+  const healthTop = (s.toolHealth ?? [])
+    .filter((t) => t.calls >= 5)
+    .sort((a, b) => {
+      const ab = (x: typeof a) => x.failed >= 3 && x.failureRate >= 0.15;
+      if (ab(a) !== ab(b)) return ab(a) ? -1 : 1;
+      if (ab(a) && ab(b)) return b.failureRate - a.failureRate;
+      return b.calls - a.calls;
+    })
+    .slice(0, 5);
+  if (healthTop.length > 0) {
+    paint("TOOL HEALTH", 9, C.faint, "mono", 400);
+    for (const t of healthTop) {
+      const abnormal = t.calls >= TOOL_HEALTH_MIN_CALLS && t.failed >= TOOL_HEALTH_MIN_FAILED && t.failureRate >= TOOL_HEALTH_MIN_FAILURE_RATE;
+      const successPct = Math.round(t.successRate * 1000) / 10;
+      // 极细 measurement bar（success 占比；异常工具红色）
+      ctx.fillStyle = C.line;
+      ctx.fillRect(P, y + 6, barW, 2);
+      ctx.fillStyle = abnormal ? C.red : C.safe;
+      ctx.fillRect(P, y + 6, Math.max(2, barW * t.successRate), 2);
+      ctx.font = `600 11px ${EXPORT_SANS}`;
+      ctx.fillStyle = C.ink;
+      ctx.fillText(t.name, P + 6, y + 10);
+      ctx.font = `700 9px ${EXPORT_MONO}`;
+      ctx.fillStyle = abnormal ? C.red : C.faint;
+      ctx.fillText(`${successPct}% SUCCESS`, P + 6 + Math.min(150, ctx.measureText(t.name).width) + 14, y + 10);
+      ctx.font = `400 9px ${EXPORT_MONO}`;
+      ctx.fillStyle = C.muted;
+      const dur = t.avgDurationMs >= 1000 ? `${(t.avgDurationMs / 1000).toFixed(1)}s` : `${Math.round(t.avgDurationMs)}ms`;
+      ctx.fillText(`${t.calls} CALLS · ${dur} AVG${t.failed > 0 ? ` · ${t.failed} FAILED` : ""}`, W - P - 160, y + 10);
+      y += 21;
+    }
+    y += 4;
+  }
 
   // ── 05 风险扫描 ──
   sectionHead("06", "风险扫描", "RISK / READ ONLY");

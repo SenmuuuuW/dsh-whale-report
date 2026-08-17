@@ -121,6 +121,19 @@ interface StatsJson {
         sessionsWithRevision: number;
         shortSessions: number;
     };
+    toolHealth?: {
+        name: string;
+        calls: number;
+        completed: number;
+        failed: number;
+        incomplete: number;
+        successRate: number;
+        failureRate: number;
+        avgDurationMs: number;
+        p50DurationMs: number;
+        p95DurationMs: number;
+        errorCodes: Record<string, number>;
+    }[];
     sessionsDetail?: {
         sessionId: string;
         title: string;
@@ -141,6 +154,12 @@ interface StatsJson {
         }>;
     }[];
 }
+/** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
+/** 工具健康确定性排序：异常工具（失败明显）优先，健康工具按调用次数。 */
+export declare function sortToolHealth(health: NonNullable<StatsJson["toolHealth"]>): {
+    tool: NonNullable<StatsJson["toolHealth"]>[number];
+    abnormal: boolean;
+}[];
 /**
  * 长图导出：canvas 按面板报告同款视觉逐块绘制完整内容（零依赖、无 canvas 污染问题）。
  * - 内容与报告一致：报告头/鲸评/Findings/活跃+Token/模型与工具/风险扫描/会话轨迹/会话索引/页脚；

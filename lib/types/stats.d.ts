@@ -140,6 +140,8 @@ export interface ReportStats {
     sessionsDetail: SessionDetail[];
     /** 协作信号（协作复盘用；确定性规则，不改任何既有口径）。 */
     collab: CollabSignals;
+    /** 工具健康（按工具名聚合；确定性配对 call→result）。 */
+    toolHealth: ToolHealth[];
 }
 /** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
 export declare const SECRET_PATTERNS: {
@@ -153,6 +155,38 @@ export interface UserMessageSignals {
     constraint: boolean;
 }
 export declare function userMessageSignals(text: string): UserMessageSignals;
+/** 工具健康（Tool Health）：按工具名聚合的确定性统计。 */
+export interface ToolHealth {
+    name: string;
+    calls: number;
+    completed: number;
+    failed: number;
+    incomplete: number;
+    /** 0..1；calls 为 0 时记 0。 */
+    successRate: number;
+    /** 0..1。 */
+    failureRate: number;
+    /** 平均耗时 ms（仅配对成功的 call→result）。 */
+    avgDurationMs: number;
+    p50DurationMs: number;
+    p95DurationMs: number;
+    /** 失败原因分布（只存 error code 枚举，不存 error body）。 */
+    errorCodes: Record<string, number>;
+}
+/** 工具健康内部聚合态（统计过程用）。 */
+interface ToolHealthAcc {
+    name: string;
+    calls: number;
+    completed: number;
+    failed: number;
+    incomplete: number;
+    durations: number[];
+    errorCodes: Record<string, number>;
+}
+/** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
+export declare function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth;
+/** 全量固化：按名称排序保证确定性（展示层再按关注度排序）。 */
+export declare function finalizeAllToolHealth(accs: Map<string, ToolHealthAcc>): ToolHealth[];
 /** 协作信号聚合（报告级）。 */
 export interface CollabSignals {
     /** 用户消息总数。 */
@@ -258,6 +292,8 @@ export interface HourBucket {
         revisions: number;
         lateConstraints: number;
     };
+    /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
+    toolHealth: Record<string, ToolHealthAcc>;
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
@@ -287,4 +323,5 @@ export interface SessionBucketView {
 }
 /** 把多个会话的分桶视图聚合成区间统计（与 aggregate 等价，但 O(分桶数)）。 */
 export declare function aggregateBuckets(views: SessionBucketView[], period: Period, headers?: RawSessionHeader[]): ReportStats;
+export {};
 //# sourceMappingURL=stats.d.ts.map

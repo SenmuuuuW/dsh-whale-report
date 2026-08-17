@@ -10,6 +10,7 @@ import type { ReportRecord } from "./state.js";
 import type { ReportStats, SessionDetail } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
 import { whaleMood } from "./whale-notes.js";
+import { TOOL_HEALTH_MIN_CALLS, TOOL_HEALTH_MIN_FAILED, TOOL_HEALTH_MIN_FAILURE_RATE } from "./insights.js";
 import { computeCollaborationInsights } from "./collaboration.js";
 
 function esc(text: string): string {
@@ -242,6 +243,43 @@ function toolTableHtml(stats: ReportStats): string {
   const total = Math.max(1, stats.toolCallsTotal);
   return `<div class="tool-ledger">
     ${entries.map(([name, count], index) => `<div class="tool-row"><span>${String(index + 1).padStart(2, "0")}</span><code>${esc(name)}</code><small>${Math.round((count / total) * 100)}%</small><b>${count}</b></div>`).join("")}
+  </div>`;
+}
+
+/** 工具健康（PDF 区块）：异常优先，样本 ≥5，只存枚举与计数。 */
+function toolHealthHtml(stats: ReportStats): string {
+  const health = stats.toolHealth ?? [];
+  if (health.length === 0) return "";
+  const rows = health
+    .filter((t) => t.calls >= 5)
+    .sort((a, b) => {
+      const ab = (x: typeof a) => x.calls >= TOOL_HEALTH_MIN_CALLS && x.failed >= TOOL_HEALTH_MIN_FAILED && x.failureRate >= TOOL_HEALTH_MIN_FAILURE_RATE;
+      if (ab(a) !== ab(b)) return ab(a) ? -1 : 1;
+      if (ab(a) && ab(b)) return b.failureRate - a.failureRate;
+      return b.calls - a.calls;
+    })
+    .slice(0, 10);
+  if (rows.length === 0) return "";
+  const fmtDur = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`);
+  return `<div class="resource-title" style="margin-top:18px"><b>TOOL HEALTH</b><span>FAILURE / LATENCY PROFILE</span></div>
+  <div class="tool-ledger">
+    ${rows
+      .map((t, i) => {
+        const abnormal = t.failed >= 3 && t.failureRate >= 0.15;
+        const successPct = Math.round(t.successRate * 1000) / 10;
+        const errText = Object.entries(t.errorCodes)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 2)
+          .map(([code, n]) => `${esc(code)} ×${n}`)
+          .join(" · ");
+        return `<div class="tool-row${abnormal ? " tool-row--abnormal" : ""}">
+          <span>${String(i + 1).padStart(2, "0")}</span>
+          <code>${esc(t.name)}</code>
+          <small>${successPct}% SUCCESS${t.failed > 0 ? ` · ${t.failed} FAILED` : ""}</small>
+          <b>${t.calls} CALLS · ${fmtDur(t.avgDurationMs)}${errText !== "" ? ` · ${errText}` : ""}</b>
+        </div>`;
+      })
+      .join("")}
   </div>`;
 }
 
@@ -646,7 +684,7 @@ export function renderHtmlReport(record: ReportRecord): string {
       <div class="chapter-intro"><h2>Dive<br>profile.</h2><p>模型、Token 与工具调用按同一周期口径汇总；费用仅作观察，不替代平台账单。</p></div>
       <div class="resource-grid">
         <div><div class="resource-title"><b>MODEL LEDGER</b><span>RESOURCE ALLOCATION</span></div>${modelTableHtml(stats, cost)}</div>
-        <div><div class="resource-title"><b>TOOL CALL</b><span>${Object.keys(stats.toolCalls).length > 10 ? "TOP 10" : "ALL"}</span></div>${toolTableHtml(stats)}</div>
+        <div><div class="resource-title"><b>TOOL CALL</b><span>${Object.keys(stats.toolCalls).length > 10 ? "TOP 10" : "ALL"}</span></div>${toolTableHtml(stats)}${toolHealthHtml(stats)}</div>
       </div>
     </div>
   </section>

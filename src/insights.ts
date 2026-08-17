@@ -161,7 +161,57 @@ export function computeInsights(input: InsightInput): Insight[] {
     });
   }
 
+  // ── 9. 工具健康 ──
+  const healthInsight = toolHealthInsight(stats.toolHealth);
+  if (healthInsight !== null) insights.push(healthInsight);
+
   return insights;
+}
+
+/**
+ * 工具健康门槛（确定性）：
+ * - 样本：calls >= 5（小样本不制造"最不稳定"假象）
+ * - 失败：failed >= 3 且失败率 >= 15%
+ * 关注度 = failed × (1 + failureRate)：绝对失败数 + 比例加权（2/5 与 40/100 不等同）。
+ */
+/**
+ * 门槛（基于真实周报数据校准）：高频线 30 次、失败 ≥5、失败率 ≥8%。
+ * 真实数据参考：edit 543/53/9.8% 应触发；write 350/11/3.1% 与
+ * bash 3506/13/0.4% 不应触发——8% 明显高于其余高频工具（≤3.1%）。
+ */
+export const TOOL_HEALTH_MIN_CALLS = 30;
+export const TOOL_HEALTH_MIN_FAILED = 5;
+export const TOOL_HEALTH_MIN_FAILURE_RATE = 0.08;
+
+export function toolHealthAttention(t: ToolHealthLike): number {
+  return t.failed * (1 + t.failureRate);
+}
+
+interface ToolHealthLike {
+  name: string;
+  calls: number;
+  failed: number;
+  failureRate: number;
+  avgDurationMs: number;
+}
+
+/** 第 9 条确定性洞察：最值得关注的一个工具（最多一条，避免噪音）。 */
+export function toolHealthInsight(health: readonly ToolHealthLike[] | undefined): Insight | null {
+  if (health === undefined || health.length === 0) return null;
+  const candidates = health.filter(
+    (t) => t.calls >= TOOL_HEALTH_MIN_CALLS && t.failed >= TOOL_HEALTH_MIN_FAILED && t.failureRate >= TOOL_HEALTH_MIN_FAILURE_RATE,
+  );
+  if (candidates.length === 0) return null;
+  const top = [...candidates].sort((a, b) => toolHealthAttention(b) - toolHealthAttention(a))[0];
+  const ratePct = Math.round(top.failureRate * 1000) / 10;
+  const avg = top.avgDurationMs >= 1000 ? `${(top.avgDurationMs / 1000).toFixed(1)}s` : `${Math.round(top.avgDurationMs)}ms`;
+  return {
+    id: "tool-health",
+    level: "warning",
+    title: `工具 ${top.name} 失败 ${top.failed} 次，失败率 ${ratePct}%`,
+    detail: `本周调用 ${top.calls} 次，平均耗时 ${avg}。`,
+    action: "该工具失败率明显高于其他高频工具，优先检查调用方式或运行环境。",
+  };
 }
 
 // ─────────────────────────── 周期基线工具 ───────────────────────────
