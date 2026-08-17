@@ -18,6 +18,10 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
+    "./core": {
+      "types": "./lib/types/core.d.ts",
+      "default": "./lib/core.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
