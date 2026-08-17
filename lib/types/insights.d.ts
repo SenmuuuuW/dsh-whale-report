@@ -21,7 +21,11 @@ export interface Insight {
 }
 export interface InsightInput {
     stats: ReportStats;
-    prev?: PeriodStatsRecord;
+    /**
+     * 上一周期基线。结构类型：仅消费 cost / cacheHitRate（对比口径），
+     * 完整持久化记录（PeriodStatsRecord）与独立计算的轻量基线都兼容。
+     */
+    prev?: Pick<PeriodStatsRecord, "cost" | "cacheHitRate">;
     cost?: CostBreakdown;
 }
 /** 缓存命中率：缓存命中占输入+命中的比例。 */
