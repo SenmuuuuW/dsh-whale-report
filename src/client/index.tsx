@@ -852,6 +852,19 @@ const CSS = `
 [data-whale-report-squares] i:hover { outline: 1px solid var(--dt-blue) !important; }
 
 @container dtrace (max-width: 620px) {
+  [data-whale-report-heatzone] { flex-direction: column; gap: 16px; }
+  [data-whale-report-heatsummary] { padding-top: 0; flex-direction: row; flex-wrap: wrap; gap: 22px; }
+  [data-whale-report-heatsummary] [data-whale-report-heatsumhead] { flex-basis: 100%; margin-bottom: 4px; }
+  [data-whale-report-heatsumrow] { border-bottom: 0; padding: 2px 0; flex-direction: column; gap: 1px; align-items: flex-start; }
+  [data-whale-report-heatcells] { width: 300px; }
+  [data-whale-report-heataxis] { width: 300px; }
+  [data-whale-report-heataxis] span { left: auto !important; }
+  [data-whale-report-heataxis] span[data-align="start"] { left: 0 !important; }
+  [data-whale-report-heataxis] span[data-align="end"] { left: 300px !important; }
+  [data-whale-report-heataxis] span:nth-child(even) { display: none; }
+  [data-whale-report-trendgrid] { grid-template-columns: 1fr; }
+  [data-whale-report-heataxis] span:nth-child(even) { display: none; }
+  [data-whale-report-heatcells] { gap: 1px; }
   [data-whale-report-body] { padding-right: 18px; padding-left: 18px; }
   [data-whale-report-brand], [data-whale-report-reportopening] { margin-right: -18px; margin-left: -18px; padding-right: 18px; padding-left: 18px; }
   [data-whale-report-hero] { grid-template-columns: 1fr; gap: 18px; }
@@ -1037,19 +1050,148 @@ const CSS = `
 [data-whale-report-toolhealth-nums] em { font-style: normal; color: var(--dt-faint); }
 [data-whale-report-toolhealth-nums] em[data-abnormal="true"] { color: var(--dt-red); font-weight: 700; }
 
-/* ── 历史趋势 TRENDS ── */
-[data-whale-report-trendlive] {
-  font: 700 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--dt-faint); border: 1px solid var(--dt-line-strong);
-  border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 2px;
-  letter-spacing: .08em;
+/* ── 活跃扫描 v2（hourly heatmap：GitHub contribution × sonar）── */
+[data-whale-report-heatwrap] { position: relative; margin-top: 4px; }
+/* 活跃扫描 instrument：左 heatmap（~65%）+ 右 summary（~35%），顶部对齐，内容限宽。 */
+[data-whale-report-heatzone] {
+  display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap;
+  max-width: 960px; margin-top: 6px;
 }
+[data-whale-report-heatwrap] { min-width: 0; flex: 1 1 470px; }
+[data-whale-report-heatsummary] { flex: 1 1 220px; min-width: 180px; padding-top: 0; }
+[data-whale-report-heatscan] {
+  display: flex; gap: 18px; margin-left: 40px; margin-bottom: 5px;
+  font: 400 8.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .08em;
+}
+[data-whale-report-heatscan] b { color: var(--dt-ink-soft); font-weight: 700; }
+[data-whale-report-heataxis] { position: relative; height: 16px; width: 429px; margin-left: 40px; }
+[data-whale-report-heataxis] span {
+  position: absolute; transform: translateX(-50%);
+  font: 400 9px ui-monospace, monospace; color: var(--dt-ink-soft);
+}
+[data-whale-report-heataxis] span[data-align="start"] { transform: none; left: 0 !important; }
+[data-whale-report-heataxis] span[data-align="end"] { transform: translateX(-100%); }
+[data-whale-report-heatrows] { display: flex; flex-direction: column; gap: 4px; width: fit-content; }
+[data-whale-report-heatrow] { display: flex; align-items: center; gap: 6px; }
+[data-whale-report-heatdate] {
+  width: 34px; flex-shrink: 0; text-align: right;
+  font: 400 9px ui-monospace, monospace; color: var(--dt-ink-soft);
+  white-space: nowrap;
+}
+[data-whale-report-heatdate] em {
+  font-style: normal; font-weight: 700; color: var(--dt-blue);
+  font-size: 8px; margin-left: 2px; letter-spacing: .06em;
+}
+/* 固定 429px 网格（24 × 15px + 23 × 3px）。 */
+[data-whale-report-heatcells] { display: flex; gap: 3px; width: 429px; }
+[data-whale-report-heatcells] i {
+  width: 15px; height: 15px; flex: none; border-radius: 2.5px; display: block;
+  position: relative; transition: transform .08s ease;
+}
+/* hover hit 区扩大（视觉 15px，命中 ~21px）。 */
+[data-whale-report-heatcells] i::after { content: ""; position: absolute; inset: -3px; }
+/* 无活动：极浅背景格 + 细边框——空格子也清晰可见，24 列结构完整。 */
+[data-whale-report-heatcells] i[data-level="0"] {
+  background: #f7f9fc;
+  box-shadow: inset 0 0 0 1px #dbe2ec;
+}
+[data-whale-report-heatcells] i[data-level="1"] { background: #dbe4ff; }
+[data-whale-report-heatcells] i[data-level="2"] { background: #b3c4ff; }
+[data-whale-report-heatcells] i[data-level="3"] { background: #8aa4ff; }
+[data-whale-report-heatcells] i[data-level="4"] { background: #6b87ff; }
+[data-whale-report-heatcells] i[data-level="5"] { background: #4d6bfe; }
+[data-whale-report-heatcells] i:hover { transform: scale(1.25); z-index: 2; }
+/* 当前小时：细 1px 蓝色描边。 */
+[data-whale-report-heatcells] i[data-cur="true"] { outline: 1px solid rgba(77, 107, 254, .5); outline-offset: 0; }
+/* 活跃摘要：中文主标题 + 英文小 meta；label 弱 value 强；无卡片边框。 */
+[data-whale-report-heatsumhead] {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px;
+}
+[data-whale-report-heatsumhead] b { font: 700 13px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink); }
+[data-whale-report-heatsumhead] em { font: 700 8.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; font-style: normal; }
+[data-whale-report-heatsumrow] {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  padding: 7px 0; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-heatsumrow]:last-child { border-bottom: 0; }
+[data-whale-report-heatsumrow] span {
+  font: 500 10.5px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-muted);
+  white-space: nowrap;
+}
+[data-whale-report-heatsumrow] b {
+  font: 700 13px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+[data-whale-report-heatsumrow] b em { font-style: normal; font-weight: 400; color: var(--dt-faint); font-size: 11px; }
+[data-whale-report-heatlegend] {
+  display: flex; align-items: center; gap: 4px; margin-top: 10px; margin-left: 40px;
+  font: 400 10px ui-sans-serif, system-ui, sans-serif; color: var(--dt-muted);
+  max-width: 429px;
+}
+[data-whale-report-heatlegend] i { width: 13px; height: 13px; border-radius: 2.5px; display: inline-block; }
+[data-whale-report-heatlegend] em {
+  font-style: normal; margin-left: 10px; font: 400 9px ui-monospace, monospace; color: var(--dt-faint);
+}
+[data-whale-report-heattip] {
+  position: absolute; z-index: 6; top: 0; right: 0; min-width: 168px;
+  background: var(--dt-ink); color: #eef2f7; border-radius: 8px; padding: 8px 10px;
+  font: 400 10.5px/1.7 ui-sans-serif, system-ui, sans-serif; box-shadow: 0 8px 24px rgba(7, 22, 47, .25);
+  pointer-events: none;
+}
+[data-whale-report-heattip] b { display: block; font: 700 10.5px ui-monospace, monospace; color: #fff; margin-bottom: 2px; }
+[data-whale-report-heattip] div { display: flex; justify-content: space-between; gap: 14px; color: #c3cfe0; }
+[data-whale-report-heattip] div em { font-style: normal; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+[data-whale-report-heattip-empty] { color: #9fb0c8; }
+[data-whale-report-heatlegend] {
+  display: flex; align-items: center; gap: 3px; margin-top: 8px; margin-left: 44px;
+  font: 400 9px ui-sans-serif, system-ui, sans-serif; color: var(--dt-muted);
+}
+[data-whale-report-heatlegend] i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+[data-whale-report-heatlegend] em {
+  font-style: normal; margin-left: 8px; font: 400 8.5px ui-monospace, monospace; color: var(--dt-faint);
+}
+
+/* ── 历史趋势 TRENDS（v2：中文主标题 / 当前值 / 时间轴 / hover tooltip）── */
 [data-whale-report-trendgrid] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-[data-whale-report-trendchart] { border: 1px solid var(--dt-line); border-radius: 8px; padding: 8px 10px; background: var(--dt-paper-deep); min-width: 0; }
-[data-whale-report-trendhead] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-[data-whale-report-trendhead] b { font: 700 9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); letter-spacing: .08em; }
-[data-whale-report-trendhead] span { font: 700 12.5px ui-sans-serif, system-ui, sans-serif; color: var(--dt-ink); font-variant-numeric: tabular-nums; }
-[data-whale-report-trendkeys] { font: 400 8.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dt-faint); margin-top: 3px; display: flex; justify-content: space-between; }
+[data-whale-report-trendchart] {
+  position: relative; min-width: 0; padding: 10px 12px 8px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--dt-line);
+}
+[data-whale-report-trendhead] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+[data-whale-report-trendhead] b { font: 700 13px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink); letter-spacing: .02em; }
+[data-whale-report-trendhead] em { font: 700 8.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; font-style: normal; }
+[data-whale-report-trendval] {
+  font: 700 24px/1.2 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink);
+  font-variant-numeric: tabular-nums; margin: 2px 0 6px; display: flex; align-items: baseline; gap: 8px;
+}
+[data-whale-report-trendval] [data-trend-delta] { font: 700 11px ui-monospace, monospace; }
+[data-whale-report-trendval] [data-trend-delta="up"] { color: var(--dt-red); }
+[data-whale-report-trendval] [data-trend-delta="down"] { color: var(--dt-safe, #31765a); }
+[data-whale-report-trendaxis] {
+  display: flex; justify-content: space-between; gap: 2px; margin-top: 5px;
+  font: 400 9px ui-monospace, monospace; color: var(--dt-ink-soft);
+}
+[data-whale-report-trendaxis] span { cursor: default; white-space: nowrap; padding: 1px 3px; }
+[data-whale-report-trendaxis] span[data-live="true"] { color: var(--dt-blue); font-weight: 700; }
+[data-whale-report-trendaxis] span[data-hover="true"] { background: var(--dt-paper-deep); border-radius: 4px; }
+[data-whale-report-trendlive] {
+  font: 700 8px/1.4 ui-monospace, monospace; color: var(--dt-blue);
+  border: 1px solid var(--dt-blue); border-radius: 4px; padding: 0 4px; margin-left: 6px;
+  letter-spacing: .08em; vertical-align: 2px;
+}
+[data-whale-report-trendtip] {
+  position: absolute; z-index: 5; top: 46px; right: 8px; min-width: 150px;
+  background: var(--dt-ink); color: #eef2f7; border-radius: 8px; padding: 8px 10px;
+  font: 400 10.5px/1.7 ui-sans-serif, system-ui, sans-serif; box-shadow: 0 8px 24px rgba(7, 22, 47, .25);
+}
+[data-whale-report-trendtip] b { display: block; font: 700 11px ui-monospace, monospace; color: #fff; }
+[data-whale-report-trendtip] > span { color: #9fb0c8; font: 400 9.5px ui-monospace, monospace; }
+[data-whale-report-trendtip] div { display: flex; justify-content: space-between; gap: 14px; margin-top: 2px; color: #c3cfe0; }
+[data-whale-report-trendtip] div em { font-style: normal; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+[data-whale-report-trendempty] {
+  margin-top: 12px; padding: 22px 0; text-align: center; border-bottom: 1px solid var(--dt-line);
+  color: var(--dt-muted); font: 500 12px ui-sans-serif, system-ui, sans-serif; letter-spacing: .04em;
+}
 
 /* ── Provider Balance：live instrumentation module ── */
 [data-whale-report-balance] {
@@ -1348,6 +1490,17 @@ interface StatsJson {
   secretHits?: { label: string; time: number; source: string; sessionId?: string }[];
   plugins?: string[];
   collab?: { userMessages: number; revisions: number; lateConstraints: number; sessionsWithRevision: number; shortSessions: number };
+  dayHourDetail?: {
+    date: string;
+    hours: {
+      tokens: number;
+      sessions: number;
+      turns: number;
+      toolCalls: number;
+      modelTokens: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
+      cost: number;
+    }[];
+  }[];
   toolHealth?: {
     name: string;
     calls: number;
@@ -1560,117 +1713,186 @@ function SquareRow({ label, cells }: { label: string; cells: { title: string; le
  *   年报 → 每格 1 周（约 52 格一行）
  * 颜色越绿代表事件越多。
  */
+/**
+ * 活跃扫描（v2）：GitHub contribution × hourly heatmap。
+ * nightOf：夜间占比（0–6 点，与报告口径一致）。
+ * 每格 = 1 小时；颜色深浅 = activityLevel(tokens)（固定 log 阈值，跨日可比）；
+ * hover 显示该小时的完整统计（tokens/会话/回合/工具/成本，来自报告聚合，无 hover IO）。
+ */
+const ACTIVITY_LEVEL_COLORS = ["#eef2f5", "#dbe4ff", "#b3c4ff", "#8aa4ff", "#6b87ff", "#4d6bfe"];
+
+/** 夜间占比（0–6 点，与报告口径一致）。 */
+function nightOf(s: StatsJson): number {
+  return s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
+}
+
 function ActivityStrip({ report }: { report: ReportFull }): ReactNode {
   const s = report.stats;
-  const preset = report.preset;
-  const cell = (count: number, max: number, title: string) => ({ title, level: count === 0 ? 0 : count / max });
-
-  // 日报：每格 30 分钟（4 行 × 12 格，每行 6 小时）
-  if (preset === "daily") {
-    const hist = s.halfHourHistogram ?? [];
-    if (hist.length === 0) return <EmptyActivity />;
-    const max = Math.max(1, ...hist);
-    const rows = [
-      { label: "00–06", cells: hist.slice(0, 12) },
-      { label: "06–12", cells: hist.slice(12, 24) },
-      { label: "12–18", cells: hist.slice(24, 36) },
-      { label: "18–24", cells: hist.slice(36, 48) },
-    ];
-    return (
-      <div>
-        {rows.map((row, ri) => (
-          <SquareRow
-            key={row.label}
-            label={row.label}
-            cells={row.cells.map((count, i) => {
-              const halfHour = ri * 360 + i * 30;
-              const h = Math.floor(halfHour / 60);
-              const m = halfHour % 60;
-              return cell(count, max, `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"} · ${count}`);
-            })}
-          />
-        ))}
-        <Legend />
-      </div>
-    );
+  const detail = s.dayHourDetail;
+  // 旧报告（无 hour 级明细）：回退事件计数版（无 tooltip）。
+  if (detail === undefined || detail.length === 0) {
+    return <LegacyActivityStrip report={report} />;
   }
-
-  // 24小时：滚动窗口 → 一行 24 格（每小时一格，跨天不叠加）
-  if (preset === "24h") {
-    const hist = s.hourHistogram ?? [];
-    if (hist.length === 0) return <EmptyActivity />;
-    const max = Math.max(1, ...hist);
-    return (
-      <div>
-        <SquareRow
-          label="24h"
-          cells={hist.map((count, h) => cell(count, max, `${String(h).padStart(2, "0")}:00 · ${count}`))}
-        />
-        <Legend />
-      </div>
-    );
+  const now = new Date();
+  const todayKey = now.toISOString().slice(0, 10);
+  const curHour = now.getHours();
+  const rows = detail.slice(-31);
+  const [hover, setHover] = useState<{ date: string; hour: number } | null>(null);
+  const hovered = hover !== null ? rows.find((r) => r.date === hover.date) : undefined;
+  const hoverCell =
+    hover !== null && hovered !== undefined && hover.hour >= 0 && hover.hour < 24 ? hovered.hours[hover.hour] : undefined;
+  // 右侧 summary（确定性，从 dayHourDetail 聚合，无 hover IO）。
+  let peak: { date: string; hour: number; tokens: number } | null = null;
+  let activeHours = 0;
+  let totalTokens = 0;
+  for (const day of rows) {
+    for (let h = 0; h < 24; h++) {
+      const cell = day.hours[h];
+      totalTokens += cell.tokens;
+      if (cell.tokens > 0) activeHours += 1;
+      if (peak === null || cell.tokens > peak.tokens) {
+        peak = { date: day.date, hour: h, tokens: cell.tokens };
+      }
+    }
   }
-
-  // 周报 / 自定义：每格 1 小时（7 行 × 24 格，每行 1 天）
-  if (preset === "weekly" || preset === "custom") {
-    const series = s.dayHourSeries ?? [];
-    if (series.length === 0) return <EmptyActivity />;
-    const max = Math.max(1, ...series.flatMap((d) => d.hours));
-    const shown = series.slice(-30);
-    return (
-      <div>
-        {shown.map((day) => (
-          <SquareRow
-            key={day.date}
-            label={day.date.slice(5)}
-            cells={day.hours.map((count, h) => cell(count, max, `${day.date} ${String(h).padStart(2, "0")}:00 · ${count}`))}
-          />
-        ))}
-        <Legend />
-      </div>
-    );
-  }
-
-  // 月报：每格 1 天；年报：每格 1 周
-  const series = s.dailySeries ?? [];
-  if (series.length === 0) return <EmptyActivity />;
-  const buckets =
-    preset === "yearly"
-      ? (() => {
-          const weekly: { label: string; count: number }[] = [];
-          const weekMs = 7 * 86400000;
-          for (const day of series) {
-            const t = Date.parse(day.date + "T00:00:00");
-            const weekStart = new Date(Math.floor(t / weekMs) * weekMs);
-            const label = weekStart.toISOString().slice(0, 10);
-            const last = weekly[weekly.length - 1];
-            if (last !== undefined && last.label === label) last.count += day.count;
-            else weekly.push({ label, count: day.count });
-          }
-          return weekly;
-        })()
-      : series.map((d) => ({ label: d.date, count: d.count }));
-  const max = Math.max(1, ...buckets.map((b) => b.count));
-  const perRow = preset === "yearly" ? 13 : 10;
-  const rows: { label: string; items: typeof buckets }[] = [];
-  for (let i = 0; i < buckets.length; i += perRow) {
-    const items = buckets.slice(i, i + perRow);
-    const from = items[0].label.slice(5);
-    const to = items[items.length - 1].label.slice(5);
-    rows.push({ label: preset === "yearly" ? `${items[0].label.slice(0, 4)}月` : `${from}–${to}`, items });
-  }
+  const totalHours = rows.length * 24;
   return (
-    <div>
-      {rows.map((row) => (
-        <SquareRow
-          key={row.label}
-          label={row.label}
-          cells={row.items.map((b) => cell(b.count, max, `${b.label} · ${b.count} 事件`))}
-        />
-      ))}
-      <Legend />
+    <div data-whale-report-heatzone>
+      <div data-whale-report-heatwrap>
+        <div data-whale-report-heatscan>
+          <span>SCAN <b>00—24</b></span>
+          <span>DEPTH <b>4,096M</b></span>
+          <span>PING <b>OK</b></span>
+          <span>NIGHT <b>{nightOf(s)}%</b></span>
+        </div>
+        <div data-whale-report-heataxis>
+          {[0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => (
+            <span
+              key={h}
+              data-align={h === 0 ? "start" : h === 24 ? "end" : "center"}
+              style={{ left: h === 0 ? 0 : h === 24 ? 429 : h * 18 + 7.5 }}
+            >
+              {String(h).padStart(2, "0")}
+            </span>
+          ))}
+        </div>
+        <div data-whale-report-heatrows>
+          {rows.map((day) => {
+            const isToday = day.date === todayKey;
+            return (
+              <div key={day.date} data-whale-report-heatrow>
+                <span data-whale-report-heatdate>
+                  {day.date.slice(5).replace("-", "/")}
+                  {isToday && <em>LIVE</em>}
+                </span>
+                <div data-whale-report-heatcells>
+                  {day.hours.map((cell, h) => {
+                    const level = cell.tokens > 0 ? activityLevelOf(cell.tokens) : 0;
+                    const isCur = isToday && h === curHour;
+                    return (
+                      <i
+                        key={h}
+                        data-level={level}
+                        data-cur={isCur}
+                        onMouseEnter={() => setHover({ date: day.date, hour: h })}
+                        onMouseLeave={() => setHover(null)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {hoverCell !== undefined && hovered !== undefined && hover !== null && (
+          <div data-whale-report-heattip>
+            <b>
+              {hover.date.slice(5).replace("-", "月")}月 · {String(hover.hour).padStart(2, "0")}:00–{String(hover.hour + 1).padStart(2, "0")}:00
+              {hover.date === todayKey && hover.hour === curHour ? " · 当前" : ""}
+            </b>
+            {hoverCell.tokens > 0 ? (
+              <>
+                <div>Tokens <em>{fmt(hoverCell.tokens)}</em></div>
+                <div>会话 <em>{hoverCell.sessions}</em></div>
+                <div>回合 <em>{hoverCell.turns}</em></div>
+                <div>Tool calls <em>{hoverCell.toolCalls}</em></div>
+                {hoverCell.cost > 0 && <div>成本 <em>¥{hoverCell.cost.toFixed(2)}</em></div>}
+              </>
+            ) : (
+              <div data-whale-report-heattip-empty>无活动</div>
+            )}
+          </div>
+        )}
+        <div data-whale-report-heatlegend>
+          <span>少</span>
+          {[0, 1, 2, 3, 4, 5].map((l) => (
+            <i key={l} style={{ background: ACTIVITY_LEVEL_COLORS[l] }} title={l === 0 ? "无活动" : l === 1 ? "低" : l === 2 ? "中低" : l === 3 ? "中" : l === 4 ? "高" : "非常高"} />
+          ))}
+          <span>多</span>
+          <em>基于 Tokens · 固定阈值</em>
+        </div>
+      </div>
+      <div data-whale-report-heatsummary>
+        <div data-whale-report-heatsumhead>
+          <b>活跃摘要</b>
+          <em>ACTIVITY SUMMARY</em>
+        </div>
+        <div data-whale-report-heatsumrow>
+          <span>峰值时段</span>
+          <b>
+            {peak !== null && peak.tokens > 0
+              ? `${peak.date.slice(5).replace("-", "/")} · ${String(peak.hour).padStart(2, "0")}:00–${String(peak.hour + 1).padStart(2, "0")}:00`
+              : "—"}
+          </b>
+        </div>
+        <div data-whale-report-heatsumrow>
+          <span>活跃小时</span>
+          <b>
+            {activeHours} <em>/ {totalHours}</em>
+          </b>
+        </div>
+        <div data-whale-report-heatsumrow>
+          <span>本期 Tokens</span>
+          <b>{fmt(totalTokens)}</b>
+        </div>
+      </div>
     </div>
   );
+}
+
+/** 旧报告回退：事件计数版 heatmap（无 tooltip，无小时明细）。 */
+function LegacyActivityStrip({ report }: { report: ReportFull }): ReactNode {
+  const s = report.stats;
+  const series = s.dayHourSeries ?? [];
+  if (series.length === 0) return <EmptyActivity />;
+  const max = Math.max(1, ...series.flatMap((d) => d.hours));
+  return (
+    <div data-whale-report-heatwrap>
+      <div data-whale-report-heatrows>
+        {series.slice(-31).map((day) => (
+          <div key={day.date} data-whale-report-heatrow>
+            <span data-whale-report-heatdate>{day.date.slice(5).replace("-", "/")}</span>
+            <div data-whale-report-heatcells>
+              {day.hours.map((count, h) => {
+                const level = count === 0 ? 0 : Math.min(5, 1 + Math.floor((count / max) * 5));
+                return <i key={h} data-level={level} title={`${day.date} ${String(h).padStart(2, "0")}:00 · ${count} 事件`} />;
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** activityLevel 的前端版本（与 stats.ts 同阈值；tokens 来自报告聚合）。 */
+function activityLevelOf(tokens: number): number {
+  if (tokens <= 0) return 0;
+  if (tokens >= 80_000_000) return 5;
+  if (tokens >= 30_000_000) return 4;
+  if (tokens >= 10_000_000) return 3;
+  if (tokens >= 1_000_000) return 2;
+  return 1;
 }
 
 
@@ -2382,57 +2604,106 @@ interface TrendPoint {
   cost: number;
   sessions: number;
   totalEvents: number;
+  tokens: { input: number; output: number; cacheRead: number; reasoning: number };
   nightRatio: number;
   cacheHitRate: number;
   dangerCount: number;
   redDanger: number;
   retryBursts: number;
   activeDays: number;
+  from: number;
+  to: number;
   /** 进行中周期（服务端确定性判定）：展示语义，不参与统计。 */
   isCurrent?: boolean;
 }
 
+/** 周期短标签：wk-2026-W33 → W33；day-2026-08-16 → 08/16；mo-2026-06 → 2026-06；yr-2026 → 2026。 */
+export function periodShortLabel(key: string): string {
+  if (key.startsWith("wk-")) {
+    const m = key.match(/W(\d+)$/);
+    return m !== null ? `W${m[1]}` : key.slice(3);
+  }
+  if (key.startsWith("day-")) return key.slice(9, 11) + "/" + key.slice(12, 14);
+  if (key.startsWith("mo-")) return key.slice(3);
+  if (key.startsWith("yr-")) return key.slice(3);
+  return key;
+}
+
+/** 周期日期范围（tooltip）：08/10 – 08/16。 */
+function periodRange(from: number, to: number): string {
+  const d = (ms: number): string => {
+    const x = new Date(ms);
+    return `${String(x.getMonth() + 1).padStart(2, "0")}/${String(x.getDate()).padStart(2, "0")}`;
+  };
+  return `${d(from)} – ${d(to)}`;
+}
+
+/** 完整周期标签（tooltip）：2026-W33。 */
+function periodFullLabel(preset: string, key: string): string {
+  if (preset === "weekly") return key.replace("wk-", "").replace("-W", "-W");
+  if (preset === "daily") return key.slice(4).replace(/-/g, "/");
+  if (preset === "monthly") return key.slice(3);
+  if (preset === "yearly") return key.slice(3);
+  return key;
+}
+
 function TrendChart({
-  label,
-  values,
+  preset,
+  points,
+  metric,
   color,
   unit,
-  keys,
-  liveLast,
+  cnTitle,
+  hoverIndex,
+  onHover,
 }: {
-  label: string;
-  values: number[];
+  preset: string;
+  points: TrendPoint[];
+  metric: (t: TrendPoint) => number;
   color: string;
   unit: string;
-  keys: string[];
-  /** 最后一个点是否为进行中周期（空心 + 虚线连接，不抢眼）。 */
-  liveLast?: boolean;
+  cnTitle: string;
+  hoverIndex: number | null;
+  onHover: (i: number | null) => void;
 }): ReactNode {
   const W = 220;
-  const H = 64;
-  const P = 4;
-  if (values.length < 2) return null;
+  const H = 60;
+  const P = 6;
+  const values = points.map(metric);
+  const liveLast = points[points.length - 1].isCurrent === true;
+  const last = values[values.length - 1];
+  // 当前值 vs 上一完整周期（LIVE 时对比前一个；无 LIVE 时对比上一个点）。
+  const prevComplete = liveLast ? values[values.length - 2] : values[values.length - 2];
+  const delta = prevComplete !== undefined && prevComplete > 0 ? Math.round(((last - prevComplete) / prevComplete) * 100) : null;
   const max = Math.max(...values, 1);
   const min = Math.min(...values);
-  const range = Math.max(max - min, max * 0.2, 1);
+  const range = Math.max(max - min, max * 0.15, 1);
   const pts = values.map((v, i) => {
     const x = P + (i / (values.length - 1)) * (W - P * 2);
-    const y = H - P - ((v - min) / range) * (H - P * 2 - 10);
+    const y = H - P - ((v - min) / range) * (H - P * 2 - 8);
     return [x, y] as const;
   });
-  const last = values[values.length - 1];
   const lastIdx = pts.length - 1;
+  const fmtVal = (v: number): string => (unit === "%" ? `${v}%` : unit === "¥" ? `¥${v.toFixed(2)}` : fmt(v) + unit);
+  const hover = hoverIndex !== null ? points[hoverIndex] : null;
   return (
-    <div data-whale-report-trendchart>
+    <div data-whale-report-trendchart onMouseLeave={() => onHover(null)}>
       <div data-whale-report-trendhead>
-        <b>{label}</b>
-        <span>
-          {fmt(last)}
-          {unit}
-          {liveLast === true && <em data-whale-report-trendlive>LIVE</em>}
-        </span>
+        <b>
+          {cnTitle} <span>{points.length > 0 && unit === "%" ? "夜间活跃" : unit}</span>
+        </b>
+        <em>{unit === "¥" ? "COST" : unit === "%" ? "NIGHT" : cnTitle.toUpperCase()}</em>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`${label} 趋势`}>
+      <div data-whale-report-trendval>
+        {fmtVal(last)}
+        {delta !== null && delta !== 0 && (
+          <span data-trend-delta={delta > 0 ? "up" : "down"}>
+            {delta > 0 ? "↑" : "↓"} {Math.abs(delta)}%
+          </span>
+        )}
+        {liveLast && <em data-whale-report-trendlive>LIVE</em>}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={`${cnTitle} 趋势`}>
         <line x1={P} y1={H - P} x2={W - P} y2={H - P} stroke="var(--dt-line)" strokeWidth="1" />
         {pts.map(([x, y], i) => (
           <g key={i}>
@@ -2444,30 +2715,62 @@ function TrendChart({
                 y2={y}
                 stroke={color}
                 strokeWidth="1.8"
-                strokeDasharray={liveLast === true && i === lastIdx ? "3 3" : undefined}
+                strokeDasharray={liveLast && i === lastIdx ? "3 3" : undefined}
               />
             )}
-            {liveLast === true && i === lastIdx ? (
-              <circle cx={x} cy={y} r="2.6" fill="var(--dt-paper-deep)" stroke={color} strokeWidth="1.4" />
-            ) : (
-              <circle cx={x} cy={y} r="2.4" fill={color} />
-            )}
+            <circle
+              cx={x}
+              cy={y}
+              r={liveLast && i === lastIdx ? 3.2 : hoverIndex === i ? 3.6 : 2.6}
+              fill={liveLast && i === lastIdx ? "var(--dt-paper-deep)" : color}
+              stroke={color}
+              strokeWidth={liveLast && i === lastIdx ? 1.4 : 0}
+              style={{ cursor: "pointer", transition: "r .12s ease" }}
+              onMouseEnter={() => onHover(i)}
+            />
           </g>
         ))}
       </svg>
-      <div data-whale-report-trendkeys>
-        <span>{keys[0]}</span>
-        <span>{liveLast === true ? `${keys[keys.length - 1]} · LIVE` : keys[keys.length - 1]}</span>
+      <div data-whale-report-trendaxis>
+        {points.map((t, i) => (
+          <span key={t.key} data-live={t.isCurrent === true} data-hover={hoverIndex === i} onMouseEnter={() => onHover(i)}>
+            {periodShortLabel(t.key)}
+            {t.isCurrent === true ? " LIVE" : ""}
+          </span>
+        ))}
       </div>
+      {hover !== null && (
+        <div data-whale-report-trendtip>
+          <b>
+            {periodFullLabel(preset, hover.key)}
+            {hover.isCurrent === true ? " · LIVE" : ""}
+          </b>
+          <span>{periodRange(hover.from, hover.to)}{hover.isCurrent === true ? " · 当前进行中" : ""}</span>
+          <div>
+            成本 <em>¥{hover.cost.toFixed(2)}</em>
+          </div>
+          <div>
+            会话 <em>{hover.sessions}</em>
+          </div>
+          <div>
+            Tokens <em>{fmt(hover.tokens.input + hover.tokens.output + hover.tokens.cacheRead + hover.tokens.reasoning)}</em>
+          </div>
+          <div>
+            夜间 <em>{hover.nightRatio}%</em>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function TrendSection({ preset }: { preset: string }): ReactNode {
   const [trends, setTrends] = useState<TrendPoint[] | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
     setTrends(null);
+    setHoverIndex(null);
     fetch(`/whale/api/trends?preset=${encodeURIComponent(preset)}&limit=8`)
       .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; trends: TrendPoint[] }>) : Promise.reject(new Error("HTTP"))))
       .then((json) => {
@@ -2480,18 +2783,28 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
       alive = false;
     };
   }, [preset]);
-  if (trends === null || trends.length < 2) return null;
+  if (trends === null) return null;
+  if (trends.length < 2) {
+    return (
+      <section data-whale-report-section>
+        <SectionHeader index="—" title="历史趋势" meta="HISTORY / TREND" />
+        <div data-whale-report-trendempty>暂无足够历史数据 · 至少需要 2 个周期</div>
+      </section>
+    );
+  }
   const liveCount = trends.filter((t) => t.isCurrent === true).length;
   const completeCount = trends.length - liveCount;
-  const keys = trends.map((t) => t.key.replace(/^(?:day|24h|wk|mo|yr)-/, "").replace(/-W/, "·W"));
-  const liveLast = liveCount > 0;
-  const chart = (
-    label: string,
-    values: number[],
-    color: string,
-    unit: string,
-  ) => (
-    <TrendChart label={label} values={values} color={color} unit={unit} keys={keys} liveLast={liveLast} />
+  const chart = (cnTitle: string, metric: (t: TrendPoint) => number, color: string, unit: string) => (
+    <TrendChart
+      preset={preset}
+      points={trends}
+      metric={metric}
+      color={color}
+      unit={unit}
+      cnTitle={cnTitle}
+      hoverIndex={hoverIndex}
+      onHover={setHoverIndex}
+    />
   );
   return (
     <section data-whale-report-section>
@@ -2501,10 +2814,10 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
         meta={`HISTORY / ${completeCount} COMPLETE${liveCount > 0 ? ` · ${liveCount} LIVE` : ""}`}
       />
       <div data-whale-report-trendgrid>
-        {chart("COST", trends.map((t) => t.cost), "var(--dt-blue)", "")}
-        {chart("SESSIONS", trends.map((t) => t.sessions), "var(--dt-cyan)", "")}
-        {chart("CACHE HIT", trends.map((t) => t.cacheHitRate), "var(--dt-safe, #31765a)", "%")}
-        {chart("NIGHT", trends.map((t) => t.nightRatio), "var(--dt-amber)", "%")}
+        {chart("成本", (t) => t.cost, "var(--dt-blue)", "¥")}
+        {chart("会话", (t) => t.sessions, "var(--dt-cyan)", "")}
+        {chart("缓存命中", (t) => t.cacheHitRate, "var(--dt-safe, #31765a)", "%")}
+        {chart("夜间活跃", (t) => t.nightRatio, "var(--dt-amber)", "%")}
       </div>
     </section>
   );

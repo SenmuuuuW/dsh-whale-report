@@ -219,6 +219,12 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   sessions: record.sessions,
                   turns: record.turns,
                   totalEvents: record.totalEvents,
+                  tokens: {
+                    input: record.tokens?.input ?? 0,
+                    output: record.tokens?.output ?? 0,
+                    cacheRead: record.tokens?.cacheRead ?? 0,
+                    reasoning: record.tokens?.reasoning ?? 0,
+                  },
                   nightRatio: record.nightRatio,
                   cacheHitRate: record.cacheHitRate,
                   dangerCount: record.dangerCount,

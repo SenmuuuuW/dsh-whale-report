@@ -142,6 +142,8 @@ export interface ReportStats {
     collab: CollabSignals;
     /** 工具健康（按工具名聚合；确定性配对 call→result）。 */
     toolHealth: ToolHealth[];
+    /** 小时级活跃明细（tooltip 用；与 dayHourSeries 同日期集）。 */
+    dayHourDetail: HourlyDetail[];
 }
 /** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
 export declare const SECRET_PATTERNS: {
@@ -155,6 +157,30 @@ export interface UserMessageSignals {
     constraint: boolean;
 }
 export declare function userMessageSignals(text: string): UserMessageSignals;
+/** 小时级活跃明细（历史趋势/活跃扫描 tooltip 用；周期聚合阶段准备，无 hover IO）。 */
+export interface HourlyDetail {
+    date: string;
+    hours: {
+        /** input + output + cacheRead + reasoning。 */
+        tokens: number;
+        /** 该小时有事件的会话数。 */
+        sessions: number;
+        turns: number;
+        toolCalls: number;
+        /** 该小时按模型的 token 用量（生成管线据此折算精确费用）。 */
+        modelTokens: Record<string, ModelUsage>;
+        /** 该小时费用（CNY；生成管线按模型单价折算）。 */
+        cost: number;
+    }[];
+}
+/**
+ * 活跃度分级（基于小时 tokens 的固定 log 阈值，全周期可比、跨周可比）：
+ * level 0 无活动；1 低（<1M）；2 中低（1M–10M）；3 中（10M–30M）；
+ * 4 高（30M–80M）；5 非常高（≥80M）。
+ * 阈值由真实周报数据校准（p50≈16.8M、p90≈40.6M、max≈59.7M），
+ * 避免"今天只跑一点点也最深色"的相对归一问题。
+ */
+export declare function activityLevel(tokens: number): number;
 /** 工具健康（Tool Health）：按工具名聚合的确定性统计。 */
 export interface ToolHealth {
     name: string;
@@ -187,6 +213,14 @@ interface ToolHealthAcc {
 export declare function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth;
 /** 全量固化：按名称排序保证确定性（展示层再按关注度排序）。 */
 export declare function finalizeAllToolHealth(accs: Map<string, ToolHealthAcc>): ToolHealth[];
+/** 小时级明细组装：date 分组 → 固定 24 小时数组（空小时补零）。 */
+export declare function assembleHourDetail(raw: Map<string, {
+    tokens: number;
+    turns: number;
+    toolCalls: number;
+    modelTokens: Record<string, ModelUsage>;
+    sessions: Set<string>;
+}>): HourlyDetail[];
 /** 协作信号聚合（报告级）。 */
 export interface CollabSignals {
     /** 用户消息总数。 */

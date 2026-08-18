@@ -123,6 +123,8 @@ export interface ReportStats {
   collab: CollabSignals;
   /** 工具健康（按工具名聚合；确定性配对 call→result）。 */
   toolHealth: ToolHealth[];
+  /** 小时级活跃明细（tooltip 用；与 dayHourSeries 同日期集）。 */
+  dayHourDetail: HourlyDetail[];
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -189,6 +191,39 @@ export function userMessageSignals(text: string): UserMessageSignals {
   };
 }
 
+/** 小时级活跃明细（历史趋势/活跃扫描 tooltip 用；周期聚合阶段准备，无 hover IO）。 */
+export interface HourlyDetail {
+  date: string;
+  hours: {
+    /** input + output + cacheRead + reasoning。 */
+    tokens: number;
+    /** 该小时有事件的会话数。 */
+    sessions: number;
+    turns: number;
+    toolCalls: number;
+    /** 该小时按模型的 token 用量（生成管线据此折算精确费用）。 */
+    modelTokens: Record<string, ModelUsage>;
+    /** 该小时费用（CNY；生成管线按模型单价折算）。 */
+    cost: number;
+  }[];
+}
+
+/**
+ * 活跃度分级（基于小时 tokens 的固定 log 阈值，全周期可比、跨周可比）：
+ * level 0 无活动；1 低（<1M）；2 中低（1M–10M）；3 中（10M–30M）；
+ * 4 高（30M–80M）；5 非常高（≥80M）。
+ * 阈值由真实周报数据校准（p50≈16.8M、p90≈40.6M、max≈59.7M），
+ * 避免"今天只跑一点点也最深色"的相对归一问题。
+ */
+export function activityLevel(tokens: number): number {
+  if (tokens <= 0) return 0;
+  if (tokens >= 80_000_000) return 5;
+  if (tokens >= 30_000_000) return 4;
+  if (tokens >= 10_000_000) return 3;
+  if (tokens >= 1_000_000) return 2;
+  return 1;
+}
+
 /** 工具健康（Tool Health）：按工具名聚合的确定性统计。 */
 export interface ToolHealth {
   name: string;
@@ -250,6 +285,37 @@ export function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth {
 /** 全量固化：按名称排序保证确定性（展示层再按关注度排序）。 */
 export function finalizeAllToolHealth(accs: Map<string, ToolHealthAcc>): ToolHealth[] {
   return [...accs.values()].map(finalizeToolHealth).sort((a, b) => (a.name < b.name ? -1 : 1));
+}
+
+/** 小时级明细组装：date 分组 → 固定 24 小时数组（空小时补零）。 */
+export function assembleHourDetail(
+  raw: Map<string, { tokens: number; turns: number; toolCalls: number; modelTokens: Record<string, ModelUsage>; sessions: Set<string> }>,
+): HourlyDetail[] {
+  const byDate = new Map<string, (HourlyDetail["hours"][number] | undefined)[]>();
+  for (const [key, v] of raw) {
+    const date = key.slice(0, 10);
+    const hour = Number(key.slice(11, 13));
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+    let arr = byDate.get(date);
+    if (arr === undefined) {
+      arr = new Array(24).fill(undefined) as (HourlyDetail["hours"][number] | undefined)[];
+      byDate.set(date, arr);
+    }
+    arr[hour] = {
+      tokens: v.tokens,
+      sessions: v.sessions.size,
+      turns: v.turns,
+      toolCalls: v.toolCalls,
+      modelTokens: { ...v.modelTokens },
+      cost: 0,
+    };
+  }
+  return [...byDate.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, hours]) => ({
+      date,
+      hours: Array.from({ length: 24 }, (_, i) => hours[i] ?? { tokens: 0, sessions: 0, turns: 0, toolCalls: 0, modelTokens: {}, cost: 0 }),
+    }));
 }
 
 /** 错误 code 提取（只存枚举，不存 body）：data.error.code ?? data.error.name。 */
@@ -328,6 +394,7 @@ export function emptyStats(period: Period): ReportStats {
     sessionsDetail: [],
     collab: { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 },
     toolHealth: [],
+    dayHourDetail: [],
   };
 }
 
@@ -452,6 +519,14 @@ export function aggregate(
   const toolPending = new Map<string, { name: string; time: number }>();
   const toolHealthAcc = new Map<string, ToolHealthAcc>();
   const dayHourMap = new Map<string, number[]>();
+  // 小时级明细（tooltip 用）：date+T+hour → 统计。
+  const hourDetail = new Map<string, {
+    tokens: number;
+    turns: number;
+    toolCalls: number;
+    modelTokens: Record<string, ModelUsage>;
+    sessions: Set<string>;
+  }>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
   const burstStart = new Map<string, number>();
@@ -516,6 +591,16 @@ export function aggregate(
     const data = event.data as Record<string, unknown> | undefined;
     const sessionId = (data?.sessionId as string) ?? lastHeader?.id ?? "unknown";
     seenSessions.add(sessionId);
+    // 小时级明细：任何事件都标记该小时活跃会话。
+    {
+      const hkey = `${day}T${String(hour).padStart(2, "0")}`;
+      let hd = hourDetail.get(hkey);
+      if (hd === undefined) {
+        hd = { tokens: 0, turns: 0, toolCalls: 0, modelTokens: {}, sessions: new Set() };
+        hourDetail.set(hkey, hd);
+      }
+      hd.sessions.add(sessionId);
+    }
     const agg = aggOf(sessionId, event.time);
     agg.events += 1;
     agg.firstTime = Math.min(agg.firstTime, event.time);
@@ -525,6 +610,11 @@ export function aggregate(
       case "turn/start":
         stats.turns += 1;
         aggOf(sessionId, event.time).turns += 1;
+        {
+          const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+          const hd = hourDetail.get(hkey);
+          if (hd !== undefined) hd.turns += 1;
+        }
         break;
       case "step/start":
         stats.steps += 1;
@@ -556,6 +646,19 @@ export function aggregate(
         stats.assistantMessages += 1;
         const usage = usageOf(data);
         if (usage) {
+          {
+            const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+            const hd = hourDetail.get(hkey);
+            if (hd !== undefined) {
+              hd.tokens += (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.reasoning ?? 0);
+              const model = currentModel.get(sessionId) ?? "unknown";
+              const m = (hd.modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+              m.input += usage.input ?? 0;
+              m.output += usage.output ?? 0;
+              m.cacheRead += usage.cacheRead ?? 0;
+              m.reasoning += usage.reasoning ?? 0;
+            }
+          }
           stats.tokens.input += usage.input ?? 0;
           stats.tokens.output += usage.output ?? 0;
           stats.tokens.cacheRead += usage.cacheRead ?? 0;
@@ -591,6 +694,11 @@ export function aggregate(
         aggOf(sessionId, event.time).toolCalls += 1;
         const name = typeof data?.name === "string" ? data.name : "(unknown)";
         stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + 1;
+        {
+          const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+          const hd = hourDetail.get(hkey);
+          if (hd !== undefined) hd.toolCalls += 1;
+        }
         // 工具健康：记录 pending（callId → 元信息），结果到达时配对。
         {
           const callId = (data as Record<string, unknown>)?.callId;
@@ -722,6 +830,7 @@ export function aggregate(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  stats.dayHourDetail = assembleHourDetail(hourDetail);
   let sessionsWithRevision = 0;
   let shortSessions = 0;
   for (const [sid, a] of sessionAgg) {
@@ -1083,6 +1192,14 @@ export function aggregateBuckets(
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
   const dayHourMap = new Map<string, number[]>();
+  // 小时级明细（tooltip 用）：date+T+hour → 统计。
+  const hourAgg = new Map<string, {
+    tokens: number;
+    turns: number;
+    toolCalls: number;
+    modelTokens: Record<string, ModelUsage>;
+    sessions: Set<string>;
+  }>();
   const lastCommand = new Map<string, string>();
   const commandStreak = new Map<string, number>();
   const burstStart = new Map<string, number>();
@@ -1172,6 +1289,27 @@ export function aggregateBuckets(
       stats.retryBursts += bucket.retryBursts ?? 0;
       stats.collab.revisions += bucket.collab?.revisions ?? 0;
       stats.collab.lateConstraints += bucket.collab?.lateConstraints ?? 0;
+      // 小时级明细：与统计同口径（边界裁剪后），按 10 分钟桶聚合到小时。
+      {
+        const bd = new Date(bucket.h);
+        const hkey = `${bd.toISOString().slice(0, 10)}T${String(bd.getHours()).padStart(2, "0")}`;
+        let hd = hourAgg.get(hkey);
+        if (hd === undefined) {
+          hd = { tokens: 0, turns: 0, toolCalls: 0, modelTokens: {}, sessions: new Set() };
+          hourAgg.set(hkey, hd);
+        }
+        hd.tokens += (bucket.input ?? 0) + (bucket.output ?? 0) + (bucket.cacheRead ?? 0) + (bucket.reasoning ?? 0);
+        hd.turns += bucket.turns ?? 0;
+        hd.toolCalls += bucket.toolCallsTotal ?? 0;
+        hd.sessions.add(view.sessionId);
+        for (const [model, usage] of Object.entries(bucket.modelUsage ?? {})) {
+          const m = (hd.modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          m.input += usage.input;
+          m.output += usage.output;
+          m.cacheRead += usage.cacheRead;
+          m.reasoning += usage.reasoning;
+        }
+      }
       for (const sample of bucket.burstSamples ?? []) {
         if (stats.burstSamples.length < 10) stats.burstSamples.push(sample);
       }
@@ -1235,6 +1373,7 @@ export function aggregateBuckets(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
+  stats.dayHourDetail = assembleHourDetail(hourAgg);
   stats.toolHealth = finalizeAllToolHealth(toolHealthMerged);
 
   let sessionsWithRevision = 0;

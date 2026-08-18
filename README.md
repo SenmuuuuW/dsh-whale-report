@@ -88,13 +88,14 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 | **Cost** | 按官方定价页实时价计算（6h 缓存，内置价兜底），按模型与按会话分账 |
 | **Tokens** | input / output / cache read / reasoning，按模型拆分 |
 | **Sessions** | 会话数、回合数、事件数、活跃天数、最忙日 |
-| **Activity** | 24h 小时分布 + 半小时分布 + 按天序列；夜猫指数（0–6 点占比） |
+| **Activity** | 小时级活跃热力图（GitHub contribution 风格，基于 Tokens 的固定 log 阈值分级）；hover 显示每小时 Tokens / 会话 / 回合 / 工具 / 成本；峰值时段、活跃小时、夜猫指数 |
 | **Tool calls** | 工具调用总量与明细，按工具族归类 |
 | **Retry bursts** | 同一命令连续重复 ≥3 次，附错误摘要样本 |
 | **Dangerous operations** | 红级（不可逆破坏）/ 黄级（需留意）分级，只对命令首行匹配 |
 | **Secret scan** | 6 类常见密钥模式的存在性检测，**只报有无，不存原文** |
 | **Session drilldown** | 按费用排序的会话轨迹：成本、重试、危险信号、模型 token 归因 |
 | **Baseline** | 每周期自动落库，报告带"较上周期 ▲/▼"（费用、会话、缓存命中率等） |
+| **Trends** | 多周期趋势曲线（成本 / 会话 / 缓存命中 / 夜间活跃），hover 显示每周期明细与日期范围，进行中周期标记 LIVE（不与完整周期混比） |
 | **Provider balance** | 模型平台实时余额（DeepSeek 已支持，可扩展）；key 只在本机服务端使用 |
 
 ## Deterministic insights
@@ -205,7 +206,6 @@ pnpm build      # tsc + tsdown（客户端单文件 bundle）
 当前边界，如实说明：
 
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
-- **历史趋势**：当前支持"较上一周期"对比，尚无跨多周期的趋势曲线
 - **费用为估算**：按官方定价页实时价计算，以平台账单为准
 
 ## License

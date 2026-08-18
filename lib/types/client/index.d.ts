@@ -121,6 +121,22 @@ interface StatsJson {
         sessionsWithRevision: number;
         shortSessions: number;
     };
+    dayHourDetail?: {
+        date: string;
+        hours: {
+            tokens: number;
+            sessions: number;
+            turns: number;
+            toolCalls: number;
+            modelTokens: Record<string, {
+                input: number;
+                output: number;
+                cacheRead: number;
+                reasoning: number;
+            }>;
+            cost: number;
+        }[];
+    }[];
     toolHealth?: {
         name: string;
         calls: number;
@@ -160,6 +176,8 @@ export declare function sortToolHealth(health: NonNullable<StatsJson["toolHealth
     tool: NonNullable<StatsJson["toolHealth"]>[number];
     abnormal: boolean;
 }[];
+/** 周期短标签：wk-2026-W33 → W33；day-2026-08-16 → 08/16；mo-2026-06 → 2026-06；yr-2026 → 2026。 */
+export declare function periodShortLabel(key: string): string;
 /**
  * 长图导出：canvas 按面板报告同款视觉逐块绘制完整内容（零依赖、无 canvas 污染问题）。
  * - 内容与报告一致：报告头/鲸评/Findings/活跃+Token/模型与工具/风险扫描/会话轨迹/会话索引/页脚；
