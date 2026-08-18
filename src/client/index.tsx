@@ -1007,6 +1007,33 @@ const CSS = `
   pointer-events: none; z-index: 1;
 }
 
+/* ── 当前价格时段（峰谷）── */
+[data-whale-report-price] {
+  margin: 0 0 14px; padding: 10px 14px 9px;
+  border: 1px solid var(--dt-line); border-radius: 10px;
+  background: var(--dt-paper-deep); position: relative;
+}
+[data-whale-report-pricehead] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+[data-whale-report-pricecode] { font: 700 9.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; }
+[data-whale-report-priceperiod] {
+  font: 700 10px ui-monospace, monospace; font-style: normal; letter-spacing: .06em;
+  color: var(--dt-safe, #31765a);
+}
+[data-whale-report-price][data-period="peak"] [data-whale-report-priceperiod] { color: var(--dt-amber); }
+[data-whale-report-priceval] {
+  display: flex; align-items: baseline; gap: 10px; margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+[data-whale-report-priceval] b { font: 700 22px/1.2 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink); }
+[data-whale-report-priceval] span { font: 400 9.5px ui-monospace, monospace; color: var(--dt-muted); }
+[data-whale-report-pricedetail] { font: 400 9px ui-monospace, monospace; color: var(--dt-faint); margin-top: 3px; letter-spacing: .04em; }
+[data-whale-report-pricenotice] {
+  margin-top: 7px; padding: 6px 9px; border-radius: 6px;
+  background: rgba(77, 107, 254, .08); border: 1px solid rgba(77, 107, 254, .25);
+  color: var(--dt-ink-soft); font: 600 10px ui-sans-serif, system-ui, "PingFang SC", sans-serif;
+  animation: dt-reveal .25s ease-out both;
+}
+
 /* ── 当前会话消耗（live session meter）── */
 [data-whale-report-live] {
   margin: 0 0 14px; padding: 10px 14px 9px;
@@ -2274,7 +2301,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
             {typeof report.cost?.total === "number" && report.cost.total > 0 && (
               <div data-whale-report-tokenline style={{ marginTop: 10 }}>
                 预估合计 <b>¥{report.cost.total.toFixed(2)}</b>
-                <span className="muted"> · {report.cost.source === "official-page" ? "官方定价页实时价" : "内置价"} · 以平台账单为准</span>
+                <span className="muted"> · {report.cost.source === "official-page" ? "官方定价页实时价" : report.cost.source === "peak-offpeak" ? "官方峰谷价（按时段）" : "内置价"} · 以平台账单为准</span>
               </div>
             )}
           </div>
@@ -2851,6 +2878,57 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
   );
 }
 
+/** 峰谷时段判定（前端版；与 pricing.ts 同口径：北京时间 9–12、14–18 高峰）。 */
+function isPeakNow(ms: number): boolean {
+  const cstHour = (new Date(ms).getUTCHours() + 8) % 24;
+  return (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
+}
+
+/** 当前价格时段 + 时段切换提醒（每分钟检查）。 */
+const PEAK_PRO_OUTPUT = 27.0;
+const OFFPEAK_PRO_OUTPUT = 13.5;
+
+function PricePeriodCard(): ReactNode {
+  const [period, setPeriod] = useState<"peak" | "offpeak">(isPeakNow(Date.now()) ? "peak" : "offpeak");
+  const [noticed, setNoticed] = useState(false);
+  useEffect(() => {
+    const initial: "peak" | "offpeak" = isPeakNow(Date.now()) ? "peak" : "offpeak";
+    let prev = initial;
+    setPeriod(initial);
+    const timer = window.setInterval(() => {
+      const cur = isPeakNow(Date.now()) ? "peak" : "offpeak";
+      if (cur !== prev) {
+        setPeriod(cur);
+        setNoticed(true);
+        window.setTimeout(() => setNoticed(false), 5000);
+      }
+      prev = cur;
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const peak = period === "peak";
+  return (
+    <div data-whale-report-price data-period={period}>
+      <div data-whale-report-pricehead>
+        <span data-whale-report-pricecode>CURRENT RATE / 当前价格</span>
+        <em data-whale-report-priceperiod>{peak ? "高峰时段 · PEAK" : "空闲时段 · OFF-PEAK"}</em>
+      </div>
+      <div data-whale-report-priceval>
+        <b>{peak ? "¥27.0" : "¥13.5"}</b>
+        <span>V4 Pro 输出 / 百万 token</span>
+      </div>
+      <div data-whale-report-pricedetail>
+        高峰 9:00–12:00 · 14:00–18:00（北京时间）· 空闲半价
+      </div>
+      {noticed && (
+        <div data-whale-report-pricenotice>
+          {peak ? "已进入高峰时段，输出价 ¥27.0/百万 token" : "已切换到空闲时段，输出价 ¥13.5/百万 token"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 当前会话消耗（live session meter）：30s 轮询，实时聚合 live 会话。 */
 interface LiveSessionJson {
   sessionId: string;
@@ -3141,6 +3219,7 @@ function Dashboard(props: {
       )}
 
       <ProviderBalanceCard />
+      <PricePeriodCard />
       <LiveSessionCard />
 
       {loading && (

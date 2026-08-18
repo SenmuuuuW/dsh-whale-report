@@ -26,7 +26,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { periodKey } from "./insights.js";
-import { computeCost } from "./pricing.js";
+import { computeCostTimed } from "./pricing.js";
 import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
 import { adapterOf, queryBalance } from "./balance.js";
 
@@ -251,7 +251,8 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   const snapshot = await svc.sessionQuery.readSession(rec.header.id);
                   const summary = summarizeSessionEvents(rec.header.id, snapshot.events);
                   if (summary.totalTokens === 0 && summary.turns === 0 && summary.toolCalls === 0) continue;
-                  const cost = await computeCost(summary.modelTokens);
+                  // 峰谷计价：按小时的模型用量 × 该时段价格。
+                  const cost = computeCostTimed(summary.hourModelTokens);
                   results.push({
                     sessionId: summary.sessionId,
                     title: summary.title,
@@ -260,7 +261,8 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                     tokens: summary.tokens,
                     totalTokens: summary.totalTokens,
                     cost: cost.total,
-                    costSource: cost.source,
+                    costSource: "peak-offpeak",
+                    peakShare: cost.peakShare,
                     lastTime: summary.lastTime,
                   });
                 } catch {

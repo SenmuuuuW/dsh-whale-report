@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { aggregate, aggregateBuckets, bucketizeOwnEvents, activityLevel, summarizeSessionEvents, type RawEvent } from "../src/stats.js";
+import { isPeakHourCST, computeCostTimed, PEAK_PRICES, OFFPEAK_PRICES } from "../src/pricing.js";
 import { periodShortLabel } from "../src/client/index.js";
 
 function ev(type: string, time: number, data: Record<string, unknown> = {}): RawEvent {
@@ -112,5 +113,44 @@ describe("summarizeSessionEvents（当前会话消耗）", () => {
     expect(s.totalTokens).toBe(0);
     expect(s.turns).toBe(1);
     expect(s.toolCalls).toBe(0);
+  });
+});
+
+describe("峰谷定价", () => {
+  it("isPeakHourCST 边界：9:00 高峰 / 12:00 空闲 / 14:00 高峰 / 18:00 空闲（北京时间）", () => {
+    const at = (cstHour: number, minute = 0): number => {
+      // 构造一个 UTC 时刻，其北京时间 = cstHour
+      const d = new Date(Date.UTC(2026, 7, 18, (cstHour - 8 + 24) % 24, minute));
+      return d.getTime();
+    };
+    expect(isPeakHourCST(at(8, 59))).toBe(false);
+    expect(isPeakHourCST(at(9, 0))).toBe(true);
+    expect(isPeakHourCST(at(11, 59))).toBe(true);
+    expect(isPeakHourCST(at(12, 0))).toBe(false);
+    expect(isPeakHourCST(at(13, 59))).toBe(false);
+    expect(isPeakHourCST(at(14, 0))).toBe(true);
+    expect(isPeakHourCST(at(17, 59))).toBe(true);
+    expect(isPeakHourCST(at(18, 0))).toBe(false);
+    expect(isPeakHourCST(at(2, 0))).toBe(false);
+  });
+
+  it("computeCostTimed：高峰小时按高峰价、空闲小时按空闲价", () => {
+    const usage = { input: 1_000_000, output: 500_000, cacheRead: 0, reasoning: 0 };
+    const r = computeCostTimed([
+      { hour: 10, modelTokens: { "deepseek-v4-pro": usage } }, // 高峰
+      { hour: 3, modelTokens: { "deepseek-v4-pro": usage } },  // 空闲
+    ]);
+    // 高峰 pro：miss 1M×9 + output 0.5M×27 = 22.5
+    // 空闲 pro：miss 1M×4.5 + output 0.5M×13.5 = 11.25
+    expect(r.total).toBeCloseTo(33.75, 6);
+    expect(r.peakShare).toBeCloseTo(22.5, 6);
+    expect(r.peakRatio).toBeCloseTo(0.5, 6);
+  });
+
+  it("内置峰谷价数值与官方一致", () => {
+    expect(PEAK_PRICES.pro.outputPerMillion).toBe(27.0);
+    expect(OFFPEAK_PRICES.pro.outputPerMillion).toBe(13.5);
+    expect(PEAK_PRICES.flash.outputPerMillion).toBe(9.0);
+    expect(OFFPEAK_PRICES.flash.outputPerMillion).toBe(4.5);
   });
 });

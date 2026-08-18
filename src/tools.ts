@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
-import { computeCost, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, type CostBreakdown } from "./pricing.js";
+import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, isPeakHourCST, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
@@ -220,26 +220,47 @@ export async function generateReportData(
   range: { from: number; to: number },
 ): Promise<ReportGeneration> {
   const stats = await collectEvents(svc, range);
-  const cost = await computeCost(stats.models);
-  // 会话钻取：按会话的按模型 token 折算费用，排序取前 20。
-  const { prices } = await getPrices();
+  // 峰谷计价：按 dayHourDetail 的每小时模型用量 × 该时段价格分段累加。
+  // 旧报告/无小时明细时回退 computeCost 总量估算。
+  let cost: CostBreakdown;
+  let peakRatio: number | undefined;
+  if (stats.dayHourDetail.length > 0) {
+    const timed = computeCostTimed(
+      stats.dayHourDetail.flatMap((day) => day.hours.map((h, hour) => ({ hour, modelTokens: h.modelTokens }))),
+    );
+    peakRatio = timed.peakRatio;
+    cost = {
+      perModel: timed.perModel,
+      total: timed.total,
+      currency: "CNY",
+      source: "peak-offpeak",
+      fetchedAt: Date.now(),
+      peakRatio,
+    };
+  } else {
+    cost = await computeCost(stats.models);
+  }
+  // 会话钻取与小时级费用统一按官方峰谷价折算：
+  // - sessionsDetail：按空闲价基准（确定性，会话跨时段无法精确拆分，排名用途一致即可）
+  // - dayHourDetail.hours[].cost：按该小时所属时段（高峰/空闲）精确计价
   for (const detail of stats.sessionsDetail) {
     let total = 0;
     for (const [model, usage] of Object.entries(detail.modelTokens)) {
       const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
-      const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : prices;
+      const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : OFFPEAK_PRICES;
       total += modelCost(usage, priceSet[modelTier(model)]);
     }
     detail.cost = total;
   }
-  // 小时级明细费用：按小时 × 模型 token × 单价折算（与 sessionsDetail 同口径）。
   for (const day of stats.dayHourDetail) {
-    for (const h of day.hours) {
+    for (let hour = 0; hour < 24; hour++) {
+      const h = day.hours[hour];
+      const priceSet = isPeakHourCST(hour * 3600_000) ? PEAK_PRICES : OFFPEAK_PRICES;
       let hourCost = 0;
       for (const [model, usage] of Object.entries(h.modelTokens)) {
         const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
-        const priceSet = provider === "opencode-go" ? OPENCODE_GO_PRICES : prices;
-        hourCost += modelCost(usage, priceSet[modelTier(model)]);
+        const ps = provider === "opencode-go" ? OPENCODE_GO_PRICES : priceSet;
+        hourCost += modelCost(usage, ps[modelTier(model)]);
       }
       h.cost = hourCost;
     }

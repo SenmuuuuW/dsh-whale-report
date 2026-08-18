@@ -19,7 +19,37 @@ export interface Prices {
 }
 export declare const PRICING_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/";
 /** 内置回退价（官方当前价，CNY / 1M）。 */
+/**
+ * DeepSeek 官方峰谷价（2026-08-17 起，CNY / 1M token）。
+ * 高峰时段（北京时间 9:00–12:00、14:00–18:00）价格为空闲时段两倍。
+ */
+export declare const PEAK_PRICES: Record<"flash" | "pro", Prices>;
+export declare const OFFPEAK_PRICES: Record<"flash" | "pro", Prices>;
+/** 旧内置价（峰谷定价前，仅历史兼容参考）。 */
 export declare const BUILTIN_PRICES: Record<"flash" | "pro", Prices>;
+/**
+ * 高峰时段判定：北京时间（UTC+8）9:00–12:00、14:00–18:00。
+ * 确定性纯函数；输入为 epoch ms 或本地小时。
+ */
+export declare function isPeakHourCST(ms: number): boolean;
+/** 当前时刻价格（峰/谷）。 */
+export declare function pricesForTime(ms: number): Record<"flash" | "pro", Prices>;
+/**
+ * 按时段分段计价：输入 小时 → 模型用量，按各自时段价格累加。
+ * 返回 perModel 费用（确定性）与时段统计。
+ */
+export interface TimedCostResult {
+    perModel: Record<string, number>;
+    total: number;
+    /** 高峰时段费用（估算口径展示用）。 */
+    peakShare: number;
+    /** 高峰 token 占比（0..1）。 */
+    peakRatio: number;
+}
+export declare function computeCostTimed(perHourModelTokens: {
+    hour: number;
+    modelTokens: Record<string, ModelUsage>;
+}[]): TimedCostResult;
 /**
  * opencode-go 订阅的计价（CNY / 1M token）。
  * 默认先用 DeepSeek 官方价作为估算；可通过环境变量覆盖为订阅实际单价：
@@ -36,8 +66,11 @@ export interface CostBreakdown {
     perModel: Record<string, number>;
     total: number;
     currency: string;
-    source: "official-page" | "builtin";
+    /** official-page = 官方页实时抓取；builtin = 内置价；peak-offpeak = 官方峰谷价分段计算。 */
+    source: "official-page" | "builtin" | "peak-offpeak";
     fetchedAt: number;
+    /** 高峰时段 token 占比（峰谷计价时提供）。 */
+    peakRatio?: number;
 }
 export declare const PRICING_TTL_MS: number;
 /** 取价格（6 小时缓存；失败回退内置价）。 */

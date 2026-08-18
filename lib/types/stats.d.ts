@@ -244,6 +244,11 @@ export interface LiveSessionSummary {
     totalTokens: number;
     /** 按模型的 token 用量（费用折算用）。 */
     modelTokens: Record<string, ModelUsage>;
+    /** 按小时的模型用量（峰谷计价用；hour 为本地小时）。 */
+    hourModelTokens: {
+        hour: number;
+        modelTokens: Record<string, ModelUsage>;
+    }[];
     /** 最后事件时间。 */
     lastTime: number;
 }

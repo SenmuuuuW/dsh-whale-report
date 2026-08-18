@@ -22,10 +22,80 @@ export interface Prices {
 export const PRICING_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/";
 
 /** 内置回退价（官方当前价，CNY / 1M）。 */
+/**
+ * DeepSeek 官方峰谷价（2026-08-17 起，CNY / 1M token）。
+ * 高峰时段（北京时间 9:00–12:00、14:00–18:00）价格为空闲时段两倍。
+ */
+export const PEAK_PRICES: Record<"flash" | "pro", Prices> = {
+  flash: { cacheReadPerMillion: 0.1, inputPerMillion: 3.0, outputPerMillion: 9.0 },
+  pro: { cacheReadPerMillion: 0.3, inputPerMillion: 9.0, outputPerMillion: 27.0 },
+};
+export const OFFPEAK_PRICES: Record<"flash" | "pro", Prices> = {
+  flash: { cacheReadPerMillion: 0.05, inputPerMillion: 1.5, outputPerMillion: 4.5 },
+  pro: { cacheReadPerMillion: 0.15, inputPerMillion: 4.5, outputPerMillion: 13.5 },
+};
+/** 旧内置价（峰谷定价前，仅历史兼容参考）。 */
 export const BUILTIN_PRICES: Record<"flash" | "pro", Prices> = {
   flash: { cacheReadPerMillion: 0.02, inputPerMillion: 1, outputPerMillion: 2 },
   pro: { cacheReadPerMillion: 0.025, inputPerMillion: 3, outputPerMillion: 6 },
 };
+
+/**
+ * 高峰时段判定：北京时间（UTC+8）9:00–12:00、14:00–18:00。
+ * 确定性纯函数；输入为 epoch ms 或本地小时。
+ */
+export function isPeakHourCST(ms: number): boolean {
+  // 北京时间 = UTC + 8
+  const cstHour = (new Date(ms).getUTCHours() + 8) % 24;
+  return (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
+}
+
+/** 当前时刻价格（峰/谷）。 */
+export function pricesForTime(ms: number): Record<"flash" | "pro", Prices> {
+  return isPeakHourCST(ms) ? PEAK_PRICES : OFFPEAK_PRICES;
+}
+
+/**
+ * 按时段分段计价：输入 小时 → 模型用量，按各自时段价格累加。
+ * 返回 perModel 费用（确定性）与时段统计。
+ */
+export interface TimedCostResult {
+  perModel: Record<string, number>;
+  total: number;
+  /** 高峰时段费用（估算口径展示用）。 */
+  peakShare: number;
+  /** 高峰 token 占比（0..1）。 */
+  peakRatio: number;
+}
+
+export function computeCostTimed(
+  perHourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[],
+): TimedCostResult {
+  const perModel: Record<string, number> = {};
+  let total = 0;
+  let peakCost = 0;
+  let peakTokens = 0;
+  let allTokens = 0;
+  for (const { hour, modelTokens } of perHourModelTokens) {
+    // hour 为本地小时；峰谷按北京时间（UTC+8）判定——本地为 UTC+8 时一致。
+    const priceSet = isPeakHourCST(hour * 3600_000) ? PEAK_PRICES : OFFPEAK_PRICES;
+    for (const [model, usage] of Object.entries(modelTokens)) {
+      const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
+      const tier = modelTier(model);
+      const prices = provider === "opencode-go" ? OPENCODE_GO_PRICES : priceSet;
+      const cost = modelCost(usage, prices[tier]);
+      perModel[model] = (perModel[model] ?? 0) + cost;
+      total += cost;
+      const tokens = usage.input + usage.output + usage.cacheRead + usage.reasoning;
+      allTokens += tokens;
+      if (priceSet === PEAK_PRICES) {
+        peakCost += cost;
+        peakTokens += tokens;
+      }
+    }
+  }
+  return { perModel, total, peakShare: peakCost, peakRatio: allTokens > 0 ? peakTokens / allTokens : 0 };
+}
 
 /**
  * opencode-go 订阅的计价（CNY / 1M token）。
@@ -65,8 +135,11 @@ export interface CostBreakdown {
   perModel: Record<string, number>;
   total: number;
   currency: string;
-  source: "official-page" | "builtin";
+  /** official-page = 官方页实时抓取；builtin = 内置价；peak-offpeak = 官方峰谷价分段计算。 */
+  source: "official-page" | "builtin" | "peak-offpeak";
   fetchedAt: number;
+  /** 高峰时段 token 占比（峰谷计价时提供）。 */
+  peakRatio?: number;
 }
 
 /** 缓存的价格快照 + 过期时间。 */

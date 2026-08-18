@@ -353,6 +353,8 @@ export interface LiveSessionSummary {
   totalTokens: number;
   /** 按模型的 token 用量（费用折算用）。 */
   modelTokens: Record<string, ModelUsage>;
+  /** 按小时的模型用量（峰谷计价用；hour 为本地小时）。 */
+  hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[];
   /** 最后事件时间。 */
   lastTime: number;
 }
@@ -364,6 +366,7 @@ export function summarizeSessionEvents(
 ): LiveSessionSummary {
   const tokens: TokenTotals = { input: 0, output: 0, cacheRead: 0, reasoning: 0 };
   const modelTokens: Record<string, ModelUsage> = {};
+  const hourMap = new Map<number, Record<string, ModelUsage>>();
   const summary: LiveSessionSummary = {
     sessionId,
     title: "",
@@ -372,6 +375,7 @@ export function summarizeSessionEvents(
     tokens,
     totalTokens: 0,
     modelTokens,
+    hourModelTokens: [],
     lastTime: 0,
   };
   for (const event of events) {
@@ -399,6 +403,15 @@ export function summarizeSessionEvents(
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
+          // 按小时分段（峰谷计价）：hour 为本地小时。
+          const hour = new Date(event.time).getHours();
+          let hm = hourMap.get(hour);
+          if (hm === undefined) { hm = {}; hourMap.set(hour, hm); }
+          const hm2 = (hm[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          hm2.input += usage.input ?? 0;
+          hm2.output += usage.output ?? 0;
+          hm2.cacheRead += usage.cacheRead ?? 0;
+          hm2.reasoning += usage.reasoning ?? 0;
         }
         break;
       }
@@ -412,6 +425,9 @@ export function summarizeSessionEvents(
     }
   }
   summary.totalTokens = summary.tokens.input + summary.tokens.output + summary.tokens.cacheRead + summary.tokens.reasoning;
+  summary.hourModelTokens = [...hourMap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([hour, modelTokens]) => ({ hour, modelTokens }));
   return summary;
 }
 
