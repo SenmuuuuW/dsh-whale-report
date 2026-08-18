@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [Unreleased]
+
+### 兼容性
+- 依赖升级到 DSH **0.1.0-rc.7**：peerDependencies 全部 @deepseek-ai/* ^0.1.0-rc.7，
+  devDependencies 锁定 rc.7 类型（与 DSH Desktop Community Market 的 rc.7 兼容边界对齐）
+- rc.7 下实测：typecheck / 128 tests / build 全绿；全部功能（余额 / 协作复盘 /
+  工具健康 / 历史趋势 / 活跃扫描）在 rc.7 运行时环境验证通过
+- 既有 webServer/httpServer 双惰性注入与 SessionQuery 结构化类型兼容策略保持有效
+
 ## [0.4.0] - 2026-08-16
 
 ### 新增
