@@ -21,6 +21,7 @@ const SUMMARY_FRESHNESS_MS = 5 * 60 * 1000;
 import type { ReportStats } from "./stats.js";
 import { renderReport, presetRange, type ReportPreset } from "./report.js";
 import { renderHtmlReport } from "./html.js";
+import { summarizeSessionEvents } from "./stats.js";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,6 +239,35 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 .sort((a, b) => (a.key < b.key ? -1 : 1))
                 .slice(-limit);
               writeJson(res, 200, { ok: true, trends: rows });
+              return;
+            }
+            if (req.method === "GET" && method === "live-session") {
+              // 当前会话消耗：读 live 会话事件实时聚合（轻量，不落库）。
+              const sessions = await svc.sessionQuery.listSessions();
+              const live = sessions.filter((r) => r.live === true);
+              const results = [];
+              for (const rec of live.slice(0, 5)) {
+                try {
+                  const snapshot = await svc.sessionQuery.readSession(rec.header.id);
+                  const summary = summarizeSessionEvents(rec.header.id, snapshot.events);
+                  if (summary.totalTokens === 0 && summary.turns === 0 && summary.toolCalls === 0) continue;
+                  const cost = await computeCost(summary.modelTokens);
+                  results.push({
+                    sessionId: summary.sessionId,
+                    title: summary.title,
+                    turns: summary.turns,
+                    toolCalls: summary.toolCalls,
+                    tokens: summary.tokens,
+                    totalTokens: summary.totalTokens,
+                    cost: cost.total,
+                    costSource: cost.source,
+                    lastTime: summary.lastTime,
+                  });
+                } catch {
+                  // 单个会话读取失败不影响其余
+                }
+              }
+              writeJson(res, 200, { ok: true, sessions: results });
               return;
             }
             if (req.method === "GET" && method === "balance") {

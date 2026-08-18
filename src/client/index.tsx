@@ -1007,6 +1007,34 @@ const CSS = `
   pointer-events: none; z-index: 1;
 }
 
+/* ── 当前会话消耗（live session meter）── */
+[data-whale-report-live] {
+  margin: 0 0 14px; padding: 10px 14px 9px;
+  border: 1px solid var(--dt-line); border-radius: 10px;
+  background: var(--dt-paper-deep);
+}
+[data-whale-report-livehead] { display: flex; justify-content: space-between; align-items: center; }
+[data-whale-report-livecode] { font: 700 9.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; }
+[data-whale-report-livepulse] {
+  font-style: normal; color: var(--dt-safe, #31765a); font-size: 9px;
+  animation: dt-breathe 2.4s ease-in-out infinite;
+}
+[data-whale-report-livetitle] {
+  font: 600 12.5px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink);
+  margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-whale-report-liveval] {
+  font: 700 22px/1.2 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink);
+  font-variant-numeric: tabular-nums; margin-top: 2px;
+}
+[data-whale-report-liveval] small { font: 400 10px ui-monospace, monospace; color: var(--dt-faint); margin-left: 8px; }
+[data-whale-report-livenums] { font: 400 9.5px ui-monospace, monospace; color: var(--dt-muted); margin-top: 3px; }
+[data-whale-report-livefoot] {
+  display: flex; justify-content: space-between; margin-top: 7px; padding-top: 6px;
+  border-top: 1px dashed var(--dt-line); font: 400 8.5px ui-monospace, monospace; color: var(--dt-faint);
+  letter-spacing: .05em;
+}
+
 /* ── Balance 动效：呼吸 LIVE 点 + 刷新差值 ── */
 @keyframes dt-breathe {
   0%, 100% { opacity: .3; transform: scale(.85); }
@@ -2823,6 +2851,61 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
   );
 }
 
+/** 当前会话消耗（live session meter）：30s 轮询，实时聚合 live 会话。 */
+interface LiveSessionJson {
+  sessionId: string;
+  title: string;
+  turns: number;
+  toolCalls: number;
+  tokens: { input: number; output: number; cacheRead: number; reasoning: number };
+  totalTokens: number;
+  cost: number;
+  costSource: string;
+  lastTime: number;
+}
+
+function LiveSessionCard(): ReactNode {
+  const [sessions, setSessions] = useState<LiveSessionJson[] | null>(null);
+  const [error, setError] = useState(false);
+  const load = (): void => {
+    fetch("/whale/api/live-session")
+      .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; sessions: LiveSessionJson[] }>) : Promise.reject(new Error("HTTP"))))
+      .then((json) => {
+        setSessions(Array.isArray(json.sessions) ? json.sessions : []);
+        setError(false);
+      })
+      .catch(() => setError(true));
+  };
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  if (sessions === null || sessions.length === 0) return null;
+  const s = sessions[0];
+  const liveTime = new Date(s.lastTime).toLocaleTimeString("zh-CN", { hour12: false });
+  return (
+    <div data-whale-report-live>
+      <div data-whale-report-livehead>
+        <span data-whale-report-livecode>LIVE SESSION</span>
+        <em data-whale-report-livepulse>●</em>
+      </div>
+      <div data-whale-report-livetitle>{s.title || "（未命名会话）"}</div>
+      <div data-whale-report-liveval>
+        ¥{s.cost.toFixed(2)}
+        <small>{fmt(s.totalTokens)} tokens</small>
+      </div>
+      <div data-whale-report-livenums>
+        {s.turns} 回合 · {s.toolCalls} 工具 · IN {fmt(s.tokens.input)} / OUT {fmt(s.tokens.output)} / CACHE {fmt(s.tokens.cacheRead)}
+      </div>
+      <div data-whale-report-livefoot>
+        <span>LAST EVENT {liveTime} · 30s AUTO REFRESH</span>
+        <span>READ ONLY</span>
+      </div>
+    </div>
+  );
+}
+
 /** Provider Balance：模型平台余额（live instrumentation module）。
  * 服务端只读探针：key 永不出宿主进程；余额查询失败绝不影响报告加载。 */
 interface BalanceJson {
@@ -3058,6 +3141,7 @@ function Dashboard(props: {
       )}
 
       <ProviderBalanceCard />
+      <LiveSessionCard />
 
       {loading && (
         <div data-whale-report-loadingbar>

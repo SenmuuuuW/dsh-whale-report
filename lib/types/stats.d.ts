@@ -234,6 +234,25 @@ export interface CollabSignals {
     /** 短会话数（≤2 回合）。 */
     shortSessions: number;
 }
+/** 当前会话实时摘要（live-session meter 用；轻量遍历，不落库）。 */
+export interface LiveSessionSummary {
+    sessionId: string;
+    title: string;
+    turns: number;
+    toolCalls: number;
+    tokens: TokenTotals;
+    totalTokens: number;
+    /** 按模型的 token 用量（费用折算用）。 */
+    modelTokens: Record<string, ModelUsage>;
+    /** 最后事件时间。 */
+    lastTime: number;
+}
+/** 从完整事件流实时聚合当前会话消耗（确定性；不经过分桶索引）。 */
+export declare function summarizeSessionEvents(sessionId: string, events: ReadonlyArray<{
+    type: string;
+    time: number;
+    data?: unknown;
+}>): LiveSessionSummary;
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
 export type DangerSeverity = "red" | "amber";
 /**

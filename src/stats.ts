@@ -343,6 +343,78 @@ export interface CollabSignals {
   shortSessions: number;
 }
 
+/** 当前会话实时摘要（live-session meter 用；轻量遍历，不落库）。 */
+export interface LiveSessionSummary {
+  sessionId: string;
+  title: string;
+  turns: number;
+  toolCalls: number;
+  tokens: TokenTotals;
+  totalTokens: number;
+  /** 按模型的 token 用量（费用折算用）。 */
+  modelTokens: Record<string, ModelUsage>;
+  /** 最后事件时间。 */
+  lastTime: number;
+}
+
+/** 从完整事件流实时聚合当前会话消耗（确定性；不经过分桶索引）。 */
+export function summarizeSessionEvents(
+  sessionId: string,
+  events: ReadonlyArray<{ type: string; time: number; data?: unknown }>,
+): LiveSessionSummary {
+  const tokens: TokenTotals = { input: 0, output: 0, cacheRead: 0, reasoning: 0 };
+  const modelTokens: Record<string, ModelUsage> = {};
+  const summary: LiveSessionSummary = {
+    sessionId,
+    title: "",
+    turns: 0,
+    toolCalls: 0,
+    tokens,
+    totalTokens: 0,
+    modelTokens,
+    lastTime: 0,
+  };
+  for (const event of events) {
+    if (typeof event.time !== "number" || !Number.isFinite(event.time)) continue;
+    if (event.time > summary.lastTime) summary.lastTime = event.time;
+    const data = event.data as Record<string, unknown> | undefined;
+    switch (event.type) {
+      case "turn/start":
+        summary.turns += 1;
+        break;
+      case "tool/call": {
+        summary.toolCalls += 1;
+        break;
+      }
+      case "assistant/message": {
+        const usage = usageOf(data);
+        if (usage !== null) {
+          summary.tokens.input += usage.input ?? 0;
+          summary.tokens.output += usage.output ?? 0;
+          summary.tokens.cacheRead += usage.cacheRead ?? 0;
+          summary.tokens.reasoning += usage.reasoning ?? 0;
+          const model = (data?.model as string) ?? "unknown";
+          const m = (summary.modelTokens[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+          m.input += usage.input ?? 0;
+          m.output += usage.output ?? 0;
+          m.cacheRead += usage.cacheRead ?? 0;
+          m.reasoning += usage.reasoning ?? 0;
+        }
+        break;
+      }
+      case "session/title": {
+        const title = (data as Record<string, unknown> | undefined)?.title;
+        if (typeof title === "string" && title !== "") summary.title = title;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  summary.totalTokens = summary.tokens.input + summary.tokens.output + summary.tokens.cacheRead + summary.tokens.reasoning;
+  return summary;
+}
+
 /** 危险命令严重级：red = 致命级（可能造成不可逆破坏），amber = 需留意。 */
 export type DangerSeverity = "red" | "amber";
 

@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { aggregate, aggregateBuckets, bucketizeOwnEvents, activityLevel, type RawEvent } from "../src/stats.js";
+import { aggregate, aggregateBuckets, bucketizeOwnEvents, activityLevel, summarizeSessionEvents, type RawEvent } from "../src/stats.js";
 import { periodShortLabel } from "../src/client/index.js";
 
 function ev(type: string, time: number, data: Record<string, unknown> = {}): RawEvent {
@@ -78,5 +78,39 @@ describe("periodShortLabel", () => {
     expect(periodShortLabel("mo-2026-06")).toBe("2026-06");
     expect(periodShortLabel("yr-2026")).toBe("2026");
     expect(periodShortLabel("24h-2026-08-16")).toBe("24h-2026-08-16");
+  });
+});
+
+describe("summarizeSessionEvents（当前会话消耗）", () => {
+  it("聚合 tokens / turns / toolCalls / title / lastTime", () => {
+    const base = Date.parse("2026-08-18T02:00:00Z");
+    const events = [
+      { type: "session/title", time: base, data: { title: "调试当前会话" } },
+      { type: "turn/start", time: base + 1, data: {} },
+      { type: "tool/call", time: base + 2, data: { callId: "c1", name: "bash" } },
+      { type: "tool/call", time: base + 3, data: { callId: "c2", name: "edit" } },
+      { type: "assistant/message", time: base + 4, data: { usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, reasoningTokens: 5 } } },
+      { type: "assistant/message", time: base + 5, data: { usage: { inputTokens: 20, outputTokens: 10 } } },
+    ];
+    const s = summarizeSessionEvents("s-live", events);
+    expect(s.title).toBe("调试当前会话");
+    expect(s.turns).toBe(1);
+    expect(s.toolCalls).toBe(2);
+    expect(s.tokens.input).toBe(120);
+    expect(s.tokens.output).toBe(60);
+    expect(s.tokens.cacheRead).toBe(10);
+    expect(s.tokens.reasoning).toBe(5);
+    expect(s.totalTokens).toBe(195);
+    expect(s.lastTime).toBe(base + 5);
+  });
+
+  it("无 token 的空会话 totalTokens = 0；坏 time 事件跳过", () => {
+    const s = summarizeSessionEvents("s", [
+      { type: "turn/start", time: 1, data: {} },
+      { type: "tool/call", time: Number.NaN, data: {} },
+    ]);
+    expect(s.totalTokens).toBe(0);
+    expect(s.turns).toBe(1);
+    expect(s.toolCalls).toBe(0);
   });
 });
