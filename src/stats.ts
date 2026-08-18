@@ -1113,6 +1113,7 @@ export function aggregateBuckets(
     return a;
   };
   const days = new Map<string, number>();
+  const toolHealthMerged = new Map<string, ToolHealthAcc>();
 
   for (const view of views) {
     seenSessions.add(view.sessionId);
@@ -1187,6 +1188,20 @@ export function aggregateBuckets(
       for (const d of bucket.danger) {
         stats.dangerousCommands.push({ command: d.cmd, time: d.ms, sessionId: view.sessionId, label: d.label, sev: d.sev });
       }
+      // 工具健康：只合并周期内分桶（与 toolCallsTotal 同裁剪语义；修复前
+      // 误合并了全部会话历史的分桶，导致工具健康与周期口径不一致）。
+      for (const [name, acc] of Object.entries(bucket.toolHealth ?? {})) {
+        const target = toolHealthMerged.get(name) ?? newToolHealthAcc(name);
+        target.calls += acc.calls;
+        target.completed += acc.completed;
+        target.failed += acc.failed;
+        target.incomplete += acc.incomplete;
+        target.durations.push(...acc.durations);
+        for (const [code, n] of Object.entries(acc.errorCodes ?? {})) {
+          target.errorCodes[code] = (target.errorCodes[code] ?? 0) + n;
+        }
+        toolHealthMerged.set(name, target);
+      }
       const d = new Date(bucket.h);
       const hour = d.getHours();
       stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + bucket.total;
@@ -1220,24 +1235,6 @@ export function aggregateBuckets(
   stats.busiestDay = busiest;
   stats.dailySeries = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, count]) => ({ date, count }));
   stats.dayHourSeries = [...dayHourMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([date, hours]) => ({ date, hours }));
-  // 工具健康：合并各分桶的聚合态（ToolHealthAcc merge），再固化。
-  const toolHealthMerged = new Map<string, ToolHealthAcc>();
-  for (const view of views) {
-    for (const bucket of view.buckets) {
-      for (const [name, acc] of Object.entries(bucket.toolHealth ?? {})) {
-        const target = toolHealthMerged.get(name) ?? newToolHealthAcc(name);
-        target.calls += acc.calls;
-        target.completed += acc.completed;
-        target.failed += acc.failed;
-        target.incomplete += acc.incomplete;
-        target.durations.push(...acc.durations);
-        for (const [code, n] of Object.entries(acc.errorCodes ?? {})) {
-          target.errorCodes[code] = (target.errorCodes[code] ?? 0) + n;
-        }
-        toolHealthMerged.set(name, target);
-      }
-    }
-  }
   stats.toolHealth = finalizeAllToolHealth(toolHealthMerged);
 
   let sessionsWithRevision = 0;

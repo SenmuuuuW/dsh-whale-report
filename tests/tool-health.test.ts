@@ -223,11 +223,13 @@ describe("Tool Health 双路径等价", () => {
       result("c1", base + 80, true),
       // c3 无 result → incomplete
     ];
-    const direct = aggregate(events, { from: base - 1, to: base + 1000 }, [{ id: "s1", createdAt: base }]);
+    // 周期需覆盖整个 10 分钟分桶（分桶路径对桶做整体裁剪）。
+    const PERIOD = { from: base - 1, to: base + 600_000 };
+    const direct = aggregate(events, PERIOD, [{ id: "s1", createdAt: base }]);
     const built = bucketizeOwnEvents("s1", events.map((e) => ({ ...e, seq: 0 })), 0);
     const indexed = aggregateBuckets(
       [{ sessionId: "s1", buckets: built.buckets, titles: built.titles }],
-      { from: base - 1, to: base + 1000 },
+      PERIOD,
       [{ id: "s1", createdAt: base }],
     );
     expect(indexed.toolHealth).toEqual(direct.toolHealth);
