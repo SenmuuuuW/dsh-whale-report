@@ -435,7 +435,7 @@ const CSS = `
 [data-whale-report-sonar] i:nth-child(1) { width: 46%; height: 46%; }
 [data-whale-report-sonar] i:nth-child(2) { width: 72%; height: 72%; }
 [data-whale-report-sonar] i:nth-child(3) { width: 100%; height: 100%; animation: dt-sonar 4.8s ease-out infinite; }
-[data-whale-report-depthscale] { position: absolute; right: 10px; top: 18px; height: 82px; padding-right: 14px; border-right: 1px solid var(--dt-line-strong); color: var(--dt-faint); font: 9px/1.1 ui-monospace, monospace; letter-spacing: .08em; }
+[data-whale-report-depthscale] { position: absolute; right: 10px; top: 52px; height: 82px; padding-right: 14px; border-right: 1px solid var(--dt-line-strong); color: var(--dt-faint); font: 9px/1.1 ui-monospace, monospace; letter-spacing: .08em; }
 [data-whale-report-depthscale]::after { content: "4096m\\A 3072\\A 2048\\A 1024\\A 0000"; white-space: pre; display: block; line-height: 18px; text-align: right; }
 
 /* Hero sonar: slow scan sweep + faint pings, no glow. */
@@ -1007,32 +1007,95 @@ const CSS = `
   pointer-events: none; z-index: 1;
 }
 
-/* ── 当前价格时段（峰谷）── */
+/* ── 当前价格时段（峰谷仪表：峰=琥珀 / 谷=青，时段色贯穿整卡）── */
 [data-whale-report-price] {
   margin: 0 0 14px; padding: 10px 14px 9px;
-  border: 1px solid var(--dt-line); border-radius: 10px;
-  background: var(--dt-paper-deep); position: relative;
+  border: 1px solid var(--dt-line); border-left: 3px solid var(--dt-cyan-deep);
+  border-radius: 10px; background: var(--dt-paper-deep); position: relative;
 }
-[data-whale-report-pricehead] { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+[data-whale-report-price][data-period="peak"] { border-left-color: var(--dt-amber); }
+[data-whale-report-pricehead] { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 [data-whale-report-pricecode] { font: 700 9.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; }
 [data-whale-report-priceperiod] {
-  font: 700 10px ui-monospace, monospace; font-style: normal; letter-spacing: .06em;
-  color: var(--dt-safe, #31765a);
+  font: 750 9.5px ui-monospace, monospace; font-style: normal; letter-spacing: .08em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  color: var(--dt-cyan-deep); background: rgba(54, 185, 209, .14);
 }
-[data-whale-report-price][data-period="peak"] [data-whale-report-priceperiod] { color: var(--dt-amber); }
-[data-whale-report-priceval] {
-  display: flex; align-items: baseline; gap: 10px; margin-top: 4px;
+[data-whale-report-price][data-period="peak"] [data-whale-report-priceperiod] {
+  color: #8a5a0e; background: rgba(184, 117, 25, .15);
+}
+[data-whale-report-ratetable] { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+[data-whale-report-raterow] {
+  display: grid; grid-template-columns: 66px 1fr 1.5fr 1.3fr auto;
+  align-items: baseline; gap: 8px; padding: 5px 9px;
+  background: var(--dt-paper); border: 1px solid var(--dt-line); border-radius: 7px;
   font-variant-numeric: tabular-nums;
 }
-[data-whale-report-priceval] b { font: 700 22px/1.2 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink); }
-[data-whale-report-priceval] span { font: 400 9.5px ui-monospace, monospace; color: var(--dt-muted); }
-[data-whale-report-pricedetail] { font: 400 9px ui-monospace, monospace; color: var(--dt-faint); margin-top: 3px; letter-spacing: .04em; }
+[data-whale-report-ratemodel] {
+  font: 750 9px ui-monospace, monospace; font-style: normal; letter-spacing: .06em; color: var(--dt-ink-soft);
+}
+[data-whale-report-ratein], [data-whale-report-ratecache] { font: 400 9.5px ui-monospace, monospace; color: var(--dt-muted); }
+[data-whale-report-rateout] {
+  font: 700 14.5px/1.1 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-cyan-deep);
+}
+[data-whale-report-price][data-period="peak"] [data-whale-report-rateout] { color: var(--dt-amber); }
+[data-whale-report-rateother] { font: 400 9.5px ui-monospace, monospace; color: rgba(138, 90, 14, .72); }
+[data-whale-report-price][data-period="peak"] [data-whale-report-rateother] { color: rgba(20, 122, 146, .72); }
+[data-whale-report-pricestrip] {
+  position: relative; display: grid; grid-template-columns: repeat(24, 1fr);
+  gap: 2px; margin-top: 8px; height: 14px;
+}
+[data-whale-report-pricestrip] i {
+  display: block; border-radius: 2px; background: rgba(54, 185, 209, .16);
+}
+[data-whale-report-pricestrip] i[data-peak="true"] { background: rgba(184, 117, 25, .42); }
+[data-whale-report-pricestrip] i[data-now="true"] {
+  box-shadow: 0 0 0 1.5px var(--dt-ink-soft) inset;
+  background: rgba(54, 185, 209, .5);
+}
+[data-whale-report-pricestrip] i[data-now="true"][data-peak="true"] { background: rgba(184, 117, 25, .68); }
+[data-whale-report-stripneedle] {
+  position: absolute; top: -3px; bottom: -3px; width: 2px;
+  background: var(--dt-cyan-deep); transform: translateX(-50%);
+  animation: dt-needle 1.4s ease-in-out infinite; pointer-events: none;
+}
+[data-whale-report-price][data-period="peak"] [data-whale-report-stripneedle] { background: var(--dt-amber); }
+@keyframes dt-needle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .25; }
+}
+[data-whale-report-stripticks] {
+  display: flex; justify-content: space-between; margin-top: 3px;
+  font: 400 8px ui-monospace, monospace; color: var(--dt-faint);
+}
+[data-whale-report-pricecount] { font: 400 9px ui-monospace, monospace; color: var(--dt-muted); margin-top: 5px; letter-spacing: .03em; }
 [data-whale-report-pricenotice] {
   margin-top: 7px; padding: 6px 9px; border-radius: 6px;
-  background: rgba(77, 107, 254, .08); border: 1px solid rgba(77, 107, 254, .25);
   color: var(--dt-ink-soft); font: 600 10px ui-sans-serif, system-ui, "PingFang SC", sans-serif;
+  background: rgba(54, 185, 209, .1); border: 1px solid rgba(54, 185, 209, .3);
   animation: dt-reveal .25s ease-out both;
 }
+[data-whale-report-price][data-period="peak"] [data-whale-report-pricenotice] {
+  background: rgba(184, 117, 25, .1); border-color: rgba(184, 117, 25, .32);
+}
+
+/* ── 右上角峰谷徽标（常驻时段指示：峰=琥珀 / 谷=青，与价格卡同口径）── */
+[data-whale-report-peakbadge] {
+  position: absolute; top: 14px; right: 14px; z-index: 4;
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 9px; border-radius: 999px;
+  border: 1px solid rgba(54, 185, 209, .45); background: rgba(54, 185, 209, .09);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+[data-whale-report-peakbadge][data-period="peak"] {
+  border-color: rgba(184, 117, 25, .5); background: rgba(184, 117, 25, .1);
+}
+[data-whale-report-peakicon] {
+  fill: var(--dt-cyan-deep); animation: dt-pulse 2s ease-in-out infinite; flex-shrink: 0;
+}
+[data-whale-report-peakbadge][data-period="peak"] [data-whale-report-peakicon] { fill: var(--dt-amber); }
+[data-whale-report-peakrate] { font: 700 10px ui-monospace, monospace; color: var(--dt-ink-soft); }
+@keyframes dt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
 /* ── 当前会话消耗（live session meter）── */
 [data-whale-report-live] {
@@ -2884,47 +2947,138 @@ function isPeakNow(ms: number): boolean {
   return (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
 }
 
-/** 当前价格时段 + 时段切换提醒（每分钟检查）。 */
-const PEAK_PRO_OUTPUT = 27.0;
-const OFFPEAK_PRO_OUTPUT = 13.5;
+/** 当前价格时段 + 时段切换提醒（每分钟检查）。
+ * 官方峰谷价目（2026-08-17 起；与 pricing.ts 的 PEAK_PRICES/OFFPEAK_PRICES 同源），单位 ¥/百万 token。 */
+const RATE_ROWS: Array<{
+  model: string;
+  peak: { in: string; out: string; cache: string };
+  offpeak: { in: string; out: string; cache: string };
+}> = [
+  { model: "V4 PRO", peak: { in: "9.0", out: "27.0", cache: "0.30" }, offpeak: { in: "4.5", out: "13.5", cache: "0.15" } },
+  { model: "V4 FLASH", peak: { in: "3.0", out: "9.0", cache: "0.10" }, offpeak: { in: "1.5", out: "4.5", cache: "0.05" } },
+];
+/** 峰谷切换边界（北京时间）；9:00/14:00 转高峰，12:00/18:00 转谷时。 */
+const PERIOD_BOUNDS: Array<{ m: number; label: string; to: "peak" | "offpeak" }> = [
+  { m: 9 * 60, label: "9:00", to: "peak" },
+  { m: 12 * 60, label: "12:00", to: "offpeak" },
+  { m: 14 * 60, label: "14:00", to: "peak" },
+  { m: 18 * 60, label: "18:00", to: "offpeak" },
+];
 
 function PricePeriodCard(): ReactNode {
   const [period, setPeriod] = useState<"peak" | "offpeak">(isPeakNow(Date.now()) ? "peak" : "offpeak");
   const [noticed, setNoticed] = useState(false);
+  const [, tick] = useState(0);
   useEffect(() => {
     const initial: "peak" | "offpeak" = isPeakNow(Date.now()) ? "peak" : "offpeak";
     let prev = initial;
     setPeriod(initial);
     const timer = window.setInterval(() => {
       const cur = isPeakNow(Date.now()) ? "peak" : "offpeak";
+      tick((t) => t + 1); // 每分钟重绘时针与倒计时
       if (cur !== prev) {
         setPeriod(cur);
         setNoticed(true);
-        window.setTimeout(() => setNoticed(false), 5000);
+        window.setTimeout(() => setNoticed(false), 6000);
       }
       prev = cur;
     }, 60_000);
     return () => window.clearInterval(timer);
   }, []);
   const peak = period === "peak";
+  const now = new Date();
+  const cstHour = (now.getUTCHours() + 8) % 24;
+  const cstClock = cstHour * 60 + now.getUTCMinutes();
+  const next = PERIOD_BOUNDS.find((b) => b.m > cstClock) ?? { m: 33 * 60, label: "9:00", to: "peak" as const };
+  const minutesLeft = next.m - cstClock;
+  const countdown =
+    minutesLeft >= 60 ? `${Math.floor(minutesLeft / 60)}h ${String(minutesLeft % 60).padStart(2, "0")}m` : `${minutesLeft}m`;
+  const hours = Array.from({ length: 24 }, (_, h) => (h >= 9 && h < 12) || (h >= 14 && h < 18));
   return (
     <div data-whale-report-price data-period={period}>
       <div data-whale-report-pricehead>
-        <span data-whale-report-pricecode>CURRENT RATE / 当前价格</span>
-        <em data-whale-report-priceperiod>{peak ? "高峰时段 · PEAK" : "空闲时段 · OFF-PEAK"}</em>
+        <span data-whale-report-pricecode>CURRENT RATE · ¥/1M TOKEN / 当前价格</span>
+        <em data-whale-report-priceperiod>{peak ? "高峰 · PEAK" : "谷时 · OFF-PEAK"}</em>
       </div>
-      <div data-whale-report-priceval>
-        <b>{peak ? "¥27.0" : "¥13.5"}</b>
-        <span>V4 Pro 输出 / 百万 token</span>
+      <div data-whale-report-ratetable>
+        {RATE_ROWS.map((r) => {
+          const cur = peak ? r.peak : r.offpeak;
+          const other = peak ? r.offpeak : r.peak;
+          return (
+            <div key={r.model} data-whale-report-raterow>
+              <em data-whale-report-ratemodel>{r.model}</em>
+              <span data-whale-report-ratein>输入 ¥{cur.in}</span>
+              <b data-whale-report-rateout>输出 ¥{cur.out}</b>
+              <span data-whale-report-ratecache>缓存 ¥{cur.cache}</span>
+              <span data-whale-report-rateother>
+                {peak ? "谷" : "峰"} ¥{other.out}
+              </span>
+            </div>
+          );
+        })}
       </div>
-      <div data-whale-report-pricedetail>
-        高峰 9:00–12:00 · 14:00–18:00（北京时间）· 空闲半价
+      <div
+        data-whale-report-pricestrip
+        role="img"
+        aria-label="峰谷时段分布：高峰 9–12 与 14–18 时（琥珀色），其余为谷时（青色），指针标示当前时刻"
+      >
+        {hours.map((pk, h) => (
+          <i key={h} data-peak={pk} data-now={h === cstHour} />
+        ))}
+        <div data-whale-report-stripneedle style={{ left: `${((cstClock / (24 * 60)) * 100).toFixed(2)}%` }} />
+      </div>
+      <div data-whale-report-stripticks aria-hidden="true">
+        <span>0</span>
+        <span>6</span>
+        <span>12</span>
+        <span>18</span>
+        <span>24</span>
+      </div>
+      <div data-whale-report-pricecount>
+        距 {next.label} 转{next.to === "peak" ? "高峰" : "谷时"} {countdown} · 高峰 9–12 / 14–18 北京时间
+        {peak ? " · 谷时 5 折" : " · 高峰 2×"}
       </div>
       {noticed && (
         <div data-whale-report-pricenotice>
-          {peak ? "已进入高峰时段，输出价 ¥27.0/百万 token" : "已切换到空闲时段，输出价 ¥13.5/百万 token"}
+          {peak
+            ? "已进入高峰时段 · PRO 输出 ¥27.0 / FLASH 输出 ¥9.0"
+            : "已切换到谷时段 · PRO 输出 ¥13.5 / FLASH 输出 ¥4.5"}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 右上角峰谷徽标：常驻显示当前时段与 PRO 输出价（与 PricePeriodCard 同口径，每分钟刷新）。 */
+function PeakBadge(): ReactNode {
+  const [period, setPeriod] = useState<"peak" | "offpeak">(isPeakNow(Date.now()) ? "peak" : "offpeak");
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPeriod(isPeakNow(Date.now()) ? "peak" : "offpeak");
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const peak = period === "peak";
+  const proOut = peak ? RATE_ROWS[0].peak.out : RATE_ROWS[0].offpeak.out;
+  return (
+    <div
+      data-whale-report-peakbadge
+      data-period={period}
+      role="status"
+      aria-label={
+        peak
+          ? `当前高峰时段，V4 Pro 输出价 ¥${RATE_ROWS[0].peak.out}/百万 token`
+          : `当前谷时段，V4 Pro 输出价 ¥${RATE_ROWS[0].offpeak.out}/百万 token`
+      }
+    >
+      <svg data-whale-report-peakicon viewBox="0 0 16 16" width={13} height={13} aria-hidden="true">
+        {peak ? (
+          <path d="M1.5 14 L4.5 5 L7 9.5 L10 2 L14.5 14 Z" />
+        ) : (
+          <path d="M1.5 2 L4.5 11 L7 6.5 L10 14 L14.5 2 Z" />
+        )}
+      </svg>
+      <span data-whale-report-peakrate>¥{proOut} 输出</span>
     </div>
   );
 }
@@ -3202,6 +3356,7 @@ function Dashboard(props: {
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
         </div>
+        <PeakBadge />
       </div>
 
       <div data-whale-report-chips>
