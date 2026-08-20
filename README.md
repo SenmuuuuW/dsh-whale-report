@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://github.com/SenmuuuuW/dsh-whale-report/releases"><img src="https://img.shields.io/github/v/release/SenmuuuuW/dsh-whale-report?label=version&color=4d6bfe" alt="version"></a>
   <a href="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml"><img src="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Anil-matcha/awesome-dsh-plugin"><img src="https://img.shields.io/badge/awesome--dsh--plugin-listed-4d6bfe" alt="awesome dsh plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4d6bfe.svg" alt="license"></a>
 </p>
 
