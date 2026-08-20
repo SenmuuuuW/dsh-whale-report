@@ -16,6 +16,26 @@
   - 缺失数据不按 0 处理：被跳过会话不计入 sessions/subagentSessions、不产生 Improve 证据，只经 partial 披露
   - Improve 不引用被跳过会话（跳过会话从未进入聚合视图，结构性保证 + 测试覆盖）
 
+### 新增（Dark Mode — System / Light / Dark 三档主题）
+- **主题解析优先级**：用户显式选择 > 宿主 theme（复用 DSH web 在 `<html>` 上的
+  `color-scheme` 信号，不侵入本体）> prefers-color-scheme > light 兜底；
+  默认 System，选择持久化到 localStorage（`whale.theme`），不上传任何设置
+- **统一 token 体系**：`--dt-*` 全量收敛（paper/surface/ink/muted/faint/line/border/
+  blue/cyan/danger/warning/secret/tooltip/heat/abyss/export…），CSS 零散硬编码色清零；
+  dark 调色板为深蓝黑 graphite（DeepSeek × Linear × Vercel 方向：克制、低眩光、非纯黑）
+- **切换入口**：面板顶部右侧小型 segmented toggle（系统/浅色/深色），抽屉头 / 概览品牌区 /
+  完整报告 actions 三处放置，不抢主界面；抽屉模式不重复出现
+- **专项校准**：Activity Scan 深色为「深灰蓝 → 更亮 DeepTrace blue」，空 cell 保持可见但
+  不亮成网格墙；Trend 轴线/网格/LIVE 虚线/空心点/tooltip 全 token 化；severity 徽标
+  （HIGH/MEDIUM/LOW、DATA PARTIAL、risk、Tool Health）深色下前景/背景重校准；
+  scrollbar / color-scheme 随主题；鲸鱼 SVG 素材用 filter 压亮度（不复制资产）
+- **内联色主题化**：活跃图/图例/Token 构成/模型条等 JSX 内联色改为主题感知
+  （THEME_COLORS），accent 类改 CSS var
+- 测试：20 个 theme 单测（默认 system / prefers dark→dark / prefers light→light /
+  显式覆盖 / 持久化恢复 / matchMedia 不可用兜底 / 存储异常 / 不影响 report data /
+  订阅摘除）；203 tests 全绿
+- 未动：Improve rules / thresholds / REPORT_SEM / INDEX_VERSION / stats / pricing / session index
+
 ### 修复（真实数据验收发现）
 - **summary 常规路径漏存 `improvements`**：markdown 里有 Improve 段，但 API record 没有
   `improvements` 字段 → 面板拿不到数组、IMPROVE 区不渲染（custom 路径与 generate 路径已有）
