@@ -21,11 +21,15 @@
     <td align="center" style="background:#0b1733;border-radius:12px;padding:10px 30px">
       <span style="color:#4d6bfe;font-weight:700;font-family:ui-monospace,Menlo,monospace">6 PERIODS</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">10 RULES</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">10 FINDINGS</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">4 EXPORTS</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">4 IMPROVE RULES</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">VERIFY-READY</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">PEAK / OFF-PEAK</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">FAULT ISOLATION</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">READ-ONLY</span>
       <span style="color:#33445f"> · </span>
@@ -49,6 +53,7 @@ Agent 跑完之后，真正难回答的问题不是"它做了什么"，而是：
 - 哪些操作值得注意？
 - 夜里到底跑了多少？
 - 是哪次任务把成本拉高的？
+- **这周有什么值得改的？**
 
 DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件日志聚合成报告，让这些问题有答案。
 
@@ -56,24 +61,29 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 <table align="center">
   <tr>
-    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
       <b style="color:#4d6bfe">SEE</b><br/>
       <span style="color:#33445f;font-size:13px">总览成本、调用、模型与异常</span>
     </td>
-    <td align="center" width="5%" style="color:#94a2b3">→</td>
-    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+    <td align="center" width="4%" style="color:#94a2b3">→</td>
+    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
       <b style="color:#4d6bfe">NOTICE</b><br/>
       <span style="color:#33445f;font-size:13px">Findings + Whale Note 指出值得看的问题</span>
     </td>
-    <td align="center" width="5%" style="color:#94a2b3">→</td>
-    <td align="center" width="30%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 14px">
+    <td align="center" width="4%" style="color:#94a2b3">→</td>
+    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
       <b style="color:#4d6bfe">TRACE</b><br/>
       <span style="color:#33445f;font-size:13px">Session Drilldown 追到具体会话复盘</span>
+    </td>
+    <td align="center" width="4%" style="color:#94a2b3">→</td>
+    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
+      <b style="color:#4d6bfe">IMPROVE</b><br/>
+      <span style="color:#33445f;font-size:13px">只读建议 + 证据 + VERIFY 计划（v0.5）</span>
     </td>
   </tr>
 </table>
 
-一次报告，走完整个闭环。
+一次报告，走完整个闭环；IMPROVE 的输出带 VERIFY 基线 → 目标，为后续自动回验（Apply / self-healing）预留。
 
 ## Product
 
@@ -103,6 +113,8 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 | **Baseline** | 每周期自动落库，报告带"较上周期 ▲/▼"（费用、会话、缓存命中率等） |
 | **Trends** | 多周期趋势曲线（成本 / 会话 / 缓存命中 / 夜间活跃），hover 显示每周期明细与日期范围，进行中周期标记 LIVE（不与完整周期混比） |
 | **Provider balance** | 模型平台实时余额（DeepSeek 已支持，可扩展）；key 只在本机服务端使用 |
+| **Improve（v0.5）** | 值得改的行为建议：Repeated Tool Failure / Retry Workflow Waste / Repeated User Correction（EXPERIMENTAL）/ Peak Cost Opportunity；每条带 metrics、受影响会话、置信度与 VERIFY 基线 → 目标；stable id 跨周期不变，只读、不自动修改任何配置 |
+| **Data partial** | 单个会话日志损坏/不可读 → 跳过并披露（只存会话 id + 粗分类原因，不含错误原文）；其余健康会话照常聚合，缺失数据不按 0 计；markdown / HTML / Web 三处非阻断提示 |
 
 ## Deterministic insights
 
@@ -113,7 +125,18 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 - explicit rules
 - reproducible report generation
 
-10 条确定性规则：深夜消耗、峰谷时段成本、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势、工具健康。每条都带阈值、归因与估算口径。
+10 条确定性 Finding 规则：深夜消耗、峰谷时段成本、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势、工具健康。每条都带阈值、归因与估算口径。
+
+**IMPROVE 引擎（v0.5）**：Finding 回答"发生了什么"，Improve 回答"值不值得改、怎么改"。4 条确定性规则：
+
+| 规则 | 触发证据（跨 session 重复性） | 输出 |
+| --- | --- | --- |
+| Repeated Tool Failure | 工具失败跨 ≥3 会话、失败率 ≥8%、单一错误码占失败 ≥40% | 建议 + 主错误码 + P95 |
+| Retry / Workflow Waste | 同一归一化命令在 ≥2 会话重复重试且伴随失败 | 建议 + 重试次数 |
+| Repeated User Correction（EXPERIMENTAL） | 同类纠正跨 ≥2 会话（只在第 2+ 条用户消息统计，首条消息是初始需求不算） | 建议 + 类别 + 计数 |
+| Peak Cost Opportunity | 高峰占 ≥50% 且 ≥¥3，且有夜间批量负载证据 | 建议 + 可省金额 |
+
+每条建议都带 **evidence**（metrics / affectedSessions / 置信度）与 **verificationPlan**（目标指标、基线 → 目标、窗口），排序 severity → score → occurrences → category；同一目标跨周期 id 稳定。全部本地确定性规则，**0 额外 LLM token**；Apply / self-healing 为后续版本预留（v0.5 只落 DETECTED / DISMISSED）。
 
 **协作复盘（COLLABORATION REVIEW）**：观察人机协作模式——需求漂移 / 迟到约束 / 上下文碎片化，最多 3 条，样本不足不展示；语气是"找摩擦、给可尝试的优化"，不评价人格、不把技术 retry 归因为沟通问题。
 
@@ -129,6 +152,8 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 - **不自动执行**：修复建议只输出方案与命令模板，需要你亲自确认
 - **Secret Scan 不重印**：只记录模式标签、时间与来源，报告与导出里都不出现 secret 原文
 - **危险命令只存首行**：引号段剥离，防止 grep 模式被误报
+- **纠正信号只存类别与计数**：Repeated User Correction 的匹配基于归一化白名单（去引号、数字、路径），**绝不保存用户原句**
+- **损坏日志不泄错误**：fault isolation 只披露会话 id 与粗分类原因（corrupt-log / read-failed），错误消息 / 堆栈从不进报告
 - **本机围栏**：API 只服务本机 loopback + 同源标记
 
 ## Reports
@@ -146,10 +171,10 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Export
 
-- **Web report**：面板内完整报告视图
-- **PNG 图片**：canvas 按面板同款视觉绘制主报告（报告头 / 鲸评 / Findings / 活跃 / 模型工具 / 风险），不含会话轨迹与索引
+- **Web report**：面板内完整报告视图（含 IMPROVE 区与 DATA PARTIAL 提示）
+- **PNG 图片**：canvas 按面板同款视觉绘制主报告（报告头 / 鲸评 / Findings / 活跃 / 模型工具 / 风险），不含会话轨迹、索引与 IMPROVE 区
 - **会话轨迹**：单独导出的 PNG，仅含会话轨迹 + 会话索引（追查专用）
-- **HTML**：独立可打印 HTML 页
+- **HTML**：独立可打印 HTML 页，含 02 / IMPROVE 章节（severity 色标 + 证据 + VERIFY 行）与 DATA PARTIAL 横幅
 - **PDF**：直接打印面板报告（A4 排版），浏览器打印对话框另存为 PDF——与面板逐像素一致
 
 鲸鱼娘与页面形象在导出中使用真实素材（与面板显示一致）。
@@ -197,12 +222,13 @@ CLI 直接读本机会话存档（`~/.dsh/sessions/*/session.jsonl.zstd`），�
 DSH session events
         ↓
 aggregation / pricing / safety
+（损坏会话跳过 → partial，缺失 ≠ 0）
         ↓
-deterministic insights
+deterministic findings + improve rules
         ↓
-DeepTrace report
+DeepTrace report（DATA PARTIAL 披露 + VERIFY-ready 建议）
         ↓
-Web / PDF / PNG
+Web / HTML / PDF / PNG
 ```
 
 细节（数据流、存储结构、兼容性策略）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
@@ -213,7 +239,7 @@ Web / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 139 个单测：引擎 / 洞察 / 规则 / 峰谷计价 / 导出
+pnpm test       # 183 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / 峰谷计价 / 导出
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
@@ -223,6 +249,8 @@ pnpm build      # tsc + tsdown（客户端单文件 bundle）
 
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
 - **费用为估算**：按官方峰谷价分段估算，以平台账单为准
+- **IMPROVE 为只读建议**：v0.5 只落 DETECTED / DISMISSED 与 VERIFY 计划，Apply / self-healing 未实现（路线图下一步）；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
+- **PNG 主报告导出暂不含 IMPROVE 区**（HTML / PDF / markdown / 面板已含）
 
 ## License
 
