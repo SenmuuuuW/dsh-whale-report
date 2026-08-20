@@ -75,7 +75,17 @@ export interface CostBreakdown {
     peakShare?: number;
 }
 export declare const PRICING_TTL_MS: number;
-/** 取价格（6 小时缓存；失败回退内置价）。 */
+/** 官方峰谷两套价：peak = 高峰时段（北京 9–12、14–18），offpeak = 空闲时段。 */
+export interface OfficialPeakPrices {
+    peak: Record<"flash" | "pro", Prices>;
+    offpeak: Record<"flash" | "pro", Prices>;
+}
+/**
+ * 解析官方定价页（2026-08-17 峰谷定价后：每类费用下 空闲时段 / 高峰时段 两行 × flash/pro 两列，
+ * 人民币元/百万 token）。纯函数，便于离线测试；抓不到表格即抛错。
+ */
+export declare function parsePricingPage(html: string): OfficialPeakPrices;
+/** 取价格（6 小时缓存；失败回退内置价）。返回按当前时刻选定的时段价。 */
 export declare function getPrices(): Promise<{
     prices: Record<"flash" | "pro", Prices>;
     source: "official-page" | "builtin";

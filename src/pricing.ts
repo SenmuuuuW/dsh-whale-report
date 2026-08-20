@@ -145,7 +145,7 @@ export interface CostBreakdown {
 }
 
 /** 缓存的价格快照 + 过期时间。 */
-let priceCache: { prices: Record<"flash" | "pro", Prices>; source: "official-page" | "builtin"; fetchedAt: number } | null = null;
+let priceCache: { peak: Record<"flash" | "pro", Prices>; offpeak: Record<"flash" | "pro", Prices>; source: "official-page" | "builtin"; fetchedAt: number } | null = null;
 export const PRICING_TTL_MS = 6 * 60 * 60 * 1000;
 
 function stripHtml(html: string): string {
@@ -160,60 +160,75 @@ function stripHtml(html: string): string {
 }
 
 const PRICE_RE = /(\d+(?:\.\d+)?)\s*元/;
-function parsePriceCell(text: string): number | undefined {
-  const m = PRICE_RE.exec(text);
-  if (m === null) return undefined;
-  const value = Number(m[1]);
-  return Number.isFinite(value) ? value : undefined;
+
+/** 官方峰谷两套价：peak = 高峰时段（北京 9–12、14–18），offpeak = 空闲时段。 */
+export interface OfficialPeakPrices {
+  peak: Record<"flash" | "pro", Prices>;
+  offpeak: Record<"flash" | "pro", Prices>;
 }
 
-/** 解析官方定价页（当前单价格表：缓存命中 / 未命中 / 输出 三行 × flash/pro 两列）。 */
-async function fetchOfficialPrices(): Promise<Record<"flash" | "pro", Prices>> {
+/**
+ * 解析官方定价页（2026-08-17 峰谷定价后：每类费用下 空闲时段 / 高峰时段 两行 × flash/pro 两列，
+ * 人民币元/百万 token）。纯函数，便于离线测试；抓不到表格即抛错。
+ */
+export function parsePricingPage(html: string): OfficialPeakPrices {
+  const text = stripHtml(html);
+  const hit = /百万tokens输入（缓存命中）([\s\S]{0,300}?)百万tokens输入（缓存未命中）([\s\S]{0,300}?)百万tokens输出([\s\S]{0,300}?)(?:并发|Concurrency|<\/table)/i.exec(text);
+  if (hit === null) throw new Error("pricing table not found");
+  const four = (raw: string) => {
+    const nums = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*元/g)].map((m) => Number(m[1]));
+    return {
+      offpeakFlash: nums[0],
+      offpeakPro: nums[1],
+      peakFlash: nums[2],
+      peakPro: nums[3],
+    };
+  };
+  const cache = four(hit[1]);
+  const input = four(hit[2]);
+  const output = four(hit[3]);
+  const valid = (c: ReturnType<typeof four>): boolean =>
+    [c.offpeakFlash, c.offpeakPro, c.peakFlash, c.peakPro].every((v) => Number.isFinite(v));
+  if (!valid(cache) || !valid(input) || !valid(output)) throw new Error("pricing cells missing");
+  const mk = (pick: (c: ReturnType<typeof four>) => { flash: number; pro: number }): Record<"flash" | "pro", Prices> => {
+    const p = pick(cache);
+    return {
+      flash: { cacheReadPerMillion: p.flash, inputPerMillion: pick(input).flash, outputPerMillion: pick(output).flash },
+      pro: { cacheReadPerMillion: p.pro, inputPerMillion: pick(input).pro, outputPerMillion: pick(output).pro },
+    };
+  };
+  return {
+    offpeak: mk((c) => ({ flash: c.offpeakFlash, pro: c.offpeakPro })),
+    peak: mk((c) => ({ flash: c.peakFlash, pro: c.peakPro })),
+  };
+}
+
+/** 抓取官方定价页（中文版，人民币峰谷价）。 */
+async function fetchOfficialPrices(): Promise<OfficialPeakPrices> {
   const response = await fetch(PRICING_URL, {
     headers: { "user-agent": "dsh-whale-report/0.1 (cost estimation)" },
     signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) throw new Error(`pricing page ${response.status}`);
-  const html = await response.text();
-  const text = stripHtml(html);
-  const hit = /百万tokens输入（缓存命中）([\s\S]{0,400}?)百万tokens输入（缓存未命中）([\s\S]{0,400}?)百万tokens输出([\s\S]{0,400}?)(?:并发限制|<\/table)/i.exec(text);
-  if (hit === null) throw new Error("pricing table not found");
-  const cell = (raw: string) => {
-    const first = parsePriceCell(raw);
-    const second = parsePriceCell(raw.replace(/^\s*\d+(?:\.\d+)?元/, ""));
-    return { first, second };
-  };
-  const cache = cell(hit[1]);
-  const input = cell(hit[2]);
-  const output = cell(hit[3]);
-  if (cache.first === undefined || input.first === undefined || output.first === undefined) {
-    throw new Error("pricing cells missing");
-  }
-  return {
-    flash: {
-      cacheReadPerMillion: cache.first,
-      inputPerMillion: input.first,
-      outputPerMillion: output.first,
-    },
-    pro: {
-      cacheReadPerMillion: cache.second ?? cache.first,
-      inputPerMillion: input.second ?? input.first,
-      outputPerMillion: output.second ?? output.first,
-    },
-  };
+  return parsePricingPage(await response.text());
 }
 
-/** 取价格（6 小时缓存；失败回退内置价）。 */
+/** 取价格（6 小时缓存；失败回退内置价）。返回按当前时刻选定的时段价。 */
 export async function getPrices(): Promise<{ prices: Record<"flash" | "pro", Prices>; source: "official-page" | "builtin"; fetchedAt: number }> {
   const now = Date.now();
-  if (priceCache !== null && now - priceCache.fetchedAt < PRICING_TTL_MS) return priceCache;
-  try {
-    const prices = await fetchOfficialPrices();
-    priceCache = { prices, source: "official-page", fetchedAt: now };
-  } catch {
-    priceCache = { prices: BUILTIN_PRICES, source: "builtin", fetchedAt: now };
+  if (priceCache === null || now - priceCache.fetchedAt >= PRICING_TTL_MS) {
+    try {
+      const { peak, offpeak } = await fetchOfficialPrices();
+      priceCache = { peak, offpeak, source: "official-page", fetchedAt: now };
+    } catch {
+      priceCache = { peak: BUILTIN_PRICES, offpeak: BUILTIN_PRICES, source: "builtin", fetchedAt: now };
+    }
   }
-  return priceCache;
+  return {
+    prices: isPeakHourCST(now) ? priceCache.peak : priceCache.offpeak,
+    source: priceCache.source,
+    fetchedAt: priceCache.fetchedAt,
+  };
 }
 
 /** 单模型费用：缓存命中 + 缓存未命中 + 输出。输入扣除已命中部分避免重复计费。 */
