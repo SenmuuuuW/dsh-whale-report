@@ -4,8 +4,8 @@
  */
 import { z } from "zod";
 export type ReportId = string;
-/** 报告语义版本：语义变更（如 daily 改自然日、新增预设）时 +1，旧记录作废重建。 */
-export declare const REPORT_SEM = 5;
+/** 报告语义版本：语义变更（如 daily 改自然日、新增预设、新增 Improve 输出）时 +1，旧记录作废重建。 */
+export declare const REPORT_SEM = 6;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{
@@ -22,6 +22,7 @@ export declare const ReportRecordSchema: z.ZodObject<{
     markdown: z.ZodString;
     cost: z.ZodOptional<z.ZodUnknown>;
     insights: z.ZodOptional<z.ZodUnknown>;
+    improvements: z.ZodOptional<z.ZodUnknown>;
     reportGeneration: z.ZodOptional<z.ZodUnknown>;
     prev: z.ZodOptional<z.ZodUnknown>;
 }, z.core.$strip>;
@@ -62,6 +63,7 @@ export declare const PeriodStatsSchema: z.ZodObject<{
     redDanger: z.ZodNumber;
     retryBursts: z.ZodNumber;
     activeDays: z.ZodNumber;
+    skippedCount: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
 export declare const whaleDomain: {
@@ -82,6 +84,7 @@ export declare const whaleDomain: {
             sem?: number | undefined;
             cost?: unknown;
             insights?: unknown;
+            improvements?: unknown;
             reportGeneration?: unknown;
             prev?: unknown;
         }>;
@@ -119,6 +122,7 @@ export declare const whaleDomain: {
             redDanger: number;
             retryBursts: number;
             activeDays: number;
+            skippedCount?: number | undefined;
         }>;
     };
 };

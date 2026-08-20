@@ -18,6 +18,34 @@ interface InsightJson {
     action: string;
     estimate?: string;
 }
+/** Improve 建议（v0.5；服务端确定性规则，旧报告可缺省）。 */
+interface ImprovementJson {
+    id: string;
+    period: string;
+    category: string;
+    severity: "HIGH" | "MEDIUM" | "LOW";
+    title: string;
+    summary: string;
+    evidence: {
+        metrics: Record<string, number>;
+        affectedTools: string[];
+        affectedSessions: string[];
+        affectedModels: string[];
+        affectedProviders: string[];
+        occurrences: number;
+        confidence: number;
+        experimental?: boolean;
+    };
+    recommendation: string;
+    verificationPlan: {
+        targetMetric: string;
+        baseline: number | null;
+        target: string;
+        window: string;
+    };
+    status: string;
+    createdAt: number;
+}
 interface PrevSummary {
     key: string;
     cost: number;
@@ -39,6 +67,7 @@ interface ReportFull extends ReportMeta {
         peakShare?: number;
     };
     insights?: InsightJson[];
+    improvements?: ImprovementJson[];
     prev?: PrevSummary;
     reportGeneration?: {
         mode: "local" | "model";
@@ -171,6 +200,12 @@ interface StatsJson {
             reasoning: number;
         }>;
     }[];
+    /** 数据完整性（fault isolation）：损坏/读取失败被跳过的会话；缺失 ≠ 0。 */
+    partial?: {
+        skippedSessionIds: string[];
+        skippedCount: number;
+        reasons: string[];
+    };
 }
 /** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
 /** 工具健康确定性排序：异常工具（失败明显）优先，健康工具按调用次数。 */

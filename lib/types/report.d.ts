@@ -6,6 +6,7 @@
 import { type ReportStats } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
 import { type Insight } from "./insights.js";
+import { type ImprovementItem } from "./improvements.js";
 import type { PeriodStatsRecord } from "./state.js";
 export type ReportPreset = "daily" | "24h" | "weekly" | "monthly" | "yearly" | "custom";
 export declare const PRESET_LABELS: Record<ReportPreset, string>;
@@ -21,5 +22,5 @@ export declare function presetRange(preset: ReportPreset, now: number): {
     from: number;
     to: number;
 };
-export declare function renderReport(stats: ReportStats, preset: ReportPreset, cost?: CostBreakdown, prev?: PeriodStatsRecord | null, insights?: Insight[]): string;
+export declare function renderReport(stats: ReportStats, preset: ReportPreset, cost?: CostBreakdown, prev?: PeriodStatsRecord | null, insights?: Insight[], improvements?: ImprovementItem[]): string;
 //# sourceMappingURL=report.d.ts.map

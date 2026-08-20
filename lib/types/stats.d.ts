@@ -9,6 +9,7 @@
  * 3. 事件类型是插件可扩展的（SessionEventMap 声明合并），所以这里
  *    对未知事件类型全部宽容跳过，只聚合我们认识的那几种。
  */
+import { type CorrectionAggregate, type CorrectionCategory } from "./improvements.js";
 /** 一行原始会话事件的宽松形态（插件只关心这几个字段）。 */
 export interface RawEvent {
     type: string;
@@ -66,9 +67,25 @@ export interface ModelUsage {
     cacheRead: number;
     reasoning: number;
 }
+/**
+ * 数据完整性（fault isolation）：读取失败被跳过的会话。
+ * 只存会话 id 与粗分类原因，绝不存错误原文 / 堆栈；
+ * 缺失数据不按 0 处理 —— 消费端必须披露 partial，不得当作"没有活动"。
+ */
+export interface DataPartial {
+    /** 被跳过的会话 id（上限 SKIP_IDS_CAP 条，其余只计数）。 */
+    skippedSessionIds: string[];
+    /** 被跳过的会话总数。 */
+    skippedCount: number;
+    /** 失败原因分类（去重、稳定、有界，如 "corrupt-log" / "read-failed"）。 */
+    reasons: string[];
+}
+/** skippedSessionIds 上限：报告体积有界，超出的只计数。 */
+export declare const SKIP_IDS_CAP = 20;
+export declare function emptyPartial(): DataPartial;
 export interface ReportStats {
     period: Period;
-    /** 覆盖的会话数（区间内有过事件的 session）。 */
+    /** 覆盖的会话数（区间内有过事件的 session；partial 时低于实际，见 partial）。 */
     sessions: number;
     /** 子代理会话数（delegationDepth >= 1 的 header）。 */
     subagentSessions: number;
@@ -144,6 +161,12 @@ export interface ReportStats {
     toolHealth: ToolHealth[];
     /** 小时级活跃明细（tooltip 用；与 dayHourSeries 同日期集）。 */
     dayHourDetail: HourlyDetail[];
+    /** 工具 → 失败发生的会话 id 列表（Improve 跨 session 证据；只存 id）。 */
+    toolFailedSessions: Record<string, string[]>;
+    /** 人工纠正分类聚合（v0.5 Improve；只存类别与计数，不存原文）。 */
+    correctionSignals: CorrectionAggregate[];
+    /** 数据完整性（fault isolation）：读取失败被跳过的会话；缺失 ≠ 0，必须披露。 */
+    partial: DataPartial;
 }
 /** 疑似密钥/令牌模式（只做存在性检测，从不存储命中原文）。 */
 export declare const SECRET_PATTERNS: {
@@ -208,6 +231,8 @@ interface ToolHealthAcc {
     incomplete: number;
     durations: number[];
     errorCodes: Record<string, number>;
+    /** 失败发生的会话集合（Improve 跨 session 证据；只存 id）。 */
+    failedSessions: Set<string>;
 }
 /** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
 export declare function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth;
@@ -352,6 +377,11 @@ export interface HourBucket {
     };
     /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
     toolHealth: Record<string, ToolHealthAcc>;
+    /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
+    corrections: {
+        category: CorrectionCategory;
+        sessionId: string;
+    }[];
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
@@ -380,6 +410,6 @@ export interface SessionBucketView {
     titles: string[];
 }
 /** 把多个会话的分桶视图聚合成区间统计（与 aggregate 等价，但 O(分桶数)）。 */
-export declare function aggregateBuckets(views: SessionBucketView[], period: Period, headers?: RawSessionHeader[]): ReportStats;
+export declare function aggregateBuckets(views: SessionBucketView[], period: Period, headers?: RawSessionHeader[], partial?: DataPartial): ReportStats;
 export {};
 //# sourceMappingURL=stats.d.ts.map

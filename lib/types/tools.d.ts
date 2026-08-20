@@ -10,6 +10,7 @@ import { type ToolDefinition } from "@deepseek-ai/dsh-tools";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
 import { type CostBreakdown } from "./pricing.js";
 import { type Insight } from "./insights.js";
+import { type ImprovementItem } from "./improvements.js";
 import { type ReportStats } from "./stats.js";
 /**
  * 结构化类型：只依赖 sessionQuery 的行为面，不依赖具体类名。
@@ -79,13 +80,25 @@ export interface ToolsHost {
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export declare const INDEX_TTL_MS: number;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export declare const INDEX_VERSION = 13;
+export declare const INDEX_VERSION = 14;
+/**
+ * 读取失败原因粗分类（fault isolation）。
+ *
+ * 原则：只产出**有界、稳定、非敏感**的类别（如 "corrupt-log"），
+ * 绝不把错误消息 / 堆栈原文存进报告 —— 日志损坏原因属于技术诊断，
+ * 报告只声明"哪类失败、多少会话"，细节留给用户自己看 ~/.dsh。
+ */
+export declare function classifyReadError(error: unknown): string;
 /**
  * 收集区间统计。两条数据路径：
  * - live 会话：readSession 走内存快照，直接分桶；
  * - 持久化会话：优先读 whale 域的会话索引（10 分钟新鲜度窗口），
  *   过期才读完整日志（zstd 解压重放，实测 60s+）并回写索引。
  * 返回与 aggregate(events, …) 等价的 ReportStats。
+ *
+ * Fault isolation：单个会话损坏 / 读取失败 → 跳过该会话并记入
+ * stats.partial（id + 粗分类原因），其余健康会话照常聚合；
+ * 缺失数据不按 0 处理 —— 报告与 UI 必须披露 partial。
  */
 export declare function collectEvents(svc: ReportServices, period: {
     from: number;
@@ -114,6 +127,8 @@ export interface ReportGeneration {
     key: string;
     prev: PeriodStatsRecord | null;
     insights: Insight[];
+    /** Improve 建议（v0.5；确定性规则，旧报告可缺省）。 */
+    improvements: ImprovementItem[];
     reportGeneration: ReportGenerationMeta;
 }
 export declare function generateReportData(svc: ReportServices, preset: string, range: {
