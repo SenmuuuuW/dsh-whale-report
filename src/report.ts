@@ -11,6 +11,7 @@ import {
 } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
 import { toolFamilies, type Insight } from "./insights.js";
+import { type ImprovementItem } from "./improvements.js";
 import type { PeriodStatsRecord } from "./state.js";
 
 export type ReportPreset = "daily" | "24h" | "weekly" | "monthly" | "yearly" | "custom";
@@ -104,6 +105,7 @@ export function renderReport(
   cost?: CostBreakdown,
   prev?: PeriodStatsRecord | null,
   insights?: Insight[],
+  improvements?: ImprovementItem[],
 ): string {
   const label = PRESET_LABELS[preset];
   const { from, to } = stats.period;
@@ -131,6 +133,16 @@ export function renderReport(
       } · 命中率 ${prev.cacheHitRate}% → ${Math.round((stats.tokens.cacheRead / Math.max(1, stats.tokens.input + stats.tokens.cacheRead)) * 1000) / 10}%`,
     );
   }
+  // Fault isolation：部分会话损坏/读取失败被跳过 → 明示 partial，缺失 ≠ 0。
+  if (stats.partial.skippedCount > 0) {
+    const p = stats.partial;
+    const ids = p.skippedSessionIds.length > 0 ? `（${p.skippedSessionIds.join(" · ")}${p.skippedSessionIds.length < p.skippedCount ? " …" : ""}）` : "";
+    const reasons = p.reasons.length > 0 ? `，原因分类：${p.reasons.join(" / ")}` : "";
+    lines.push(
+      `> ⚠️ DATA PARTIAL：**${p.skippedCount}** 个会话日志损坏/无法读取，已跳过${ids}${reasons}。` +
+        "以下数字低于实际且**不按 0 计**；建议在 `~/.dsh` 中核查被跳过的会话。",
+    );
+  }
   lines.push("");
 
   if (insights !== undefined && insights.length > 0) {
@@ -141,6 +153,24 @@ export function renderReport(
       lines.push(`  ${insight.detail}`);
       lines.push(`  建议：${insight.action}`);
       if (insight.estimate !== undefined) lines.push(`  ${insight.estimate}`);
+      lines.push("");
+    }
+  }
+
+  // —— Improve（v0.5：值得改的行为建议；全部本地确定性，未自动修改任何配置）
+  if (improvements !== undefined && improvements.length > 0) {
+    lines.push("## Improve");
+    lines.push("");
+    lines.push("> 只读建议：DeepTrace 未修改任何 skill / workflow / 仓库文件。");
+    lines.push("");
+    for (const item of improvements.slice(0, 3)) {
+      const tag = item.evidence.experimental === true ? "（EXPERIMENTAL）" : "";
+      lines.push(`- **[${item.severity}] ${item.title}**${tag}`);
+      lines.push(`  ${item.summary}`);
+      lines.push(`  建议：${item.recommendation}`);
+      lines.push(
+        `  验证：${item.verificationPlan.targetMetric} 基线 ${item.verificationPlan.baseline ?? "—"} → 目标 ${item.verificationPlan.target}（${item.verificationPlan.window}）`,
+      );
       lines.push("");
     }
   }

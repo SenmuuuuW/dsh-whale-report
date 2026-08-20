@@ -264,6 +264,33 @@ describe("索引层：bucketizeOwnEvents + aggregateBuckets 与 aggregate 等价
     expect(total).toBe(1);
     expect(built.lastSeq).toBe(2);
   });
+
+  it("窗口外会话不计入 sessions / sessionsDetail（真实数据回归：历史会话曾全算进本周）", () => {
+    const base = new Date(2026, 7, 10, 0, 0, 0).getTime(); // 本地零点
+    const period = { from: base, to: base + 24 * 3600_000 };
+    // s-old：事件全部在窗口之前（历史会话）；s-new：窗口内活跃
+    const oldEvents = [ev("turn/start", base - 5 * 3600_000, { sessionId: "s-old" }), ev("turn/start", base - 4 * 3600_000, { sessionId: "s-old" })];
+    const newEvents = [ev("turn/start", base + 3600_000, { sessionId: "s-new" })];
+    const all = [...oldEvents, ...newEvents];
+    const direct = aggregate(all, period, [
+      { id: "s-old", createdAt: base - 10 * 24 * 3600_000 },
+      { id: "s-new", createdAt: base - 3600_000 },
+    ]);
+    const views = [
+      { sessionId: "s-old", buckets: bucketizeOwnEvents("s-old", oldEvents.map((e) => ({ ...e, seq: 0 })), 0).buckets, titles: [] },
+      { sessionId: "s-new", buckets: bucketizeOwnEvents("s-new", newEvents.map((e) => ({ ...e, seq: 0 })), 0).buckets, titles: [] },
+    ];
+    const indexed = aggregateBuckets(views, period, [
+      { id: "s-old", createdAt: base - 10 * 24 * 3600_000 },
+      { id: "s-new", createdAt: base - 3600_000 },
+    ]);
+    // 双路径等价：只算窗口内活跃的会话
+    expect(direct.sessions).toBe(1);
+    expect(indexed.sessions).toBe(1);
+    expect(indexed.sessionsDetail.map((s) => s.sessionId)).toEqual(["s-new"]);
+    expect(indexed.sessionsDetail[0].events).toBe(1);
+    expect(indexed.totalEvents).toBe(direct.totalEvents);
+  });
 });
 
 describe("DeepSeek 计费（pricing）", () => {

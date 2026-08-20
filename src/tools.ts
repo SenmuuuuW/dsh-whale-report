@@ -11,7 +11,8 @@ import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
 import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, isPeakHourCST, type CostBreakdown } from "./pricing.js";
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
-import { aggregateBuckets, bucketizeOwnEvents, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
+import { computeImprovements, type ImprovementItem } from "./improvements.js";
+import { aggregateBuckets, bucketizeOwnEvents, emptyPartial, SKIP_IDS_CAP, type DataPartial, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
 /**
@@ -99,7 +100,21 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 /** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
 export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 13;
+export const INDEX_VERSION = 14;
+
+/**
+ * 读取失败原因粗分类（fault isolation）。
+ *
+ * 原则：只产出**有界、稳定、非敏感**的类别（如 "corrupt-log"），
+ * 绝不把错误消息 / 堆栈原文存进报告 —— 日志损坏原因属于技术诊断，
+ * 报告只声明"哪类失败、多少会话"，细节留给用户自己看 ~/.dsh。
+ */
+export function classifyReadError(error: unknown): string {
+  if (error instanceof Error && /corrupt|torn|zstd|zstandard|jsonl/i.test(error.message)) {
+    return "corrupt-log";
+  }
+  return "read-failed";
+}
 
 /**
  * 收集区间统计。两条数据路径：
@@ -107,6 +122,10 @@ export const INDEX_VERSION = 13;
  * - 持久化会话：优先读 whale 域的会话索引（10 分钟新鲜度窗口），
  *   过期才读完整日志（zstd 解压重放，实测 60s+）并回写索引。
  * 返回与 aggregate(events, …) 等价的 ReportStats。
+ *
+ * Fault isolation：单个会话损坏 / 读取失败 → 跳过该会话并记入
+ * stats.partial（id + 粗分类原因），其余健康会话照常聚合；
+ * 缺失数据不按 0 处理 —— 报告与 UI 必须披露 partial。
  */
 export async function collectEvents(
   svc: ReportServices,
@@ -122,7 +141,10 @@ export async function collectEvents(
 
   const candidates = sessions.filter((record) => record.header.createdAt < period.to);
   const views: SessionBucketView[] = [];
-  let failed = 0;
+  const skippedIds: string[] = [];
+  const skippedIdSet = new Set<string>();
+  const skippedReasons = new Set<string>();
+  let skippedCount = 0;
 
   await mapWithConcurrency(candidates, 12, async (record) => {
     const now = Date.now();
@@ -158,12 +180,22 @@ export async function collectEvents(
           titles: built.titles,
         });
       }
-    } catch {
-      failed += 1;
+    } catch (error) {
+      // 单会话损坏/读取失败：跳过，不影响其他会话；只记 id + 粗分类原因。
+      skippedCount += 1;
+      skippedIdSet.add(record.header.id);
+      if (skippedIds.length < SKIP_IDS_CAP) skippedIds.push(record.header.id);
+      skippedReasons.add(classifyReadError(error));
     }
   });
 
-  return aggregateBuckets(views, period, headers);
+  const partial: DataPartial = skippedCount > 0
+    ? { skippedSessionIds: skippedIds, skippedCount, reasons: [...skippedReasons].sort() }
+    : emptyPartial();
+  // 被跳过的会话不进聚合：既不计入 sessions/subagentSessions，也不产生任何统计痕迹；
+  // 它们的缺失通过 partial 披露（缺失 ≠ 0），不按"无活动"处理。
+  const coveredHeaders = skippedCount > 0 ? headers.filter((h) => !skippedIdSet.has(h.id)) : headers;
+  return aggregateBuckets(views, period, coveredHeaders, partial);
 }
 
 /**
@@ -211,6 +243,8 @@ export interface ReportGeneration {
   key: string;
   prev: PeriodStatsRecord | null;
   insights: Insight[];
+  /** Improve 建议（v0.5；确定性规则，旧报告可缺省）。 */
+  improvements: ImprovementItem[];
   reportGeneration: ReportGenerationMeta;
 }
 
@@ -273,6 +307,14 @@ export async function generateReportData(
   const prevKey = previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
   const insights = computeInsights({ stats, prev: prev ?? undefined, cost });
+  // Improve（v0.5）：基于聚合证据的确定性建议；不重扫原始事件，无额外 IO。
+  const improvements = computeImprovements({
+    stats,
+    cost,
+    period: key,
+    failedSessions: stats.toolFailedSessions,
+    corrections: stats.correctionSignals,
+  });
   // 生成本报告消耗：DeepTrace 的 stats → insights → 鲸评 → 导出全为本地确定性代码，
   // 不调用任何模型 API —— 报告生成本身消耗 0 token（这是产品事实，不是估算）。
   const reportGeneration = {
@@ -283,7 +325,7 @@ export async function generateReportData(
     totalTokens: 0,
     estimatedCostCny: 0,
   };
-  return { stats, cost, key, prev, insights, reportGeneration };
+  return { stats, cost, key, prev, insights, improvements, reportGeneration };
 }
 
 export function toPeriodRecord(
@@ -313,6 +355,7 @@ export function toPeriodRecord(
     redDanger: s.dangerousCommands.filter((d) => d.sev === "red").length,
     retryBursts: s.retryBursts,
     activeDays: s.activeDays,
+    skippedCount: s.partial.skippedCount,
   };
 }
 
@@ -416,7 +459,7 @@ export function whaleReportTool(svc: ReportServices): ToolDefinition {
       if (svc.periodStats !== undefined) {
         await svc.periodStats.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
       }
-      const report = renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights);
+      const report = renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements);
 
       // 不再把 whale/report 写进会话日志：核心 harness 的 KNOWN_SESSION_EVENT_TYPES
       // 不认插件自定义事件，且当前 Session.append 不支持 ignorable 标记，写入会让

@@ -97,7 +97,7 @@ async function generateReport(
   await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
   const stats = gen.stats;
   const cost = gen.cost;
-  const markdown = renderReport(stats, preset, cost, gen.prev, gen.insights);
+  const markdown = renderReport(stats, preset, cost, gen.prev, gen.insights, gen.improvements);
 
   const record: ReportRecord = {
     sem: REPORT_SEM,
@@ -113,6 +113,7 @@ async function generateReport(
     markdown,
     cost,
     insights: gen.insights,
+    improvements: gen.improvements,
     reportGeneration: gen.reportGeneration,
     prev: gen.prev
       ? {
@@ -232,6 +233,8 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   redDanger: record.redDanger,
                   retryBursts: record.retryBursts,
                   activeDays: record.activeDays,
+                  // 数据完整性：损坏/读取失败被跳过的会话数（0/缺失 = 完整）。
+                  skippedCount: record.skippedCount ?? 0,
                   // 进行中周期：key 命中当前自然周期。custom 无自然周期 → 恒 false。
                   isCurrent: currentKey !== null && record.key === currentKey,
                 }))
@@ -369,9 +372,10 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   turns: gen.stats.turns,
                   totalEvents: gen.stats.totalEvents,
                   stats: gen.stats as unknown,
-                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
+                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
                   cost: gen.cost,
                   insights: gen.insights,
+                  improvements: gen.improvements,
                   reportGeneration: gen.reportGeneration,
                   prev: gen.prev
                     ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
@@ -413,9 +417,10 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 turns: gen.stats.turns,
                 totalEvents: gen.stats.totalEvents,
                 stats: gen.stats as unknown,
-                markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights),
+                markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
                 cost: gen.cost,
                 insights: gen.insights,
+                improvements: gen.improvements,
                 reportGeneration: gen.reportGeneration,
                 prev: gen.prev
                   ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }

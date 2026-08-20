@@ -7,8 +7,8 @@ import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
 
 export type ReportId = string;
 
-/** 报告语义版本：语义变更（如 daily 改自然日、新增预设）时 +1，旧记录作废重建。 */
-export const REPORT_SEM = 5;
+/** 报告语义版本：语义变更（如 daily 改自然日、新增预设、新增 Improve 输出）时 +1，旧记录作废重建。 */
+export const REPORT_SEM = 6;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 
@@ -30,6 +30,8 @@ export const ReportRecordSchema = z.object({
   cost: z.unknown().optional(),
   /** 洞察卡片（Insight[]；旧记录可缺省）。 */
   insights: z.unknown().optional(),
+  /** Improve 建议（ImprovementItem[]，v0.5；旧记录可缺省）。 */
+  improvements: z.unknown().optional(),
   /** 生成本报告消耗（mode=local 时全 0；旧记录可缺省）。 */
   reportGeneration: z.unknown().optional(),
   /** 上一周期对比摘要（用于展示涨跌；旧记录可缺省）。 */
@@ -72,6 +74,8 @@ export const PeriodStatsSchema = z.object({
   redDanger: z.number(),
   retryBursts: z.number(),
   activeDays: z.number(),
+  /** 数据完整性：被跳过（损坏/读取失败）的会话数（fault isolation；0 或缺失 = 完整）。 */
+  skippedCount: z.number().int().min(0).optional(),
 });
 
 export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;

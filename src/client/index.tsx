@@ -72,6 +72,24 @@ const CSS = `
   border-radius: 8px; padding: 9px 12px; font-size: 13.5px;
 }
 [data-whale-report-inputs] input:focus { outline: none; border-color: #4d6bfe; box-shadow: 0 0 0 3px rgba(77,107,254,.12); }
+
+/* ── DATA PARTIAL（fault isolation：会话损坏被跳过时的非阻断提示）── */
+[data-whale-report-partial] {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px;
+  padding: 8px 12px; border: 1px solid #fde68a; border-radius: 8px;
+  background: #fffbeb; color: #7a5310; font-size: 12px; line-height: 1.55;
+}
+[data-whale-report-partial] b { color: #92400e; font-weight: 750; }
+[data-whale-report-partial] code {
+  font: 500 10px ui-monospace, Menlo, monospace; color: #92400e;
+  background: rgba(146, 64, 14, .08); border-radius: 4px; padding: 0 4px;
+}
+[data-whale-report-partialmark] {
+  display: inline-block; flex: none; margin-top: 1px;
+  font: 750 8.5px ui-monospace, Menlo, monospace; letter-spacing: .1em;
+  color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 1px 6px;
+}
+[data-whale-report-reportopening] [data-whale-report-partial] { margin: 12px 0 0; }
 [data-whale-report-actions] { display: flex; gap: 8px; }
 [data-whale-report-btn] {
   padding: 9px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
@@ -161,6 +179,54 @@ const CSS = `
   font-size: 12.5px; padding: 7px; border-radius: 8px; cursor: pointer; margin-bottom: 12px;
 }
 [data-whale-report-feedmore]:hover { border-color: #4d6bfe; background: #eef2ff; }
+
+/* ── IMPROVE 区（v0.5：值得改的行为建议；只读，未自动修改任何配置）── */
+[data-whale-report-improvelist] { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+[data-whale-report-improveitem] {
+  border-left: 2px solid var(--dt-cyan-deep); padding: 6px 0 6px 12px;
+  cursor: pointer; transition: border-color 120ms;
+}
+[data-whale-report-improveitem][data-severity="HIGH"] { border-left-color: #b91c1c; }
+[data-whale-report-improveitem][data-severity="MEDIUM"] { border-left-color: var(--dt-amber); }
+[data-whale-report-improveitem][data-severity="LOW"] { border-left-color: var(--dt-cyan-deep); }
+[data-whale-report-improveitem]:hover { border-left-color: var(--dt-blue); }
+[data-whale-report-improvehead] { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+[data-whale-report-improveindex] { font: 700 9.5px ui-monospace, monospace; color: var(--dt-faint); }
+[data-whale-report-improvesev] {
+  font: 750 8.5px ui-monospace, monospace; font-style: normal; letter-spacing: .08em;
+  padding: 1px 6px; border-radius: 4px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca;
+}
+[data-whale-report-improveitem][data-severity="MEDIUM"] [data-whale-report-improvesev] {
+  color: #92400e; background: #fffbeb; border-color: #fde68a;
+}
+[data-whale-report-improveitem][data-severity="LOW"] [data-whale-report-improvesev] {
+  color: var(--dt-cyan-deep); background: rgba(54, 185, 209, .12); border-color: rgba(54, 185, 209, .3);
+}
+[data-whale-report-improveexp] {
+  font: 700 8px ui-monospace, monospace; font-style: normal; letter-spacing: .08em;
+  color: var(--dt-muted); border: 1px dashed var(--dt-line-strong); border-radius: 4px; padding: 1px 5px;
+}
+[data-whale-report-improvehead] b { font: 650 12.5px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink); }
+[data-whale-report-improvetoggle] {
+  margin-left: auto; background: none; border: 1px solid var(--dt-line); border-radius: 6px;
+  font: 600 9px ui-monospace, monospace; color: var(--dt-muted); padding: 2px 8px; cursor: pointer;
+}
+[data-whale-report-improvetoggle]:hover { border-color: var(--dt-blue); color: var(--dt-blue); }
+[data-whale-report-improvenums] {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 5px;
+  font: 400 11px ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-muted);
+}
+[data-whale-report-improvenums] b { color: var(--dt-ink); font-weight: 800; font-variant-numeric: tabular-nums; margin-right: 4px; }
+[data-whale-report-improverec] { margin-top: 4px; font: 400 11px/1.5 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink-soft); }
+[data-whale-report-improvedetail] {
+  margin-top: 7px; padding: 8px 10px; background: var(--dt-paper-deep);
+  border: 1px solid var(--dt-line); border-radius: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+[data-whale-report-improverow] { display: grid; grid-template-columns: 72px 1fr; gap: 8px; }
+[data-whale-report-improverow] span { font: 750 8.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; padding-top: 2px; }
+[data-whale-report-improverow] p { margin: 0; font: 400 11px/1.55 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink-soft); }
+[data-whale-report-improvesid] { font: 400 9px ui-monospace, monospace; color: var(--dt-faint); }
 
 /* ── 本期鲸评 ── */
 
@@ -1568,6 +1634,30 @@ interface InsightJson {
   estimate?: string;
 }
 
+/** Improve 建议（v0.5；服务端确定性规则，旧报告可缺省）。 */
+interface ImprovementJson {
+  id: string;
+  period: string;
+  category: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  title: string;
+  summary: string;
+  evidence: {
+    metrics: Record<string, number>;
+    affectedTools: string[];
+    affectedSessions: string[];
+    affectedModels: string[];
+    affectedProviders: string[];
+    occurrences: number;
+    confidence: number;
+    experimental?: boolean;
+  };
+  recommendation: string;
+  verificationPlan: { targetMetric: string; baseline: number | null; target: string; window: string };
+  status: string;
+  createdAt: number;
+}
+
 interface PrevSummary {
   key: string;
   cost: number;
@@ -1583,6 +1673,7 @@ interface ReportFull extends ReportMeta {
   markdown: string;
   cost?: { perModel: Record<string, number>; total: number; currency: string; source: string; peakRatio?: number; peakShare?: number };
   insights?: InsightJson[];
+  improvements?: ImprovementJson[];
   prev?: PrevSummary;
   reportGeneration?: { mode: "local" | "model"; inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number; estimatedCostCny: number; model?: string };
 }
@@ -1653,6 +1744,12 @@ interface StatsJson {
     cost: number;
     modelTokens?: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }>;
   }[];
+  /** 数据完整性（fault isolation）：损坏/读取失败被跳过的会话；缺失 ≠ 0。 */
+  partial?: {
+    skippedSessionIds: string[];
+    skippedCount: number;
+    reasons: string[];
+  };
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
@@ -1742,6 +1839,28 @@ function SectionHeader({ index, title, meta }: { index: string; title: string; m
       <span data-whale-report-sectionindex>{index}</span>
       <div data-whale-report-sectiontitle>{title}</div>
       {meta !== undefined && <span data-whale-report-sectionmeta>{meta}</span>}
+    </div>
+  );
+}
+
+/** DATA PARTIAL 非阻断提示（fault isolation：部分会话损坏被跳过，数字低于实际）。 */
+function PartialBanner({ partial }: { partial?: StatsJson["partial"] }): ReactNode {
+  if (partial === undefined || partial.skippedCount <= 0) return null;
+  const shown = partial.skippedSessionIds.slice(0, 4);
+  return (
+    <div data-whale-report-partial role="note">
+      <span data-whale-report-partialmark>DATA PARTIAL</span>
+      <span>
+        <b>{partial.skippedCount}</b> 个会话日志损坏/无法读取，已跳过
+        {shown.length > 0 && (
+          <>
+            {" "}
+            <code>{shown.join(" · ")}</code>
+            {shown.length < partial.skippedCount && ` +${partial.skippedCount - shown.length}`}
+          </>
+        )}
+        。以下数字低于实际且不按 0 计，可在 ~/.dsh 中核查被跳过的会话。
+      </span>
     </div>
   );
 }
@@ -2299,6 +2418,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
           <div data-whale-report-stat><b>{fmt(totalTokens)}</b><span>Token burn</span></div>
           <div data-whale-report-stat><b>{cacheRate(s)}%</b><span>Cache hit</span></div>
         </div>
+        <PartialBanner partial={s.partial} />
       </header>
 
       <WhaleNote report={report} />
@@ -2740,6 +2860,8 @@ interface TrendPoint {
   to: number;
   /** 进行中周期（服务端确定性判定）：展示语义，不参与统计。 */
   isCurrent?: boolean;
+  /** 数据完整性：该周期被跳过（损坏/读取失败）的会话数（fault isolation）。 */
+  skippedCount?: number;
 }
 
 /** 周期短标签：wk-2026-W33 → W33；day-2026-08-16 → 08/16；mo-2026-06 → 2026-06；yr-2026 → 2026。 */
@@ -2861,6 +2983,7 @@ function TrendChart({
           <span key={t.key} data-live={t.isCurrent === true} data-hover={hoverIndex === i} onMouseEnter={() => onHover(i)}>
             {periodShortLabel(t.key)}
             {t.isCurrent === true ? " LIVE" : ""}
+            {(t.skippedCount ?? 0) > 0 ? " ⚠" : ""}
           </span>
         ))}
       </div>
@@ -2869,8 +2992,14 @@ function TrendChart({
           <b>
             {periodFullLabel(preset, hover.key)}
             {hover.isCurrent === true ? " · LIVE" : ""}
+            {(hover.skippedCount ?? 0) > 0 ? " · DATA PARTIAL" : ""}
           </b>
           <span>{periodRange(hover.from, hover.to)}{hover.isCurrent === true ? " · 当前进行中" : ""}</span>
+          {(hover.skippedCount ?? 0) > 0 && (
+            <span>
+              该周期 {hover.skippedCount} 个会话损坏被跳过 · 数字低于实际
+            </span>
+          )}
           <div>
             成本 <em>¥{hover.cost.toFixed(2)}</em>
           </div>
@@ -2919,6 +3048,7 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
   }
   const liveCount = trends.filter((t) => t.isCurrent === true).length;
   const completeCount = trends.length - liveCount;
+  const partialCount = trends.filter((t) => (t.skippedCount ?? 0) > 0).length;
   const chart = (cnTitle: string, metric: (t: TrendPoint) => number, color: string, unit: string) => (
     <TrendChart
       preset={preset}
@@ -2936,7 +3066,7 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
       <SectionHeader
         index="—"
         title="历史趋势"
-        meta={`HISTORY / ${completeCount} COMPLETE${liveCount > 0 ? ` · ${liveCount} LIVE` : ""}`}
+        meta={`HISTORY / ${completeCount} COMPLETE${liveCount > 0 ? ` · ${liveCount} LIVE` : ""}${partialCount > 0 ? ` · ${partialCount} PARTIAL` : ""}`}
       />
       <div data-whale-report-trendgrid>
         {chart("成本", (t) => t.cost, "var(--dt-blue)", "¥")}
@@ -3380,6 +3510,8 @@ function Dashboard(props: {
         </div>
       )}
 
+      <PartialBanner partial={s?.partial} />
+
       <ProviderBalanceCard />
       <PricePeriodCard />
       <LiveSessionCard />
@@ -3433,9 +3565,11 @@ function Dashboard(props: {
 
           <TrendSection preset={preset} />
 
+          {(report.improvements ?? []).length > 0 && <ImproveSection items={report.improvements ?? []} />}
+
           {insights.length > 0 && (
             <section data-whale-report-section>
-              <SectionHeader index="01" title="值得注意" meta="FINDINGS / INVESTIGATION LOG" />
+              <SectionHeader index="02" title="值得注意" meta="FINDINGS / INVESTIGATION LOG" />
               <InsightFeed insights={insights.slice(0, 3)} stats={s} />
               {insights.length > 3 && (
                 <button data-whale-report-feedmore onClick={onOpenReport}>
@@ -3463,7 +3597,7 @@ function Dashboard(props: {
           })()}
 
           <section data-whale-report-section>
-            <SectionHeader index="02" title="活跃扫描" meta={`SONAR / NIGHT ${night}%`} />
+            <SectionHeader index="03" title="活跃扫描" meta={`SONAR / NIGHT ${night}%`} />
             <div data-whale-report-zone>
               <div data-whale-report-scanmeta>
                 <span>SCAN <b>00—24</b></span><span>DEPTH <b>4,096m</b></span><span>PING <b>OK</b></span><span>NIGHT <b>{night}%</b></span>
@@ -3474,7 +3608,7 @@ function Dashboard(props: {
 
           {modelRows.length > 0 && (
             <section data-whale-report-section>
-              <SectionHeader index="03" title="模型分配" meta="RESOURCE / ALLOCATION" />
+              <SectionHeader index="04" title="模型分配" meta="RESOURCE / ALLOCATION" />
               <div data-whale-report-modeltable>
                 {modelRows.map((m, index) => (
                   <div key={m.model} data-whale-report-modelrow>
@@ -3497,7 +3631,7 @@ function Dashboard(props: {
           )}
 
           {(s.sessionsDetail ?? []).length > 0 && (
-            <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} totalCost={cost} index="04" />
+            <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} totalCost={cost} index="05" />
           )}
 
           <button data-whale-report-btn data-whale-report-fullbtn onClick={onOpenReport}>
@@ -4542,6 +4676,94 @@ function InsightFeed({ insights, stats }: { insights: InsightJson[]; stats: Stat
         );
       })}
     </div>
+  );
+}
+
+/** 指标中文标签（IMPROVE 强数字展示；未知 key 不渲染）。 */
+const IMPROVE_METRIC_LABEL: Record<string, string> = {
+  calls: "调用",
+  failures: "失败",
+  failureRate: "失败率",
+  sessions: "会话",
+  mainCodeCount: "主错误码",
+  p95Ms: "P95",
+  bursts: "重试",
+  corrections: "纠正",
+  peakCost: "高峰成本",
+  peakRatio: "高峰占比",
+  avoidableCost: "可省",
+  nightPct: "夜间",
+};
+
+/** Improve 列表（v0.5：默认 Top 3；点击展开 Evidence / VERIFY）。 */
+function ImproveSection({ items }: { items: ImprovementJson[] }): ReactNode {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const top = items.slice(0, 3);
+  return (
+    <section data-whale-report-section>
+      <SectionHeader index="01" title="值得改进" meta={`IMPROVE / TOP ${top.length}${items.length > top.length ? ` · +${items.length - top.length} 条` : ""}`} />
+      <div data-whale-report-improvelist>
+        {top.map((it, index) => {
+          const open = openId === it.id;
+          const metrics = Object.entries(it.evidence.metrics)
+            .filter(([key]) => IMPROVE_METRIC_LABEL[key] !== undefined)
+            .map(([key, value]) => ({ key, label: IMPROVE_METRIC_LABEL[key], value }));
+          return (
+            <div key={it.id} data-whale-report-improveitem data-severity={it.severity} data-open={open}>
+              <div data-whale-report-improvehead>
+                <span data-whale-report-improveindex>{String(index + 1).padStart(2, "0")}</span>
+                <em data-whale-report-improvesev>{it.severity}</em>
+                {it.evidence.experimental === true && <i data-whale-report-improveexp>EXPERIMENTAL</i>}
+                <b>{it.title}</b>
+                <button data-whale-report-improvetoggle onClick={() => setOpenId(open ? null : it.id)}>
+                  {open ? "收起 ↑" : "查看证据 ↓"}
+                </button>
+              </div>
+              <div data-whale-report-improvenums>
+                {metrics.map((m) => (
+                  <span key={m.key}>
+                    <b>{m.key === "failureRate" || m.key === "peakRatio" || m.key === "nightPct" ? `${m.value}%` : m.value}</b>
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+              <div data-whale-report-improverec>建议 · {it.recommendation}</div>
+              {open && (
+                <div data-whale-report-improvedetail>
+                  <div data-whale-report-improverow>
+                    <span>WHY</span>
+                    <p>{it.summary}</p>
+                  </div>
+                  <div data-whale-report-improverow>
+                    <span>AFFECTED</span>
+                    <p>
+                      {it.evidence.affectedTools.length > 0 && <>工具 {it.evidence.affectedTools.join(" / ")} · </>}
+                      会话 {it.evidence.occurrences} 个
+                      {it.evidence.affectedSessions.length > 0 && (
+                        <>
+                          {" "}
+                          <code data-whale-report-improvesid>{it.evidence.affectedSessions.slice(0, 4).join(" · ")}</code>
+                          {it.evidence.affectedSessions.length > 4 && ` +${it.evidence.affectedSessions.length - 4}`}
+                        </>
+                      )}
+                      {it.evidence.confidence > 0 && <> · 置信度 {(it.evidence.confidence * 100).toFixed(0)}%</>}
+                    </p>
+                  </div>
+                  <div data-whale-report-improverow>
+                    <span>VERIFY</span>
+                    <p>
+                      {it.verificationPlan.targetMetric} 基线 {it.verificationPlan.baseline ?? "—"} → 目标 {it.verificationPlan.target}
+                      {" · "}
+                      {it.verificationPlan.window}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

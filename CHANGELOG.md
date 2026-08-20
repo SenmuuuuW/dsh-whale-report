@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### 新增（v0.5 — TRACE → DIAGNOSE → IMPROVE → VERIFY-ready）
+- **IMPROVE 引擎**：Finding 回答"发生了什么"，Improve 回答"值不值得改、怎么改"
+  - 五类确定性规则：Repeated Tool Failure（跨会话同错误码根因）/ Retry Workflow Waste（跨会话命令重试）/ Repeated User Correction（有限分类，EXPERIMENTAL）/ Peak Cost Opportunity（高峰集中 + 夜间批量证据）/ 全部只读建议，不改任何 skill / workflow / 仓库文件
+  - Evidence-first：每条建议带 metrics / affectedSessions / 置信度 / VERIFY 基线 → 目标；stable id 跨周期不变；0 额外 LLM token
+  - 人工纠正只存类别与计数，绝不保存用户原句；命令/路径/hash 全部脱敏
+  - 全出口可见：markdown Improve 段 + 面板 IMPROVE 区（默认 Top3，展开看证据）+ 独立 HTML 02 / IMPROVE 章节（含 VERIFY 行）
+- **Fault isolation（resilience case）**：单个会话日志损坏（如 corrupt Zstandard / torn JSONL）不再拖垮 History / Report / Improve
+  - 损坏/不可读会话单独跳过，其余健康会话照常聚合；原因只做粗分类（corrupt-log / read-failed），不存错误原文
+  - 报告标记 partial data：markdown 顶部 DATA PARTIAL 行 + 独立 HTML 横幅 + Web 非阻断提示（Dashboard / 完整报告 / 趋势带 ⚠）
+  - 缺失数据不按 0 处理：被跳过会话不计入 sessions/subagentSessions、不产生 Improve 证据，只经 partial 披露
+  - Improve 不引用被跳过会话（跳过会话从未进入聚合视图，结构性保证 + 测试覆盖）
+
+### 修复（真实数据验收发现）
+- **summary 常规路径漏存 `improvements`**：markdown 里有 Improve 段，但 API record 没有
+  `improvements` 字段 → 面板拿不到数组、IMPROVE 区不渲染（custom 路径与 generate 路径已有）
+- **分桶路径窗口外会话误计入 sessions / sessionsDetail**：aggregateBuckets 在窗口裁剪前
+  `seenSessions.add` 并累加会话级明细 —— 真实数据上自然周报告把全部历史会话算成
+  "本周 97 会话"（实际 3）；修复为只有窗口内至少一个桶的会话才计入，钻取明细同步过滤
+- **纠正信号首条消息误报**：首条用户消息里的"用中文输出"式指令被当成纠正 —— 真实数据上
+  OUTPUT_FORMAT 20/28 命中来自首条消息（初始需求 ≠ 纠正）；修复为只在会话第 2+ 条
+  用户消息里统计（与 collab lateConstraints 同语义），直算/分桶双路径同口径
+- 新增回归测试：窗口外会话不计入（`tests/stats.test.ts`）、首条消息不计纠正
+  （`tests/improvements.test.ts`）；183 tests 全绿
+
 ### 兼容性
 - 依赖升级到 DSH **0.1.0-rc.7**：peerDependencies 全部 @deepseek-ai/* ^0.1.0-rc.7，
   devDependencies 锁定 rc.7 类型（与 DSH Desktop Community Market 的 rc.7 兼容边界对齐）

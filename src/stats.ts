@@ -9,6 +9,7 @@
  * 3. 事件类型是插件可扩展的（SessionEventMap 声明合并），所以这里
  *    对未知事件类型全部宽容跳过，只聚合我们认识的那几种。
  */
+import { classifyCorrectionText, type CorrectionAggregate, type CorrectionCategory } from "./improvements.js";
 
 /** 一行原始会话事件的宽松形态（插件只关心这几个字段）。 */
 export interface RawEvent {
@@ -73,9 +74,30 @@ export interface ModelUsage {
   reasoning: number;
 }
 
+/**
+ * 数据完整性（fault isolation）：读取失败被跳过的会话。
+ * 只存会话 id 与粗分类原因，绝不存错误原文 / 堆栈；
+ * 缺失数据不按 0 处理 —— 消费端必须披露 partial，不得当作"没有活动"。
+ */
+export interface DataPartial {
+  /** 被跳过的会话 id（上限 SKIP_IDS_CAP 条，其余只计数）。 */
+  skippedSessionIds: string[];
+  /** 被跳过的会话总数。 */
+  skippedCount: number;
+  /** 失败原因分类（去重、稳定、有界，如 "corrupt-log" / "read-failed"）。 */
+  reasons: string[];
+}
+
+/** skippedSessionIds 上限：报告体积有界，超出的只计数。 */
+export const SKIP_IDS_CAP = 20;
+
+export function emptyPartial(): DataPartial {
+  return { skippedSessionIds: [], skippedCount: 0, reasons: [] };
+}
+
 export interface ReportStats {
   period: Period;
-  /** 覆盖的会话数（区间内有过事件的 session）。 */
+  /** 覆盖的会话数（区间内有过事件的 session；partial 时低于实际，见 partial）。 */
   sessions: number;
   /** 子代理会话数（delegationDepth >= 1 的 header）。 */
   subagentSessions: number;
@@ -125,6 +147,12 @@ export interface ReportStats {
   toolHealth: ToolHealth[];
   /** 小时级活跃明细（tooltip 用；与 dayHourSeries 同日期集）。 */
   dayHourDetail: HourlyDetail[];
+  /** 工具 → 失败发生的会话 id 列表（Improve 跨 session 证据；只存 id）。 */
+  toolFailedSessions: Record<string, string[]>;
+  /** 人工纠正分类聚合（v0.5 Improve；只存类别与计数，不存原文）。 */
+  correctionSignals: CorrectionAggregate[];
+  /** 数据完整性（fault isolation）：读取失败被跳过的会话；缺失 ≠ 0，必须披露。 */
+  partial: DataPartial;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -252,10 +280,12 @@ interface ToolHealthAcc {
   incomplete: number;
   durations: number[];
   errorCodes: Record<string, number>;
+  /** 失败发生的会话集合（Improve 跨 session 证据；只存 id）。 */
+  failedSessions: Set<string>;
 }
 
 function newToolHealthAcc(name: string): ToolHealthAcc {
-  return { name, calls: 0, completed: 0, failed: 0, incomplete: 0, durations: [], errorCodes: {} };
+  return { name, calls: 0, completed: 0, failed: 0, incomplete: 0, durations: [], errorCodes: {}, failedSessions: new Set() };
 }
 
 /** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
@@ -483,6 +513,9 @@ export function emptyStats(period: Period): ReportStats {
     collab: { userMessages: 0, revisions: 0, lateConstraints: 0, sessionsWithRevision: 0, shortSessions: 0 },
     toolHealth: [],
     dayHourDetail: [],
+    toolFailedSessions: {},
+    correctionSignals: [],
+    partial: emptyPartial(),
   };
 }
 
@@ -645,6 +678,8 @@ export function aggregate(
     return a;
   };
   const sessionIdsByEvent: string[] = [];
+  // 人工纠正分类聚合（Improve 用；只存类别/计数/sessionId）。
+  const correctionAgg = new Map<CorrectionCategory, { sessions: Set<string>; count: number; sampleIds: string[] }>();
   // 若事件不带 sessionId，我们用 session 头部做一次粗糙映射；
   // 报告引擎对精确 session 归属不做硬要求 —— 只要能数、能统计时间。
   const days = new Map<string, number>();
@@ -726,6 +761,21 @@ export function aggregate(
           if (signals.constraint && uagg.userMessages > 1) {
             uagg.collabLateConstraints += 1;
             stats.collab.lateConstraints += 1;
+          }
+          // 纠正信号只在第 2+ 条用户消息里统计：首条消息是初始需求，不是纠正
+          // （与 collab lateConstraints 同语义；真实数据上 OUTPUT_FORMAT 曾有
+          // 20/28 命中来自首条"用中文输出"式指令 —— 全是误报）。
+          if (uagg.userMessages > 1) {
+            for (const category of classifyCorrectionText(text)) {
+              let agg = correctionAgg.get(category);
+              if (agg === undefined) {
+                agg = { sessions: new Set(), count: 0, sampleIds: [] };
+                correctionAgg.set(category, agg);
+              }
+              agg.count += 1;
+              agg.sessions.add(sessionId);
+              if (agg.sampleIds.length < 8 && !agg.sampleIds.includes(sessionId)) agg.sampleIds.push(sessionId);
+            }
           }
         }
         break;
@@ -861,6 +911,7 @@ export function aggregate(
             acc.completed += 1;
             if (failed) {
               acc.failed += 1;
+              acc.failedSessions.add(sessionId);
               const code = errorCodeOf(data as Record<string, unknown>);
               acc.errorCodes[code] = (acc.errorCodes[code] ?? 0) + 1;
             }
@@ -957,6 +1008,21 @@ export function aggregate(
     toolHealthAcc.set(pending.name, acc);
   }
   stats.toolHealth = finalizeAllToolHealth(toolHealthAcc);
+  // Improve 证据：工具 → 失败会话 id（只存 id；按名称排序保证确定性）。
+  const failedMap: Record<string, string[]> = {};
+  for (const [name, acc] of [...toolHealthAcc.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (acc.failedSessions.size > 0) failedMap[name] = [...acc.failedSessions].slice(0, 100);
+  }
+  stats.toolFailedSessions = failedMap;
+  // Improve 证据：人工纠正分类（只存类别/计数/sessionId 样本）。
+  stats.correctionSignals = [...correctionAgg.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([category, agg]) => ({
+      category,
+      sessions: agg.sessions.size,
+      count: agg.count,
+      sampleSessionIds: agg.sampleIds.slice(0, 8),
+    }));
 
   return stats;
 }
@@ -1021,6 +1087,8 @@ export interface HourBucket {
   collab: { revisions: number; lateConstraints: number };
   /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
   toolHealth: Record<string, ToolHealthAcc>;
+  /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
+  corrections: { category: CorrectionCategory; sessionId: string }[];
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -1054,6 +1122,7 @@ function newBucket(h: number): HourBucket {
     secretHits: [],
     collab: { revisions: 0, lateConstraints: 0 },
     toolHealth: {},
+    corrections: [],
   };
 }
 
@@ -1120,6 +1189,15 @@ export function bucketizeOwnEvents(
           if (signals.revision) bucket.collab.revisions += 1;
           // 首条用户消息里的约束是初始需求；后续消息里的约束才是"迟到补充"。
           if (signals.constraint && seen > 0) bucket.collab.lateConstraints += 1;
+          // Improve 证据：有限分类（只存类别 + sessionId；会话级去重在聚合端完成）。
+          // 只在第 2+ 条用户消息里统计（首条消息 = 初始需求，不是纠正；与直算路径同语义）。
+          if (seen > 0) {
+            for (const category of classifyCorrectionText(text)) {
+              if (bucket.corrections.length < 24) {
+                bucket.corrections.push({ category, sessionId });
+              }
+            }
+          }
         }
         break;
       }
@@ -1216,6 +1294,7 @@ export function bucketizeOwnEvents(
             acc.completed += 1;
             if (failed) {
               acc.failed += 1;
+              acc.failedSessions.add(sessionId);
               const code = errorCodeOf(data as Record<string, unknown>);
               acc.errorCodes[code] = (acc.errorCodes[code] ?? 0) + 1;
             }
@@ -1275,8 +1354,10 @@ export function aggregateBuckets(
   views: SessionBucketView[],
   period: Period,
   headers: RawSessionHeader[] = [],
+  partial: DataPartial = emptyPartial(),
 ): ReportStats {
   const stats = emptyStats(period);
+  stats.partial = partial;
   const seenSessions = new Set<string>();
   const currentModel = new Map<string, string>();
   const dayHourMap = new Map<string, number[]>();
@@ -1319,15 +1400,31 @@ export function aggregateBuckets(
   };
   const days = new Map<string, number>();
   const toolHealthMerged = new Map<string, ToolHealthAcc>();
+  // Improve 证据：人工纠正分类聚合（会话级去重）。
+  const correctionAgg = new Map<CorrectionCategory, { sessions: Set<string>; count: number; sampleIds: string[] }>();
 
   for (const view of views) {
-    seenSessions.add(view.sessionId);
+    // 窗口裁剪：先跳过区间外的桶，再累加会话级明细 —— 否则窗口外的会话
+    // 会被算进 sessions / sessionsDetail（真实数据上会严重高估：历史会话
+    // 全部计入"本周会话"）。会话只有在窗口内至少有一个桶时才算"覆盖"。
+    let inWindow = false;
     let agg = sessionAgg.get(view.sessionId);
     if (agg === undefined) {
       agg = { firstTime: Infinity, lastTime: 0, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "", turns: 0, userMessages: 0, collabRevisions: 0, collabLateConstraints: 0 };
       sessionAgg.set(view.sessionId, agg);
     }
     for (const bucket of view.buckets) {
+      // 分桶内事件可能在区间边界外（按小时取整后），做保守裁剪：
+      // 桶整体落在区间内才计入（跨边界的小时由 nextHour 裁剪近似处理）。
+      if (bucket.h + BUCKET_MS <= period.from || bucket.h >= period.to) continue;
+      const inFrom = bucket.h >= period.from;
+      const inTo = bucket.h + BUCKET_MS <= period.to;
+      if (!inFrom || !inTo) {
+        // 边界桶：按比例近似计入事件总数与活跃度，细粒度计数不裁剪
+        // （报告用途可接受；精确值由未索引路径保证）。
+        continue;
+      }
+      inWindow = true;
       const aggCur = agg!;
       aggCur.events += bucket.total;
       aggCur.commands += bucket.commands;
@@ -1348,16 +1445,6 @@ export function aggregateBuckets(
         m.output += usage.output;
         m.cacheRead += usage.cacheRead;
         m.reasoning += usage.reasoning;
-      }
-      if (bucket.h + BUCKET_MS <= period.from || bucket.h >= period.to) continue;
-      // 分桶内事件可能在区间边界外（按小时取整后），做保守裁剪：
-      // 桶整体落在区间内才计入（跨边界的小时由 nextHour 裁剪近似处理）。
-      const inFrom = bucket.h >= period.from;
-      const inTo = bucket.h + BUCKET_MS <= period.to;
-      if (!inFrom || !inTo) {
-        // 边界桶：按比例近似计入事件总数与活跃度，细粒度计数不裁剪
-        // （报告用途可接受；精确值由未索引路径保证）。
-        continue;
       }
       stats.totalEvents += bucket.total;
       stats.turns += bucket.turns;
@@ -1426,7 +1513,19 @@ export function aggregateBuckets(
         for (const [code, n] of Object.entries(acc.errorCodes ?? {})) {
           target.errorCodes[code] = (target.errorCodes[code] ?? 0) + n;
         }
+        for (const sid of acc.failedSessions ?? []) target.failedSessions.add(sid);
         toolHealthMerged.set(name, target);
+      }
+      // Improve 证据：人工纠正（会话级去重；与 direct 路径同口径）。
+      for (const c of bucket.corrections ?? []) {
+        let agg = correctionAgg.get(c.category);
+        if (agg === undefined) {
+          agg = { sessions: new Set(), count: 0, sampleIds: [] };
+          correctionAgg.set(c.category, agg);
+        }
+        agg.count += 1;
+        agg.sessions.add(c.sessionId);
+        if (agg.sampleIds.length < 8 && !agg.sampleIds.includes(c.sessionId)) agg.sampleIds.push(c.sessionId);
       }
       const d = new Date(bucket.h);
       const hour = d.getHours();
@@ -1444,6 +1543,8 @@ export function aggregateBuckets(
     for (const title of view.titles) {
       if (!stats.titles.includes(title)) stats.titles.push(title);
     }
+    // 会话只有在窗口内至少有一个桶时才计入"覆盖会话"（与直算路径同语义）。
+    if (inWindow) seenSessions.add(view.sessionId);
   }
 
   for (const header of headers) {
@@ -1467,6 +1568,8 @@ export function aggregateBuckets(
   let sessionsWithRevision = 0;
   let shortSessions = 0;
   for (const [sid, a] of sessionAgg) {
+    // 窗口外会话（无窗口内事件）不进钻取明细 —— 与直算路径同语义。
+    if (a.events <= 0) continue;
     const view = views.find((v) => v.sessionId === sid);
     if (a.collabRevisions > 0) sessionsWithRevision += 1;
     if (a.turns > 0 && a.turns <= 2) shortSessions += 1;
@@ -1496,5 +1599,20 @@ export function aggregateBuckets(
     sessionsWithRevision,
     shortSessions,
   };
+  // Improve 证据：工具 → 失败会话 id（与 direct 路径同口径）。
+  const failedMap: Record<string, string[]> = {};
+  for (const [name, acc] of [...toolHealthMerged.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (acc.failedSessions.size > 0) failedMap[name] = [...acc.failedSessions].slice(0, 100);
+  }
+  stats.toolFailedSessions = failedMap;
+  // Improve 证据：人工纠正分类（确定性排序）。
+  stats.correctionSignals = [...correctionAgg.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([category, agg]) => ({
+      category,
+      sessions: agg.sessions.size,
+      count: agg.count,
+      sampleSessionIds: agg.sampleIds.slice(0, 8),
+    }));
   return stats;
 }

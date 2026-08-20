@@ -132,6 +132,9 @@ function heroHtml(stats: ReportStats, record: ReportRecord, cost?: CostBreakdown
       <div><span>TOKEN</span><b>${fmt(totalTokens)}</b><small>CACHE ${cacheRate(stats)}%</small></div>
       <div><span>COMMAND</span><b>${fmt(stats.commands)}</b><small>RETRY ${stats.retryBursts}</small></div>
     </div>
+    ${stats.partial !== undefined && stats.partial.skippedCount > 0
+      ? `<div class="partial-banner">⚠️ <b>DATA PARTIAL</b> · ${stats.partial.skippedCount} 个会话日志损坏/无法读取，已跳过${stats.partial.skippedSessionIds.length > 0 ? `（${esc(stats.partial.skippedSessionIds.join(" · "))}${stats.partial.skippedSessionIds.length < stats.partial.skippedCount ? " …" : ""}）` : ""}。以下数字低于实际且<b>不按 0 计</b>。</div>`
+      : ""}
     <div class="opening-status"><span>DEPTH 4,096m</span><span>CONTEXT ${cacheRate(stats)}%</span><span>PING OK</span><span>/think RESOLVED</span></div>
   </header>`;
 }
@@ -177,6 +180,94 @@ function findingsHtml(record: ReportRecord): string {
         <span class="finding-state">${insight.level === "info" ? "LOGGED" : "REVIEW"}</span>
       </div>`)
     .join("");
+}
+
+type PrintableImprovement = {
+  id: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  title: string;
+  summary: string;
+  evidence: {
+    metrics: Record<string, number>;
+    affectedSessions: string[];
+    occurrences: number;
+    confidence: number;
+    experimental?: boolean;
+  };
+  recommendation: string;
+  verificationPlan: { targetMetric: string; baseline: number | null; target: string; window: string };
+};
+
+function printableImprovements(value: unknown): PrintableImprovement[] {
+  if (!Array.isArray(value)) return [];
+  const items: PrintableImprovement[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const item = raw as Record<string, unknown>;
+    const evidence = (item.evidence ?? {}) as Record<string, unknown>;
+    const plan = (item.verificationPlan ?? {}) as Record<string, unknown>;
+    const severity = item.severity === "HIGH" || item.severity === "MEDIUM" || item.severity === "LOW" ? item.severity : "MEDIUM";
+    const metrics = (evidence.metrics ?? {}) as Record<string, number>;
+    items.push({
+      id: typeof item.id === "string" ? item.id : "improve-unknown",
+      severity,
+      title: typeof item.title === "string" ? item.title : "",
+      summary: typeof item.summary === "string" ? item.summary : "",
+      evidence: {
+        metrics: Object.fromEntries(Object.entries(metrics).filter(([, v]) => typeof v === "number")),
+        affectedSessions: Array.isArray(evidence.affectedSessions) ? evidence.affectedSessions.filter((s): s is string => typeof s === "string") : [],
+        occurrences: typeof evidence.occurrences === "number" ? evidence.occurrences : 0,
+        confidence: typeof evidence.confidence === "number" ? evidence.confidence : 0,
+        experimental: evidence.experimental === true,
+      },
+      recommendation: typeof item.recommendation === "string" ? item.recommendation : "",
+      verificationPlan: {
+        targetMetric: typeof plan.targetMetric === "string" ? plan.targetMetric : "",
+        baseline: typeof plan.baseline === "number" ? plan.baseline : null,
+        target: typeof plan.target === "string" ? plan.target : "",
+        window: typeof plan.window === "string" ? plan.window : "",
+      },
+    });
+  }
+  return items.slice(0, 4);
+}
+
+/** IMPROVE 章节：值得改的行为建议（只读；证据 + VERIFY 基线，0 额外 LLM token）。 */
+function improveHtml(record: ReportRecord): string {
+  const items = printableImprovements(record.improvements).slice(0, 3);
+  if (items.length === 0) return "";
+  const metricLabel: Record<string, string> = {
+    calls: "调用", failures: "失败", failureRate: "失败率", sessions: "会话",
+    mainCodeCount: "主错误码", p95Ms: "P95", bursts: "重试", corrections: "纠正",
+    peakCost: "高峰成本", peakRatio: "高峰占比", avoidableCost: "可省", nightPct: "夜间",
+  };
+  const sevLabel: Record<string, string> = { HIGH: "HIGH", MEDIUM: "MEDIUM", LOW: "LOW" };
+  return `
+    <section class="chapter">
+      <div class="chapter-label"><span>02 / IMPROVE</span><b>值得改进</b><small>READ ONLY<br>NO AUTO EDIT<br>VERIFY READY</small></div>
+      <div class="chapter-content">
+        <div class="chapter-intro"><h2>Worth<br>changing?</h2><p>全部建议由确定性规则生成，只读、不自动修改任何 skill / workflow / 仓库文件。</p></div>
+        <div class="improve-list">
+          ${items.map((item, index) => {
+            const metricKeys = Object.keys(item.evidence.metrics).filter((key) => metricLabel[key] !== undefined).slice(0, 5);
+            const exp = item.evidence.experimental === true ? `<span class="improve-exp">EXPERIMENTAL</span>` : "";
+            return `
+            <div class="improve-item improve-item--${item.severity.toLowerCase()}" data-id="${esc(item.id)}">
+              <div class="improve-head">
+                <span class="improve-no">${String(index + 1).padStart(2, "0")}</span>
+                <span class="improve-sev">${sevLabel[item.severity]}</span>
+                ${exp}
+                <h3>${esc(item.title)}</h3>
+              </div>
+              ${metricKeys.length > 0 ? `<div class="improve-metrics">${metricKeys.map((key) => `<span><b>${item.evidence.metrics[key]}</b>${esc(metricLabel[key])}</span>`).join("")}</div>` : ""}
+              <p class="improve-why">${esc(item.summary)}</p>
+              <p class="improve-rec"><b>建议</b> ${esc(item.recommendation)}</p>
+              <p class="improve-verify"><b>VERIFY</b> ${esc(item.verificationPlan.targetMetric)} 基线 ${item.verificationPlan.baseline ?? "—"} → 目标 ${esc(item.verificationPlan.target)} · ${esc(item.verificationPlan.window)}</p>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    </section>`;
 }
 
 function gridHtml(stats: ReportStats): string {
@@ -361,7 +452,7 @@ function collabHtml(record: ReportRecord): string {
     )
     .join("");
   return `<section class="chapter">
-    <div class="chapter-label"><span>02 / COLLAB</span><b>协作复盘</b><small>HUMAN × HARNESS<br>COLLABORATION<br>REVIEW</small></div>
+    <div class="chapter-label"><span>03 / COLLAB</span><b>协作复盘</b><small>HUMAN × HARNESS<br>COLLABORATION<br>REVIEW</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Work<br>together.</h2><p>观察人机协作模式，找可能的摩擦，给可以尝试的优化——不评价人格，不归因单方。</p></div>
       ${rows}
@@ -481,6 +572,11 @@ export function renderHtmlReport(record: ReportRecord): string {
   .telemetry span, .telemetry small { display: block; color: var(--muted); font: 8px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .07em; }
   .telemetry b { display: block; margin: 5px 0 3px; font-size: 22px; line-height: 1; font-weight: 850; }
   .opening-status { display: flex; justify-content: flex-end; gap: 18px; margin-top: 9px; color: #8a96a8; font: 8.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+  .partial-banner {
+    margin-top: 12px; padding: 9px 12px; border: 1px solid #e8c36a; border-radius: 8px;
+    background: #fffbeb; color: #7a5310; font: 600 11px/1.6 ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .partial-banner b { color: #92400e; }
   .whale-note { position: relative; display: grid; grid-template-columns: 128px 1fr; gap: 28px; margin: 18px -54px 4px; padding: 34px 154px 34px 54px; background: #edf2f9; border-top: 1px solid #ccd7e8; border-bottom: 1px solid #ccd7e8; overflow: hidden; break-inside: avoid; }
   .note-label { display: flex; flex-direction: column; align-items: flex-start; border-right: 1px solid #c9d4e4; }
   .note-label span { color: var(--blue); font: 800 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
@@ -512,6 +608,24 @@ export function renderHtmlReport(record: ReportRecord): string {
   .finding-action b { color: var(--blue); font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
   .finding-estimate { color: #7b8799 !important; font-style: italic; }
   .finding-state { align-self: start; color: var(--muted); font: 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+  .improve-list { display: flex; flex-direction: column; gap: 12px; }
+  .improve-item { padding: 14px 14px 12px; border-left: 3px solid var(--cyan); border-radius: 4px; background: #f6f9fb; break-inside: avoid; }
+  .improve-item--high { border-left-color: var(--red); background: #fdf6f6; }
+  .improve-item--medium { border-left-color: var(--amber); background: #fdfaf3; }
+  .improve-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .improve-no { color: #8a96a8; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .improve-sev { color: var(--red); font: 800 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; padding: 1px 6px; border: 1px solid #f0b9bd; border-radius: 4px; background: #fff; }
+  .improve-item--medium .improve-sev { color: var(--amber); border-color: #e8c36a; }
+  .improve-item--low .improve-sev { color: var(--cyan); border-color: #9fd7e8; }
+  .improve-exp { color: var(--muted); font: 800 7px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; border: 1px dashed var(--hairline); border-radius: 4px; padding: 1px 5px; }
+  .improve-head h3 { margin: 0; font-size: 13.5px; line-height: 1.4; }
+  .improve-metrics { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+  .improve-metrics span { color: var(--muted); font-size: 10px; }
+  .improve-metrics b { color: var(--ink); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; margin-right: 4px; }
+  .improve-why { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  .improve-rec { margin: 7px 0 0; color: var(--ink); font-size: 11px; line-height: 1.55; }
+  .improve-rec b, .improve-verify b { color: var(--blue); font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; margin-right: 6px; }
+  .improve-verify { margin: 6px 0 0; color: #7b8799; font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
   .scan-frame { position: relative; padding: 16px 12px 12px 0; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); overflow: hidden; break-inside: avoid; }
   .scan-meta { display: flex; justify-content: space-between; margin: 0 0 8px 30px; color: #8c98a9; font: 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
   .grid { position: relative; z-index: 1; display: flex; gap: 3px; }
@@ -666,10 +780,12 @@ export function renderHtmlReport(record: ReportRecord): string {
     </div>
   </section>
 
+  ${improveHtml(record)}
+
   ${collabHtml(record)}
 
   <section class="chapter">
-    <div class="chapter-label"><span>03 / ACTIVITY</span><b>活跃轨迹</b><small>SONAR<br>SCAN LOG<br>UTC+08</small></div>
+    <div class="chapter-label"><span>04 / ACTIVITY</span><b>活跃轨迹</b><small>SONAR<br>SCAN LOG<br>UTC+08</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Agent<br>trajectory.</h2><p>${stats.activeDays} 个活跃日 · 峰值 ${stats.busiestDay === null ? "—" : `${esc(stats.busiestDay.date)} / ${stats.busiestDay.events} events`} · 深夜 ${nightRatio(stats)}%</p></div>
       ${gridHtml(stats)}
@@ -679,7 +795,7 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>04 / RESOURCES</span><b>模型与工具</b><small>MODEL<br>TOOL CALL<br>/think</small></div>
+    <div class="chapter-label"><span>05 / RESOURCES</span><b>模型与工具</b><small>MODEL<br>TOOL CALL<br>/think</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Dive<br>profile.</h2><p>模型、Token 与工具调用按同一周期口径汇总；费用仅作观察，不替代平台账单。</p></div>
       <div class="resource-grid">
@@ -690,7 +806,7 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>05 / RISKS</span><b>风险记录</b><small>READ ONLY<br>NO SECRET<br>CONTENT</small></div>
+    <div class="chapter-label"><span>06 / RISKS</span><b>风险记录</b><small>READ ONLY<br>NO SECRET<br>CONTENT</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Check before<br>you dive.</h2><p>只记录危险模式与疑似密钥的存在性；不会在报告中复现敏感信息原文。</p></div>
       <div class="risk-grid">${dangerHtml(stats)}${retryDiagnoseHtml(stats)}</div>
@@ -699,7 +815,7 @@ export function renderHtmlReport(record: ReportRecord): string {
   </section>
 
   <section class="chapter">
-    <div class="chapter-label"><span>06 / TRACE LOG</span><b>会话钻取</b><small>SESSION<br>INVESTIGATION<br>TARGET</small></div>
+    <div class="chapter-label"><span>07 / TRACE LOG</span><b>会话钻取</b><small>SESSION<br>INVESTIGATION<br>TARGET</small></div>
     <div class="chapter-content">
       <div class="chapter-intro"><h2>Follow the<br>trace.</h2><p>按费用排序的会话级轨迹。成本、重试与危险信号在同一行对齐，便于回到原会话复盘。</p></div>
       ${traceLogHtml(stats, cost)}
