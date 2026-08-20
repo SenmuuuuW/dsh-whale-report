@@ -9,6 +9,7 @@
 <p align="center">把 DSH 的 session、token、cost、tool call、风险与异常，<br/>转成可以真正读懂的 Agent 报告。</p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/dsh-whale-report"><img src="https://img.shields.io/npm/v/dsh-whale-report?label=npm&color=4d6bfe" alt="npm version"></a>
   <a href="https://github.com/SenmuuuuW/dsh-whale-report/releases"><img src="https://img.shields.io/github/v/release/SenmuuuuW/dsh-whale-report?label=version&color=4d6bfe" alt="version"></a>
   <a href="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml"><img src="https://github.com/SenmuuuuW/dsh-whale-report/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Anil-matcha/awesome-dsh-plugin"><img src="https://img.shields.io/badge/awesome--dsh--plugin-listed-4d6bfe" alt="awesome dsh plugin"></a>
@@ -20,9 +21,11 @@
     <td align="center" style="background:#0b1733;border-radius:12px;padding:10px 30px">
       <span style="color:#4d6bfe;font-weight:700;font-family:ui-monospace,Menlo,monospace">6 PERIODS</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">8 RULES</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">10 RULES</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">4 EXPORTS</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">PEAK / OFF-PEAK</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">READ-ONLY</span>
       <span style="color:#33445f"> · </span>
@@ -33,7 +36,7 @@
 
 <br/>
 
-<img src="docs/images/integration.png" alt="DeepTrace inside DSH" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
+<img src="docs/images/deeptrace-overview.png" alt="DeepTrace inside DSH" width="100%" style="border:1px solid #d9e3e8;border-radius:14px">
 
 ---
 
@@ -86,11 +89,13 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 | | |
 | --- | --- |
-| **Cost** | 按官方定价页实时价计算（6h 缓存，内置价兜底），按模型与按会话分账 |
+| **Cost** | 官方峰谷价分段计算（2026-08-17 起：高峰 9–12 / 14–18 为谷时 2 倍，定价页实时抓取、6h 缓存、内置价兜底），按模型与会话分账，报告带峰谷占比（peakShare / peakRatio）与「挪到谷时约省 ¥X」估算 |
+| **Live session** | 进行中会话实时计费（30s 刷新）：token 与费用按当前时段价折算，右上角常驻峰/谷徽标 + 双模型价目表 |
 | **Tokens** | input / output / cache read / reasoning，按模型拆分 |
 | **Sessions** | 会话数、回合数、事件数、活跃天数、最忙日 |
 | **Activity** | 小时级活跃热力图（GitHub contribution 风格，基于 Tokens 的固定 log 阈值分级）；hover 显示每小时 Tokens / 会话 / 回合 / 工具 / 成本；峰值时段、活跃小时、夜猫指数 |
 | **Tool calls** | 工具调用总量与明细，按工具族归类 |
+| **Tool health** | 高频工具（≥30 次）失败率健康分级，标出最不稳定的工具 |
 | **Retry bursts** | 同一命令连续重复 ≥3 次，附错误摘要样本 |
 | **Dangerous operations** | 红级（不可逆破坏）/ 黄级（需留意）分级，只对命令首行匹配 |
 | **Secret scan** | 6 类常见密钥模式的存在性检测，**只报有无，不存原文** |
@@ -108,7 +113,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 - explicit rules
 - reproducible report generation
 
-8 条确定性规则：深夜消耗、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势。每条都带阈值、归因与估算口径。
+10 条确定性规则：深夜消耗、峰谷时段成本、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势、工具健康。每条都带阈值、归因与估算口径。
 
 **协作复盘（COLLABORATION REVIEW）**：观察人机协作模式——需求漂移 / 迟到约束 / 上下文碎片化，最多 3 条，样本不足不展示；语气是"找摩擦、给可尝试的优化"，不评价人格、不把技术 retry 归因为沟通问题。
 
@@ -151,12 +156,22 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。
+需要 DSH（DeepSeek Harness，web 端）环境。两种安装方式，注意区分：
+
+**① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
 ```sh
 dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
 # 重启 dsh web 使宿主代码生效；客户端 bundle 随插件自动更新
 ```
+
+**② npm 包安装（仅依赖）** —— 把包装进你的项目：
+
+```sh
+npm install dsh-whale-report
+```
+
+> 注意：`npm install` 只是安装包本身，**不会自动注册为 DSH 插件**。Web UI、`whale_report` 工具与实时计费都需要通过方式 ① 注册；方式 ② 适合直接 import 报告引擎 / 用 CLI 生成报告的场景。
 
 两个入口：
 
@@ -198,7 +213,7 @@ Web / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 48 个单测：引擎 / 洞察 / 规则 / 导出
+pnpm test       # 139 个单测：引擎 / 洞察 / 规则 / 峰谷计价 / 导出
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
@@ -207,7 +222,7 @@ pnpm build      # tsc + tsdown（客户端单文件 bundle）
 当前边界，如实说明：
 
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
-- **费用为估算**：按官方定价页实时价计算，以平台账单为准
+- **费用为估算**：按官方峰谷价分段估算，以平台账单为准
 
 ## License
 
