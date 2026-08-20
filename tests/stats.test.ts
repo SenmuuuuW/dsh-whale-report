@@ -320,6 +320,42 @@ describe("洞察引擎", () => {
     expect(insights.some((i) => i.id === "night-cost")).toBe(true);
   });
 
+  it("峰谷洞察：peak-offpeak 且高峰费用达标时触发，并给出挪谷节省估算", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const stats = makeStats();
+    const cost = {
+      perModel: { "deepseek/pro": 30 },
+      total: 40,
+      currency: "CNY",
+      source: "peak-offpeak" as const,
+      fetchedAt: 0,
+      peakRatio: 0.75,
+      peakShare: 30,
+    };
+    const insights = computeInsights({ stats, cost });
+    const peak = insights.find((i) => i.id === "peak-shift");
+    expect(peak).toBeDefined();
+    expect(peak!.level).toBe("warning"); // 占 75% ≥ 60%
+    expect(peak!.title).toContain("¥30.0");
+    expect(peak!.estimate).toContain("¥15.0"); // 峰谷差价 2:1 → 省高峰一半
+    expect(peak!.detail).toContain("谷时 ¥10.0");
+  });
+
+  it("峰谷洞察：高峰费用低于阈值或非峰谷计价时不触发", async () => {
+    const { computeInsights } = await import("../src/insights.js");
+    const stats = makeStats();
+    const low = computeInsights({
+      stats,
+      cost: { perModel: {}, total: 40, currency: "CNY", source: "peak-offpeak", fetchedAt: 0, peakRatio: 0.5, peakShare: 1 },
+    });
+    expect(low.some((i) => i.id === "peak-shift")).toBe(false);
+    const builtin = computeInsights({
+      stats,
+      cost: { perModel: {}, total: 40, currency: "CNY", source: "builtin", fetchedAt: 0 },
+    });
+    expect(builtin.some((i) => i.id === "peak-shift")).toBe(false);
+  });
+
   it("周期 key：day-/24h-/wk-/mo-/yr- 前缀互不冲突，24h 无上一周期", async () => {
     const { periodKey, previousPeriodKey } = await import("../src/insights.js");
     const to = Date.parse("2026-08-14T12:00:00Z"); // 周五

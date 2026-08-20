@@ -35,6 +35,8 @@ interface ReportFull extends ReportMeta {
         total: number;
         currency: string;
         source: string;
+        peakRatio?: number;
+        peakShare?: number;
     };
     insights?: InsightJson[];
     prev?: PrevSummary;

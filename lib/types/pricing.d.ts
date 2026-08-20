@@ -71,6 +71,8 @@ export interface CostBreakdown {
     fetchedAt: number;
     /** 高峰时段 token 占比（峰谷计价时提供）。 */
     peakRatio?: number;
+    /** 高峰时段费用（峰谷计价时提供；谷时费用 = total − peakShare）。 */
+    peakShare?: number;
 }
 export declare const PRICING_TTL_MS: number;
 /** 取价格（6 小时缓存；失败回退内置价）。 */

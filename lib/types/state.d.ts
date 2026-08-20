@@ -5,7 +5,7 @@
 import { z } from "zod";
 export type ReportId = string;
 /** 报告语义版本：语义变更（如 daily 改自然日、新增预设）时 +1，旧记录作废重建。 */
-export declare const REPORT_SEM = 4;
+export declare const REPORT_SEM = 5;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 export declare const ReportRecordSchema: z.ZodObject<{

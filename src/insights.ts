@@ -77,6 +77,22 @@ export function computeInsights(input: InsightInput): Insight[] {
     });
   }
 
+  // ── 1.5 峰谷时段成本 ──
+  // 官方峰谷价差统一 2:1（输入/输出/缓存命中一致），故"全挪谷时"节省 ≈ 高峰费用 × 50%。
+  if (cost?.source === "peak-offpeak" && typeof cost.peakShare === "number" && cost.peakShare >= 2) {
+    const peakCost = cost.peakShare;
+    const valleyCost = cost.total - peakCost;
+    const peakPct = cost.total > 0 ? Math.round((peakCost / cost.total) * 100) : 0;
+    insights.push({
+      id: "peak-shift",
+      level: peakPct >= 60 ? "warning" : "tip",
+      title: `高峰时段花费 ¥${peakCost.toFixed(1)}（占 ${peakPct}%）`,
+      detail: `本期峰谷计价：高峰 ¥${peakCost.toFixed(1)} / 谷时 ¥${valleyCost.toFixed(1)}。高峰为北京时间 9–12、14–18，官方峰谷差价 2:1。`,
+      action: "批量/渲染/长分析任务排到 12–14 或 18 点后执行。",
+      estimate: `全部挪到谷时执行约省 ¥${(peakCost * 0.5).toFixed(1)}/周期（按峰谷差价 2:1 估算）。`,
+    });
+  }
+
   // ── 2. 重试风暴 ──
   if (stats.retryBursts >= 3) {
     const repeatedShare = Math.min(100, Math.round(((stats.retryBursts * 3) / Math.max(1, stats.commands)) * 100));

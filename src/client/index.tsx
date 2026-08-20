@@ -131,6 +131,13 @@ const CSS = `
 [data-whale-report-herodelta2] .muted { color: #9ca3af; }
 [data-whale-report-herostat] { display: flex; gap: 16px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f1f5f9; font-size: 12.5px; color: #64748b; }
 [data-whale-report-herostat] b { color: #0f172a; font-weight: 800; font-variant-numeric: tabular-nums; }
+[data-whale-report-heropeak] { display: inline-flex; align-items: center; gap: 5px; }
+[data-whale-report-heropeak] i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--dt-amber);
+}
+[data-whale-report-heropeak][data-valley] i { background: var(--dt-cyan-deep); }
+[data-whale-report-heropeak] b { color: var(--dt-amber); }
+[data-whale-report-heropeak][data-valley] b { color: var(--dt-cyan-deep); }
 
 /* ── 洞察 Feed ── */
 [data-whale-report-feed] { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
@@ -1574,7 +1581,7 @@ interface PrevSummary {
 interface ReportFull extends ReportMeta {
   stats: StatsJson;
   markdown: string;
-  cost?: { perModel: Record<string, number>; total: number; currency: string; source: string };
+  cost?: { perModel: Record<string, number>; total: number; currency: string; source: string; peakRatio?: number; peakShare?: number };
   insights?: InsightJson[];
   prev?: PrevSummary;
   reportGeneration?: { mode: "local" | "model"; inputTokens: number; outputTokens: number; cacheTokens: number; totalTokens: number; estimatedCostCny: number; model?: string };
@@ -3415,6 +3422,12 @@ function Dashboard(props: {
               <span><b>{fmt(s.toolCallsTotal)}</b> 工具调用</span>
               <span><b>{fmt(totalTokens)}</b> Tokens</span>
               <span><b>{cacheRate(s)}%</b> Cache hit</span>
+              {report.cost?.peakShare !== undefined && (
+                <>
+                  <span data-whale-report-heropeak><i /><b>¥{report.cost.peakShare.toFixed(1)}</b> 高峰</span>
+                  <span data-whale-report-heropeak data-valley><i /><b>¥{(report.cost.total - report.cost.peakShare).toFixed(1)}</b> 谷时</span>
+                </>
+              )}
             </div>
           </div>
 

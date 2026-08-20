@@ -236,6 +236,7 @@ export async function generateReportData(
       source: "peak-offpeak",
       fetchedAt: Date.now(),
       peakRatio,
+      peakShare: timed.peakShare,
     };
   } else {
     cost = await computeCost(stats.models);

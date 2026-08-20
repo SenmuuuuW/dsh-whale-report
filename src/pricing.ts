@@ -140,6 +140,8 @@ export interface CostBreakdown {
   fetchedAt: number;
   /** 高峰时段 token 占比（峰谷计价时提供）。 */
   peakRatio?: number;
+  /** 高峰时段费用（峰谷计价时提供；谷时费用 = total − peakShare）。 */
+  peakShare?: number;
 }
 
 /** 缓存的价格快照 + 过期时间。 */
