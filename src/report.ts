@@ -10,8 +10,10 @@ import {
   nightOwlIndex,
 } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
-import { toolFamilies, type Insight } from "./insights.js";
+import { shanghaiDayStart, toolFamilies, type Insight } from "./insights.js";
 import { type ImprovementItem } from "./improvements.js";
+import { usageTotalTokens, type UsageLike } from "./usage.js";
+import type { SalvagePartial } from "./stats.js";
 import type { PeriodStatsRecord } from "./state.js";
 
 export type ReportPreset = "daily" | "24h" | "weekly" | "monthly" | "yearly" | "custom";
@@ -38,8 +40,8 @@ export function presetRange(preset: ReportPreset, now: number): { from: number; 
   const d = new Date(now);
   switch (preset) {
     case "daily": {
-      d.setHours(0, 0, 0, 0);
-      return { from: d.getTime(), to: now };
+      // P1：DeepSeek 自然日固定 Asia/Shanghai（UTC+8），不依赖机器时区。
+      return { from: shanghaiDayStart(now), to: now };
     }
     case "24h":
       return { from: now - 1 * DAY, to: now };
@@ -99,6 +101,14 @@ function nightLabel(index: number): string {
   return "极低";
 }
 
+/** P0 salvage 文案：只读恢复摘要（不泄路径/堆栈）。 */
+function salvageLine(salvage: SalvagePartial): string {
+  if (salvage.droppedRecords > 0) {
+    return `${salvage.recoveredSessions} 个会话尾部损坏。已恢复 ${salvage.recoveredRecords} 条完整记录，${salvage.droppedRecords} 条残缺记录未计入`;
+  }
+  return `${salvage.recoveredSessions} 个会话的全部 ${salvage.recoveredRecords} 条记录（0 条丢弃）`;
+}
+
 export function renderReport(
   stats: ReportStats,
   preset: ReportPreset,
@@ -112,7 +122,8 @@ export function renderReport(
   const dateStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
   const night = nightOwlIndex(stats);
   const t = stats.tokens;
-  const totalTokens = t.input + t.output + t.cacheRead + t.reasoning;
+  // 唯一合计口径（P0）：reasoning 是 output 的子集，绝不重复计。
+  const totalTokens = usageTotalTokens(t);
   const totalCost = cost?.total ?? 0;
   const deltaPct = prev !== undefined && prev !== null && prev.cost > 0
     ? Math.round(((totalCost - prev.cost) / prev.cost) * 100)
@@ -133,14 +144,20 @@ export function renderReport(
       } · 命中率 ${prev.cacheHitRate}% → ${Math.round((stats.tokens.cacheRead / Math.max(1, stats.tokens.input + stats.tokens.cacheRead)) * 1000) / 10}%`,
     );
   }
-  // Fault isolation：部分会话损坏/读取失败被跳过 → 明示 partial，缺失 ≠ 0。
-  if (stats.partial.skippedCount > 0) {
+  // Fault isolation + P0 salvage：损坏/读取失败会话被跳过或只读恢复 → 明示 partial。
+  if (stats.partial.skippedCount > 0 || stats.partial.salvage !== undefined) {
     const p = stats.partial;
-    const ids = p.skippedSessionIds.length > 0 ? `（${p.skippedSessionIds.join(" · ")}${p.skippedSessionIds.length < p.skippedCount ? " …" : ""}）` : "";
-    const reasons = p.reasons.length > 0 ? `，原因分类：${p.reasons.join(" / ")}` : "";
+    const parts: string[] = [];
+    if (p.skippedCount > 0) {
+      const ids = p.skippedSessionIds.length > 0 ? `（${p.skippedSessionIds.join(" · ")}${p.skippedSessionIds.length < p.skippedCount ? " …" : ""}）` : "";
+      const reasons = p.reasons.length > 0 ? `，原因分类：${p.reasons.join(" / ")}` : "";
+      parts.push(`**${p.skippedCount}** 个会话日志损坏/无法读取，已跳过${ids}${reasons}`);
+    }
+    if (p.salvage !== undefined) parts.push(`已通过只读恢复 ${salvageLine(p.salvage)}`);
+    const missing = p.skippedCount > 0 || (p.salvage?.droppedRecords ?? 0) > 0;
     lines.push(
-      `> ⚠️ DATA PARTIAL：**${p.skippedCount}** 个会话日志损坏/无法读取，已跳过${ids}${reasons}。` +
-        "以下数字低于实际且**不按 0 计**；建议在 `~/.dsh` 中核查被跳过的会话。",
+      `> ⚠️ DATA PARTIAL：${parts.join("；")}。` +
+        (missing ? "缺失数据**不按 0 计**。" : "数据已完整恢复。"),
     );
   }
   lines.push("");

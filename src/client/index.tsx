@@ -18,6 +18,7 @@ import { triggerNotes, whaleMood } from "../whale-notes.js";
 import { computeCollaborationInsights } from "../collaboration.js";
 import { splitModelKey } from "./model-key.js";
 import { createRoot, type Root } from "react-dom/client";
+import { usageTotalTokens } from "../usage.js";
 import {
   ThemeRuntime,
   hostThemeOf,
@@ -2134,6 +2135,12 @@ interface StatsJson {
     skippedSessionIds: string[];
     skippedCount: number;
     reasons: string[];
+    /** P0 salvage：官方读取器拒读但已只读恢复的会话。 */
+    salvage?: {
+      recoveredSessions: number;
+      recoveredRecords: number;
+      droppedRecords: number;
+    };
   };
 }
 
@@ -2230,21 +2237,34 @@ function SectionHeader({ index, title, meta }: { index: string; title: string; m
 
 /** DATA PARTIAL 非阻断提示（fault isolation：部分会话损坏被跳过，数字低于实际）。 */
 function PartialBanner({ partial }: { partial?: StatsJson["partial"] }): ReactNode {
-  if (partial === undefined || partial.skippedCount <= 0) return null;
+  if (partial === undefined || (partial.skippedCount <= 0 && partial.salvage === undefined)) return null;
   const shown = partial.skippedSessionIds.slice(0, 4);
+  const sv = partial.salvage;
   return (
     <div data-whale-report-partial role="note">
       <span data-whale-report-partialmark>DATA PARTIAL</span>
       <span>
-        <b>{partial.skippedCount}</b> 个会话日志损坏/无法读取，已跳过
-        {shown.length > 0 && (
+        {partial.skippedCount > 0 && (
           <>
-            {" "}
-            <code>{shown.join(" · ")}</code>
-            {shown.length < partial.skippedCount && ` +${partial.skippedCount - shown.length}`}
+            <b>{partial.skippedCount}</b> 个会话日志损坏/无法读取，已跳过
+            {shown.length > 0 && (
+              <>
+                {" "}
+                <code>{shown.join(" · ")}</code>
+                {shown.length < partial.skippedCount && ` +${partial.skippedCount - shown.length}`}
+              </>
+            )}
+            。{" "}
           </>
         )}
-        。以下数字低于实际且不按 0 计，可在 ~/.dsh 中核查被跳过的会话。
+        {sv !== undefined && (
+          <>
+            {sv.droppedRecords > 0
+              ? `${sv.recoveredSessions} 个会话尾部损坏。已恢复 ${sv.recoveredRecords} 条完整记录，${sv.droppedRecords} 条残缺记录未计入。`
+              : `${sv.recoveredSessions} 个会话的全部 ${sv.recoveredRecords} 条记录已只读恢复（0 条丢弃）。`}{" "}
+          </>
+        )}
+        {partial.skippedCount > 0 || (sv !== undefined && sv.droppedRecords > 0) ? "缺失数据不按 0 计。" : "数据已完整恢复。"}
       </span>
     </div>
   );
@@ -2540,7 +2560,7 @@ function activityLevelOf(tokens: number): number {
 function TokenBar({ tokens }: { tokens: StatsJson["tokens"] }): ReactNode {
   const theme = useResolvedTheme();
   const legend = THEME_COLORS[theme].tokenLegend;
-  const total = tokens.input + tokens.output + tokens.cacheRead + tokens.reasoning;
+  const total = usageTotalTokens(tokens);
   if (total === 0) return null;
   const seg = (value: number, color: string, name: string) => (
     <i key={name} title={`${name} ${fmt(value)}`} style={{ width: `${(value / total) * 100}%`, background: color }} />
@@ -2625,14 +2645,14 @@ function ToolHealthBlock({ health }: { health: NonNullable<StatsJson["toolHealth
 
 function ModelTable({ models, cost }: { models: StatsJson["models"]; cost?: ReportFull["cost"] }): ReactNode {
   const entries = Object.entries(models).sort(
-    (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
+    (a, b) => usageTotalTokens(b[1]) - usageTotalTokens(a[1]),
   );
   if (entries.length === 0) return <div data-whale-report-tokenline>（无模型用量数据）</div>;
-  const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
+  const grand = entries.reduce((sum, [, u]) => sum + usageTotalTokens(u), 0);
   return (
     <div data-whale-report-modeltable>
       {entries.map(([model, u], index) => {
-        const total = u.input + u.output + u.cacheRead + u.reasoning;
+        const total = usageTotalTokens(u);
         const share = grand > 0 ? Math.round((total / grand) * 100) : 0;
         return (
           <div key={model} data-whale-report-modelrow>
@@ -2721,7 +2741,7 @@ function ReportView({ report, onDelete }: { report: ReportFull; onDelete: (id: s
   const s = report.stats;
   const night = s.totalEvents === 0 ? 0 : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
   const topTools = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
+  const totalTokens = usageTotalTokens(s.tokens);
   const [dangerExpanded, setDangerExpanded] = useState(false);
   const [samplesShown, setSamplesShown] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -3407,7 +3427,7 @@ function TrendChart({
             会话 <em>{hover.sessions}</em>
           </div>
           <div>
-            Tokens <em>{fmt(hover.tokens.input + hover.tokens.output + hover.tokens.cacheRead + hover.tokens.reasoning)}</em>
+            Tokens <em>{fmt(usageTotalTokens(hover.tokens))}</em>
           </div>
           <div>
             夜间 <em>{hover.nightRatio}%</em>
@@ -3829,7 +3849,7 @@ function Dashboard(props: {
   const insights = (report?.insights ?? [])
     .filter((i) => i.level !== "info")
     .sort((a, b) => (levelWeight[a.level] ?? 3) - (levelWeight[b.level] ?? 3));
-  const totalTokens = s !== undefined ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning : 0;
+  const totalTokens = s !== undefined ? usageTotalTokens(s.tokens) : 0;
   const night = s === undefined || s.totalEvents === 0
     ? 0
     : Math.round((s.hourHistogram.slice(0, 6).reduce((a, b) => a + b, 0) / s.totalEvents) * 100);
@@ -3856,11 +3876,11 @@ function Dashboard(props: {
   const modelRows = (() => {
     if (s === undefined) return [];
     const entries = Object.entries(s.models ?? {}).sort(
-      (a, b) => b[1].input + b[1].output + b[1].cacheRead + b[1].reasoning - (a[1].input + a[1].output + a[1].cacheRead + a[1].reasoning),
+      (a, b) => usageTotalTokens(b[1]) - usageTotalTokens(a[1]),
     );
-    const grand = entries.reduce((sum, [, u]) => sum + u.input + u.output + u.cacheRead + u.reasoning, 0);
+    const grand = entries.reduce((sum, [, u]) => sum + usageTotalTokens(u), 0);
     return entries.map(([model, u]) => {
-      const t = u.input + u.output + u.cacheRead + u.reasoning;
+      const t = usageTotalTokens(u);
       const { provider, model: modelName } = splitModelKey(model);
       return { model, modelName, provider, total: t, share: grand > 0 ? Math.round((t / grand) * 100) : 0, cost: report?.cost?.perModel?.[model] };
     });
@@ -4068,7 +4088,7 @@ export function budgetExportHeight(report: ReportFull, sections: ExportSections 
     h += 26; // 页脚
     return Math.min(Math.ceil(h * 1.12) + 140, 32000);
   }
-  const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
+  const totalTokens = usageTotalTokens(s.tokens);
   const hist = s.dayHourSeries ?? [];
   const cellW = (W - P * 2 - 30) / 24;
   const activityRows = Math.min(hist.length, 7);
@@ -4215,7 +4235,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   const P = 28;
   const rowH = (font: number) => Math.round(font * 1.5);
   const maxText = W - P * 2;
-  const totalTokens = s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.reasoning;
+  const totalTokens = usageTotalTokens(s.tokens);
   const cost = typeof report.cost?.total === "number" ? report.cost.total : null;
   const costText = cost !== null ? `¥${cost.toFixed(2)}` : "—";
   const delta = report.prev !== undefined && report.prev.cost > 0 && cost !== null
@@ -4236,7 +4256,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
   for (const hit of secretHits) secretCounts.set(hit.label, (secretCounts.get(hit.label) ?? 0) + 1);
   const sessions = s.sessionsDetail ?? [];
   const resolvedTotal = cost !== null && cost > 0 ? cost : sessions.reduce((sum, sd) => sum + sd.cost, 0);
-  const tot = (u: ModelUsageLike) => u.input + u.output + u.cacheRead + u.reasoning;
+  const tot = (u: ModelUsageLike) => usageTotalTokens(u);
   const modelEntries = Object.entries(s.models ?? {}).sort((a, b) => tot(b[1]) - tot(a[1]));
   const toolEntries = Object.entries(s.toolCalls ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const families = toolFamilies(s.toolCalls ?? {});
@@ -4455,12 +4475,12 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     y += 6;
   }
   paint(`活跃 ${s.activeDays} 天${s.busiestDay ? ` · 最忙 ${s.busiestDay.date}（${s.busiestDay.events} 条事件）` : ""}`, 11, C.muted, "sans", 400);
-  // TokenBar：input/output/cacheRead/reasoning 四段
+  // TokenBar：input(miss) + cacheRead(hit) + output 三段（P0 口径：output 已含 reasoning，
+  // reasoning 只在 OUTPUT 图例中作为 breakdown 展示，不占额外段宽）。
   const segments: [string, number, string][] = [
     ["INPUT", s.tokens.input, C.blue],
     ["OUTPUT", s.tokens.output, C.cyan],
     ["CACHE", s.tokens.cacheRead, "#9aa7ff"],
-    ["REASON", s.tokens.reasoning, "#cdd6ff"],
   ];
   const barW = W - P * 2;
   const barH = 14;
@@ -4491,6 +4511,11 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     }
   }
   y = legendY + 16;
+  if (s.tokens.reasoning > 0) {
+    // P0：reasoning 是 output 的子集（breakdown 展示，不重复计）。
+    paint(`OUTPUT 含思考 ${fmt(s.tokens.reasoning)}`, 8.5, C.faint, "mono", 400);
+    y += rowH(8.5);
+  }
 
   // ── 04 模型与工具 ──
   sectionHead("05", "模型与工具", "MODEL / TOOL / PLUGINS");
@@ -4657,7 +4682,7 @@ export async function exportReportImage(report: ReportFull, sections: ExportSect
     ctx.fillText(`${share}% OF PERIOD`, W - P - 110, y + 24);
     y += 24;
     const sessionTokens = Object.values(sd.modelTokens ?? {}).reduce(
-      (sum, u) => sum + u.input + u.output + u.cacheRead + u.reasoning,
+      (sum, u) => sum + usageTotalTokens(u),
       0,
     );
     ctx.font = `400 9px ${EXPORT_MONO}`;

@@ -6,6 +6,7 @@
  * 无客户端数据处理与 JS 依赖；打印时保留颜色并避免关键行被分页切断。
  */
 import { formatTokens } from "./stats.js";
+import { usageTotalTokens } from "./usage.js";
 import type { ReportRecord } from "./state.js";
 import type { ReportStats, SessionDetail } from "./stats.js";
 import type { CostBreakdown } from "./pricing.js";
@@ -34,7 +35,7 @@ function timeStr(ms: number): string {
 }
 
 function sumTokens(stats: ReportStats): number {
-  return stats.tokens.input + stats.tokens.output + stats.tokens.cacheRead + stats.tokens.reasoning;
+  return usageTotalTokens(stats.tokens);
 }
 
 function nightRatio(stats: ReportStats): number {
@@ -132,11 +133,20 @@ function heroHtml(stats: ReportStats, record: ReportRecord, cost?: CostBreakdown
       <div><span>TOKEN</span><b>${fmt(totalTokens)}</b><small>CACHE ${cacheRate(stats)}%</small></div>
       <div><span>COMMAND</span><b>${fmt(stats.commands)}</b><small>RETRY ${stats.retryBursts}</small></div>
     </div>
-    ${stats.partial !== undefined && stats.partial.skippedCount > 0
-      ? `<div class="partial-banner">⚠️ <b>DATA PARTIAL</b> · ${stats.partial.skippedCount} 个会话日志损坏/无法读取，已跳过${stats.partial.skippedSessionIds.length > 0 ? `（${esc(stats.partial.skippedSessionIds.join(" · "))}${stats.partial.skippedSessionIds.length < stats.partial.skippedCount ? " …" : ""}）` : ""}。以下数字低于实际且<b>不按 0 计</b>。</div>`
+    ${stats.partial !== undefined && (stats.partial.skippedCount > 0 || stats.partial.salvage !== undefined)
+      ? `<div class="partial-banner">⚠️ <b>DATA PARTIAL</b> · ${stats.partial.skippedCount > 0 ? `${stats.partial.skippedCount} 个会话日志损坏/无法读取，已跳过${stats.partial.skippedSessionIds.length > 0 ? `（${esc(stats.partial.skippedSessionIds.join(" · "))}${stats.partial.skippedSessionIds.length < stats.partial.skippedCount ? " …" : ""}）` : ""}。` : ""}${stats.partial.salvage !== undefined ? htmlSalvageLine(stats.partial.salvage) : ""}${stats.partial.skippedCount > 0 || (stats.partial.salvage?.droppedRecords ?? 0) > 0 ? "缺失数据<b>不按 0 计</b>。" : "数据已完整恢复。"}</div>`
       : ""}
     <div class="opening-status"><span>DEPTH 4,096m</span><span>CONTEXT ${cacheRate(stats)}%</span><span>PING OK</span><span>/think RESOLVED</span></div>
   </header>`;
+}
+
+/** P0 salvage 文案（HTML 版，不泄路径/堆栈）。 */
+function htmlSalvageLine(salvage: NonNullable<ReportStats["partial"]>["salvage"]): string {
+  if (salvage === undefined) return "";
+  if (salvage.droppedRecords > 0) {
+    return `${salvage.recoveredSessions} 个会话尾部损坏。已恢复 ${salvage.recoveredRecords} 条完整记录，${salvage.droppedRecords} 条残缺记录未计入。`;
+  }
+  return `${salvage.recoveredSessions} 个会话的全部 ${salvage.recoveredRecords} 条记录（0 条丢弃）。`;
 }
 
 function whaleNoteHtml(stats: ReportStats): string {
@@ -422,7 +432,7 @@ function secretHtml(stats: ReportStats): string {
 
 function sessionTokenTotal(session: SessionDetail): number {
   return Object.values(session.modelTokens ?? {}).reduce(
-    (total, usage) => total + usage.input + usage.output + usage.cacheRead + usage.reasoning,
+    (total, usage) => total + usageTotalTokens(usage),
     0,
   );
 }

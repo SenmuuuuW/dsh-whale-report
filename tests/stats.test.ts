@@ -302,8 +302,9 @@ describe("DeepSeek 计费（pricing）", () => {
       outputPerMillion: 2,
     };
     const usage = { input: 3_000_000, output: 500_000, cacheRead: 2_000_000, reasoning: 100_000 };
-    // 命中 2M×0.02 + 未命中 1M×1 + 输出 0.5M×2 = 0.04 + 1 + 1 = 2.04
-    expect(modelCost(usage, flash)).toBeCloseTo(2.04, 4);
+    // P0 口径：input=miss、cacheRead=hit 独立计费（不再 input-cacheRead 双减）：
+    // miss 3M×1 + hit 2M×0.02 + out 0.5M×2 = 3 + 0.04 + 1 = 4.04
+    expect(modelCost(usage, flash)).toBeCloseTo(4.04, 4);
     expect(modelTier("deepseek-v4-pro")).toBe("pro");
     expect(modelTier("deepseek-v4-flash")).toBe("flash");
   });

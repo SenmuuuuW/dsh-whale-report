@@ -166,14 +166,15 @@ describe("pricing", () => {
       "opencode-go/deepseek-v4-pro": USAGE,
     };
     const cost = await computeCost(models);
-    // modelCost 口径：cache×cache价 + (input-cache)×input价 + output×output价
-    // flash 官方价：0.3M×0.02 + 0.7M×1 + 0.5M×2 = 1.706
-    expect(cost.perModel["deepseek-v4-flash"]).toBeCloseTo(1.706, 6);
+    // modelCost 口径（P0 usage reconciliation）：input=miss、cacheRead=hit，独立计费，
+    // reasoning 含在 output 中不重复收费。
+    // flash 官方价：miss 1M×1 + hit 0.3M×0.02 + out 0.5M×2 = 1 + 0.006 + 1 = 2.006
+    expect(cost.perModel["deepseek-v4-flash"]).toBeCloseTo(2.006, 6);
     // opencode-go flash 默认同官方价（env 未配置）
-    expect(cost.perModel["opencode-go/deepseek-v4-flash"]).toBeCloseTo(1.706, 6);
-    // opencode-go pro：0.3M×0.025 + 0.7M×3 + 0.5M×6 = 5.1075
-    expect(cost.perModel["opencode-go/deepseek-v4-pro"]).toBeCloseTo(5.1075, 6);
-    expect(cost.total).toBeCloseTo(8.5195, 6);
+    expect(cost.perModel["opencode-go/deepseek-v4-flash"]).toBeCloseTo(2.006, 6);
+    // opencode-go pro：miss 1M×3 + hit 0.3M×0.025 + out 0.5M×6 = 3 + 0.0075 + 3 = 6.0075
+    expect(cost.perModel["opencode-go/deepseek-v4-pro"]).toBeCloseTo(6.0075, 6);
+    expect(cost.total).toBeCloseTo(10.0195, 6);
   });
 
   it("env override 后 opencode-go 按订阅价计算", async () => {
@@ -183,8 +184,8 @@ describe("pricing", () => {
     // @ts-ignore 同上：query import 重载模块以读取新 env
     const mod = await import("../src/pricing.js?envprice=1");
     const cost = await mod.computeCost({ "opencode-go/deepseek-v4-flash": USAGE });
-    // cache 0.3M×0.02 + miss 0.7M×0.8 + output 0.5M×1.6 = 1.366
-    expect(cost.perModel["opencode-go/deepseek-v4-flash"]).toBeCloseTo(1.366, 6);
+    // P0 口径：miss 1M×0.8 + cache 0.3M×0.02 + output 0.5M×1.6 = 0.8 + 0.006 + 0.8 = 1.606
+    expect(cost.perModel["opencode-go/deepseek-v4-flash"]).toBeCloseTo(1.606, 6);
   });
 });
 

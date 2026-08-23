@@ -12,6 +12,7 @@
  *   v4-pro:   命中 0.025 · 未命中 3 · 输出 6
  */
 import type { ModelUsage } from "./stats.js";
+import { usageTotalTokens } from "./usage.js";
 
 export interface Prices {
   cacheReadPerMillion: number;
@@ -86,7 +87,7 @@ export function computeCostTimed(
       const cost = modelCost(usage, prices[tier]);
       perModel[model] = (perModel[model] ?? 0) + cost;
       total += cost;
-      const tokens = usage.input + usage.output + usage.cacheRead + usage.reasoning;
+      const tokens = usageTotalTokens(usage);
       allTokens += tokens;
       if (priceSet === PEAK_PRICES) {
         peakCost += cost;
@@ -233,10 +234,13 @@ export async function getPrices(): Promise<{ prices: Record<"flash" | "pro", Pri
 
 /** 单模型费用：缓存命中 + 缓存未命中 + 输出。输入扣除已命中部分避免重复计费。 */
 export function modelCost(usage: ModelUsage, prices: Prices): number {
+  // P0（usage reconciliation）：DSH adapter 保证 inputTokens = cache miss（disjoint），
+  // cacheReadTokens = cache hit。cost = miss×inputRate + hit×cacheRate + output×outputRate。
+  // reasoning 包含在 output 中，绝不重复收费。
+  const miss = usage.input / 1_000_000 * prices.inputPerMillion;
   const cacheRead = usage.cacheRead / 1_000_000 * prices.cacheReadPerMillion;
-  const miss = Math.max(0, usage.input - usage.cacheRead) / 1_000_000 * prices.inputPerMillion;
   const output = usage.output / 1_000_000 * prices.outputPerMillion;
-  return cacheRead + miss + output;
+  return miss + cacheRead + output;
 }
 
 /** 全部模型的费用拆解。 */

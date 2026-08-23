@@ -248,7 +248,7 @@ export function toolHealthInsight(health: readonly ToolHealthLike[] | undefined)
 export function periodKey(preset: string, toMs: number): string {
   const d = new Date(toMs);
   const iso = d.toISOString();
-  if (preset === "daily") return `day-${iso.slice(0, 10)}`;
+  if (preset === "daily") return `day-${shanghaiDateKey(toMs)}`;
   if (preset === "24h") return `24h-${iso.slice(0, 10)}`;
   if (preset === "monthly") return `mo-${iso.slice(0, 7)}`;
   if (preset === "yearly") return `yr-${iso.slice(0, 4)}`;
@@ -259,6 +259,20 @@ export function periodKey(preset: string, toMs: number): string {
   const yearStart = new Date(Date.UTC(day.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((day.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return `wk-${day.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+/** Asia/Shanghai 固定偏移（UTC+8；DeepSeek 自然日统计口径，不依赖机器时区）。 */
+export const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** 上海时区某毫秒时刻所在自然日的 00:00（UTC 毫秒）。纯算术，确定性。 */
+export function shanghaiDayStart(ms: number): number {
+  const shifted = ms + SHANGHAI_OFFSET_MS;
+  return Math.floor(shifted / 86400000) * 86400000 - SHANGHAI_OFFSET_MS;
+}
+
+/** 上海时区某时刻的日期 key（如 2026-08-20）。 */
+export function shanghaiDateKey(ms: number): string {
+  return new Date(ms + SHANGHAI_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 /** 上一周期 key。24h 为滚动窗口，没有干净的自然"上一周期"→ 返回 null（不对比）。 */

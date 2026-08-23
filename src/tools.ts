@@ -13,6 +13,7 @@ import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCOD
 import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { computeImprovements, type ImprovementItem } from "./improvements.js";
 import { aggregateBuckets, bucketizeOwnEvents, emptyPartial, SKIP_IDS_CAP, type DataPartial, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
+import { findSessionLogPath, resolveDshHome, salvageSessionFile } from "./salvage.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
 /**
@@ -145,6 +146,10 @@ export async function collectEvents(
   const skippedIdSet = new Set<string>();
   const skippedReasons = new Set<string>();
   let skippedCount = 0;
+  // P0 salvage：被恢复会话的聚合（recoveredRecords/droppedRecords 只统计区间内窗口，不泄原文）。
+  let recoveredSessions = 0;
+  let recoveredRecords = 0;
+  let droppedRecords = 0;
 
   await mapWithConcurrency(candidates, 12, async (record) => {
     const now = Date.now();
@@ -181,7 +186,22 @@ export async function collectEvents(
         });
       }
     } catch (error) {
-      // 单会话损坏/读取失败：跳过，不影响其他会话；只记 id + 粗分类原因。
+      // P0 salvage：官方读取器拒读（如尾部 spliced seq 校验失败 / torn tail）时，
+      // 尝试只读恢复：逐帧解压 + 完整 JSONL record 进入聚合，残缺尾部丢弃。
+      // 只在 zstd 无法解压 / 中间 corruption / 无 header 时 fallback 到整 session skip。
+      const salvaged = trySalvageSession(svc, record.header.id, period.to);
+      if (salvaged.ok) {
+        views.push({
+          sessionId: salvaged.sessionId ?? record.header.id,
+          buckets: salvaged.buckets,
+          titles: salvaged.titles,
+        });
+        recoveredSessions += 1;
+        recoveredRecords += salvaged.recoveredRecords;
+        droppedRecords += salvaged.droppedRecords;
+        return;
+      }
+      // 单会话损坏/读取失败且无法安全恢复：跳过，不影响其他会话；只记 id + 粗分类原因。
       skippedCount += 1;
       skippedIdSet.add(record.header.id);
       if (skippedIds.length < SKIP_IDS_CAP) skippedIds.push(record.header.id);
@@ -189,13 +209,55 @@ export async function collectEvents(
     }
   });
 
-  const partial: DataPartial = skippedCount > 0
-    ? { skippedSessionIds: skippedIds, skippedCount, reasons: [...skippedReasons].sort() }
-    : emptyPartial();
+  const partial: DataPartial = {
+    ...(skippedCount > 0
+      ? { skippedSessionIds: skippedIds, skippedCount, reasons: [...skippedReasons].sort() }
+      : emptyPartial()),
+    ...(recoveredSessions > 0
+      ? {
+          salvage: {
+            recoveredSessions,
+            recoveredRecords,
+            droppedRecords,
+          },
+          reasons: [
+            ...(skippedCount > 0 ? [...skippedReasons].sort() : []),
+            droppedRecords > 0 ? "torn-jsonl-tail" : "salvaged",
+          ],
+        }
+      : {}),
+  };
   // 被跳过的会话不进聚合：既不计入 sessions/subagentSessions，也不产生任何统计痕迹；
   // 它们的缺失通过 partial 披露（缺失 ≠ 0），不按"无活动"处理。
+  // salvage 恢复的会话正常计入聚合（与健康会话同路径）。
   const coveredHeaders = skippedCount > 0 ? headers.filter((h) => !skippedIdSet.has(h.id)) : headers;
   return aggregateBuckets(views, period, coveredHeaders, partial);
+}
+
+/** P0 salvage 尝试：官方读取器失败后，直读 ~/.dsh 日志做只读恢复。 */
+function trySalvageSession(
+  svc: ReportServices,
+  sessionId: string,
+  periodTo: number,
+): { ok: boolean; sessionId?: string; buckets: SessionBucketView["buckets"]; titles: string[]; recoveredRecords: number; droppedRecords: number } | { ok: false } {
+  try {
+    const path = findSessionLogPath(resolveDshHome(), sessionId);
+    if (path === null) return { ok: false };
+    const salvaged = salvageSessionFile(path);
+    if (!salvaged.ok || salvaged.sessionId === undefined) return { ok: false };
+    const built = bucketizeOwnEvents(salvaged.sessionId, salvaged.events, 0, periodTo);
+    // 恢复的会话不进 session_index（数据源是只读修复，避免污染索引缓存语义）。
+    return {
+      ok: true,
+      sessionId: salvaged.sessionId,
+      buckets: built.buckets,
+      titles: built.titles,
+      recoveredRecords: salvaged.recoveredRecords,
+      droppedRecords: salvaged.droppedRecords,
+    };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**

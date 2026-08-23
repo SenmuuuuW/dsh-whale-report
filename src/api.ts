@@ -27,10 +27,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { periodKey } from "./insights.js";
 import { computeCostTimed } from "./pricing.js";
+import { buildProviderBreakdown } from "./usage.js";
 import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
 import { adapterOf, queryBalance } from "./balance.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** P1 comparison scope：按 provider 拆分的用量（与 DeepSeek Platform 对账时只取 deepseek-official）。 */
+function withProviderScope(record: ReportRecord): ReportRecord & {
+  providerBreakdown: ReturnType<typeof buildProviderBreakdown>;
+} {
+  const stats = record.stats as { models?: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }> } | undefined;
+  return {
+    ...record,
+    providerBreakdown: buildProviderBreakdown(stats?.models ?? {}),
+  };
+}
 
 export interface WebServerLike {
   register(route: {
@@ -327,7 +339,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 writeJson(res, 404, { ok: false, error: { code: "not-found", message: "报告不存在" } });
                 return;
               }
-              writeJson(res, 200, { ok: true, report: record });
+              writeJson(res, 200, { ok: true, report: withProviderScope(record) });
               return;
             }
             if (req.method === "GET" && method === "html") {
@@ -382,7 +394,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                     : undefined,
                 };
                 await table.put(record.id, record);
-                writeJson(res, 200, { ok: true, fresh: true, report: record });
+                writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record) });
                 return;
               }
               const key = periodKey(preset, range.to);
@@ -401,7 +413,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 }
               }
               if (found !== undefined && now - found.createdAt < SUMMARY_FRESHNESS_MS) {
-                writeJson(res, 200, { ok: true, fresh: false, report: found });
+                writeJson(res, 200, { ok: true, fresh: false, report: withProviderScope(found) });
                 return;
               }
               const gen = await generateReportData(svc, preset, range);
@@ -427,14 +439,14 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   : undefined,
               };
               await table.put(record.id, record);
-              writeJson(res, 200, { ok: true, fresh: true, report: record });
+              writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record) });
               return;
             }
             if (req.method === "POST") {
               const payload = (await readJsonBody(req)) as Record<string, unknown>;
               if (method === "generate") {
                 const record = await generateReport(svc, payload);
-                writeJson(res, 200, { ok: true, report: record });
+                writeJson(res, 200, { ok: true, report: withProviderScope(record) });
                 return;
               }
               if (method === "delete") {

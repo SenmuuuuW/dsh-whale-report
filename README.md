@@ -113,8 +113,9 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 | **Baseline** | 每周期自动落库，报告带"较上周期 ▲/▼"（费用、会话、缓存命中率等） |
 | **Trends** | 多周期趋势曲线（成本 / 会话 / 缓存命中 / 夜间活跃），hover 显示每周期明细与日期范围，进行中周期标记 LIVE（不与完整周期混比） |
 | **Provider balance** | 模型平台实时余额（DeepSeek 已支持，可扩展）；key 只在本机服务端使用 |
+| **Usage accounting（v0.5.0）** | canonical 口径：total = input(miss) + cacheRead(hit) + output，reasoning 只作 output breakdown 不重复计；费用 = miss×输入价 + hit×缓存价 + output×输出价（不再二次减缓存）；TODAY = Asia/Shanghai 自然日（不依赖机器时区），24H = rolling；API 输出 `providerBreakdown`，与 DeepSeek Platform 对账只取 deepseek-official |
 | **Improve（v0.5）** | 值得改的行为建议：Repeated Tool Failure / Retry Workflow Waste / Repeated User Correction（EXPERIMENTAL）/ Peak Cost Opportunity；每条带 metrics、受影响会话、置信度与 VERIFY 基线 → 目标；stable id 跨周期不变，只读、不自动修改任何配置 |
-| **Data partial** | 单个会话日志损坏/不可读 → 跳过并披露（只存会话 id + 粗分类原因，不含错误原文）；其余健康会话照常聚合，缺失数据不按 0 计；markdown / HTML / Web 三处非阻断提示 |
+| **Data partial / salvage** | 单个会话日志损坏/不可读 → 优先**只读 salvage**（逐帧解压 + 完整 JSONL 记录进入聚合，仅残缺尾部丢弃，不修改 ~/.dsh 原文件）；无法安全恢复时才整段跳过并披露（只存会话 id + 粗分类原因，不含错误原文）；缺失数据不按 0 计；markdown / HTML / Web 三处非阻断提示 |
 
 ## Deterministic insights
 
@@ -181,7 +182,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.0 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -239,7 +240,7 @@ Web / HTML / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 183 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / 峰谷计价 / 导出
+pnpm test       # 226 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
@@ -249,7 +250,7 @@ pnpm build      # tsc + tsdown（客户端单文件 bundle）
 
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
 - **费用为估算**：按官方峰谷价分段估算，以平台账单为准
-- **IMPROVE 为只读建议**：v0.5 只落 DETECTED / DISMISSED 与 VERIFY 计划，Apply / self-healing 未实现（路线图下一步）；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
+- **IMPROVE 为只读建议**：v0.5.0 只落 DETECTED / DISMISSED 与 VERIFY 计划；Apply / self-healing / 自动 Verify 闭环**未实现**（后续版本）；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
 - **PNG 主报告导出暂不含 IMPROVE 区**（HTML / PDF / markdown / 面板已含）
 
 ## License

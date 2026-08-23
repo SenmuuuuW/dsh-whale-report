@@ -2,7 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
-## [Unreleased]
+## [0.5.0] - 2026-08-23
+
+正式发布：TRACE → DIAGNOSE → **IMPROVE** → **VERIFY-ready**。
+产品状态：**LOCAL · READ-ONLY · DETERMINISTIC · 0 EXTRA LLM TOKENS**。
+未实现（后续版本）：Apply / self-healing / 自动 Verify 闭环 —— 本版本只产出只读建议与验证计划。
+兼容：DSH **0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`）；226 tests 全绿。
 
 ### 新增（v0.5 — TRACE → DIAGNOSE → IMPROVE → VERIFY-ready）
 - **IMPROVE 引擎**：Finding 回答"发生了什么"，Improve 回答"值不值得改、怎么改"
@@ -15,6 +20,29 @@
   - 报告标记 partial data：markdown 顶部 DATA PARTIAL 行 + 独立 HTML 横幅 + Web 非阻断提示（Dashboard / 完整报告 / 趋势带 ⚠）
   - 缺失数据不按 0 处理：被跳过会话不计入 sessions/subagentSessions、不产生 Improve 证据，只经 partial 披露
   - Improve 不引用被跳过会话（跳过会话从未进入聚合视图，结构性保证 + 测试覆盖）
+
+### 修复（usage reconciliation — P0/P1 统计准确性）
+- **P0 salvage：损坏会话不再整段丢弃**。官方读取器因尾部 `agent/inbox/spliced`
+  seq 校验失败而整体拒读的会话，DeepTrace 改为只读 salvage：逐帧解压（fzstd）→
+  newline 解析 JSONL → 完整 record 全部进入聚合，仅残缺尾部丢弃（droppedRecords=1，
+  不猜测/不补全）；zstd 无法解压 / 中间 corruption / 无 header 时才整 session skip。
+  不修改 ~/.dsh 原文件（hash 不变测试）。partial 新增 `salvage` 元数据
+  （recoveredSessions/recoveredRecords/droppedRecords），markdown / HTML / Web 三处
+  文案改为「已恢复 N 条完整记录，M 条残缺记录未计入」
+- **P0 totalTokens 双计修复**：DSH 语义确认 output 已含 reasoning → 全仓合计统一
+  `usageTotalTokens(input + cacheRead + output)`（src/usage.ts canonical helper），
+  reasoning 只作 output breakdown 展示；report.ts / client Hero / StatGrid /
+  html.ts / PNG 导出 / Activity / Trend / 模型行全部收敛
+- **P0 cost double-subtract 修复**：modelCost 不再 `max(0, input - cacheRead)`
+  （DSH adapter 已保证 input=miss 独占）→ miss×inputRate + hit×cacheRate +
+  output×outputRate；cache≫input 的真实样例不再清零 input 计费
+- **P1 provider comparison scope**：API 响应新增 `providerBreakdown`
+  （按 provider 聚合 tokens/requests）；与 DeepSeek Platform 对账只取
+  deepseek-official
+- **P1 TODAY timezone**：daily 自然日固定 Asia/Shanghai（UTC+8），不再依赖机器
+  时区（`shanghaiDayStart` 纯算术）；`periodKey('daily')` 改用上海日期
+- 新测试：salvage（torn tail / 中间 corruption / 无效 zstd / hash 不变 / collectEvents
+  集成）+ usage（total/pricing/breakdown/UTC+8 边界/双路径）；226 tests 全绿
 
 ### 新增（Dark Mode — System / Light / Dark 三档主题）
 - **主题解析优先级**：用户显式选择 > 宿主 theme（复用 DSH web 在 `<html>` 上的
