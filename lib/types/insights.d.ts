@@ -69,6 +69,12 @@ export declare function toolHealthInsight(health: readonly ToolHealthLike[] | un
  *   yr-YYYY         年报
  */
 export declare function periodKey(preset: string, toMs: number): string;
+/** Asia/Shanghai 固定偏移（UTC+8；DeepSeek 自然日统计口径，不依赖机器时区）。 */
+export declare const SHANGHAI_OFFSET_MS: number;
+/** 上海时区某毫秒时刻所在自然日的 00:00（UTC 毫秒）。纯算术，确定性。 */
+export declare function shanghaiDayStart(ms: number): number;
+/** 上海时区某时刻的日期 key（如 2026-08-20）。 */
+export declare function shanghaiDateKey(ms: number): string;
 /** 上一周期 key。24h 为滚动窗口，没有干净的自然"上一周期"→ 返回 null（不对比）。 */
 export declare function previousPeriodKey(preset: string, toMs: number): string | null;
 /** 按工具调用数归族排序（面板与 markdown 共用）。 */

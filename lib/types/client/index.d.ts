@@ -205,6 +205,12 @@ interface StatsJson {
         skippedSessionIds: string[];
         skippedCount: number;
         reasons: string[];
+        /** P0 salvage：官方读取器拒读但已只读恢复的会话。 */
+        salvage?: {
+            recoveredSessions: number;
+            recoveredRecords: number;
+            droppedRecords: number;
+        };
     };
 }
 /** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */

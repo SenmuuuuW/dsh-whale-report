@@ -72,13 +72,24 @@ export interface ModelUsage {
  * 只存会话 id 与粗分类原因，绝不存错误原文 / 堆栈；
  * 缺失数据不按 0 处理 —— 消费端必须披露 partial，不得当作"没有活动"。
  */
+/** P0 salvage 元数据：被恢复的会话（只读解析，不修改原文件）。 */
+export interface SalvagePartial {
+    /** 成功恢复的会话数。 */
+    recoveredSessions: number;
+    /** 恢复出的完整 record 总数。 */
+    recoveredRecords: number;
+    /** 被丢弃的残缺尾部 record 总数（0 或每条会话 1）。 */
+    droppedRecords: number;
+}
 export interface DataPartial {
     /** 被跳过的会话 id（上限 SKIP_IDS_CAP 条，其余只计数）。 */
     skippedSessionIds: string[];
     /** 被跳过的会话总数。 */
     skippedCount: number;
-    /** 失败原因分类（去重、稳定、有界，如 "corrupt-log" / "read-failed"）。 */
+    /** 失败原因分类（去重、稳定、有界，如 "corrupt-log" / "read-failed" / "torn-jsonl-tail"）。 */
     reasons: string[];
+    /** P0 salvage：官方读取器拒读但可只读恢复的会话。缺失 = 无。 */
+    salvage?: SalvagePartial;
 }
 /** skippedSessionIds 上限：报告体积有界，超出的只计数。 */
 export declare const SKIP_IDS_CAP = 20;
@@ -394,7 +405,7 @@ export declare const BUCKET_MS: number;
  */
 export declare function bucketizeOwnEvents(sessionId: string, events: {
     type: string;
-    seq: number;
+    seq?: number;
     time: number;
     data?: unknown;
 }[], ownStart: number, stopAfter?: number): {
