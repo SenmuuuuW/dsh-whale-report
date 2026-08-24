@@ -141,10 +141,12 @@ describe("报告文案", () => {
     expect(md).toContain("危险操作");
   });
 
-  it("预设区间：日报=今天、24h=滚动、周/月/年=自然周期", () => {
-    const now = new Date(2026, 7, 10, 15, 30, 0).getTime(); // 本地 8/10 15:30（周一）
-    const localMidnight = new Date(2026, 7, 10).getTime();
-    expect(presetRange("daily", now).from).toBe(localMidnight);
+  it("预设区间：日报=Asia/Shanghai 自然日、24h=滚动、周/月/年=自然周期", () => {
+    // 固定绝对时刻，任何 runner 时区下一致（GitHub runner 为 UTC，本地可能为 CST）
+    const now = Date.parse("2026-08-10T15:30:00.000Z"); // 上海 8/10 23:30、UTC 8/10 15:30
+    const localMidnight = new Date(2026, 7, 10).getTime(); // runner 本地 8/10 0:00（周/月/年用它）
+    // P1：daily 固定 Asia/Shanghai（UTC+8）；now 属上海 8/10 → 起点 = 上海 8/10 00:00 = 8/9 16:00 UTC
+    expect(presetRange("daily", now).from).toBe(Date.parse("2026-08-09T16:00:00.000Z"));
     expect(presetRange("24h", now).from).toBe(now - 24 * H);
     // 自然周：8/10 是周一 → 周起点 = 当天 0:00
     expect(presetRange("weekly", now).from).toBe(localMidnight);
