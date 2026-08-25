@@ -10,10 +10,10 @@ import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
 import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, isPeakHourCST, type CostBreakdown } from "./pricing.js";
-import { computeInsights, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
+import { computeInsights, customPeriodKey, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { computeImprovements, type ImprovementItem } from "./improvements.js";
 import { aggregateBuckets, bucketizeOwnEvents, emptyPartial, SKIP_IDS_CAP, type DataPartial, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
-import { findSessionLogPath, resolveDshHome, salvageSessionFile } from "./salvage.js";
+import { buildSessionPathMap, resolveDshHome, salvageSessionFile, statSessionFile, type SessionFileStat } from "./salvage.js";
 import { renderReport, presetRange, PRESET_LABELS, type ReportPreset } from "./report.js";
 
 /**
@@ -98,10 +98,58 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results;
 }
 
-/** 索引新鲜度窗口：窗口内的持久化会话索引直接复用，过期才重读完整日志。 */
-export const INDEX_TTL_MS = 10 * 60 * 1000;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
 export const INDEX_VERSION = 14;
+
+/**
+ * 索引新鲜度（P0.2）：不再用"缓存年龄 TTL"判定 —— 历史会话在文件未变化时
+ * 必须复用索引，避免每 10 分钟全量重放。
+ *
+ * 判定规则（保守方向 = 重建）：
+ *   - 条目带指纹（src）：文件 mtime + size 完全一致 → 复用；否则失效重建。
+ *   - 旧条目（无指纹）：文件最后写入时间不晚于最后一条已索引事件
+ *     （或建索引时刻）→ 索引完整可复用（并回填指纹）；否则重建。
+ *   - 无法 stat 源文件（非常规宿主/测试）：无法证明未变 → 重建。
+ * 追加事件必然改变文件 mtime/size → 任何缓存（含 salvage 缓存）都不会漏新事件。
+ */
+export function isIndexFresh(entry: SessionIndexRecord | undefined, stat: SessionFileStat | null): entry is SessionIndexRecord {
+  if (entry === undefined || entry.v !== INDEX_VERSION) return false;
+  if (stat !== null) {
+    if (entry.src !== undefined) {
+      return entry.src.mtimeMs === stat.mtimeMs && entry.src.size === stat.size;
+    }
+    return stat.mtimeMs <= Math.max(entry.lastMs, entry.builtAt);
+  }
+  return false;
+}
+
+/** 生成性能细账（P0 验收计时；随 /summary 响应透出，前端不消费）。 */
+export interface GenerationPerf {
+  listSessionsMs: number;
+  indexHits: number;
+  /** 已有索引条目但源文件已变化（或无法验证）而被重建的会话数。 */
+  invalidations: number;
+  reads: number;
+  readMs: number;
+  salvages: number;
+  salvageMs: number;
+  aggregateMs: number;
+  improveMs: number;
+}
+
+export function newGenerationPerf(): GenerationPerf {
+  return {
+    listSessionsMs: 0,
+    indexHits: 0,
+    invalidations: 0,
+    reads: 0,
+    readMs: 0,
+    salvages: 0,
+    salvageMs: 0,
+    aggregateMs: 0,
+    improveMs: 0,
+  };
+}
 
 /**
  * 读取失败原因粗分类（fault isolation）。
@@ -131,8 +179,11 @@ export function classifyReadError(error: unknown): string {
 export async function collectEvents(
   svc: ReportServices,
   period: { from: number; to: number },
+  perf?: GenerationPerf,
 ): Promise<ReportStats> {
+  const t0 = Date.now();
   const sessions = await svc.sessionQuery.listSessions();
+  if (perf !== undefined) perf.listSessionsMs = Date.now() - t0;
   const headers: RawSessionHeader[] = sessions.map((record) => ({
     id: record.header.id,
     createdAt: record.header.createdAt,
@@ -141,6 +192,12 @@ export async function collectEvents(
   }));
 
   const candidates = sessions.filter((record) => record.header.createdAt < period.to);
+  // P0.2：一次遍历建立路径映射，逐会话 stat 判定文件是否变化。
+  const pathMap = buildSessionPathMap(resolveDshHome());
+  const statOf = (sessionId: string): SessionFileStat | null => {
+    const path = pathMap.get(sessionId);
+    return path === undefined ? null : statSessionFile(path);
+  };
   const views: SessionBucketView[] = [];
   const skippedIds: string[] = [];
   const skippedIdSet = new Set<string>();
@@ -152,44 +209,75 @@ export async function collectEvents(
   let droppedRecords = 0;
 
   await mapWithConcurrency(candidates, 12, async (record) => {
-    const now = Date.now();
-    // 持久化会话：索引新鲜直接复用
+    // 持久化会话：索引按"源文件指纹"判定新鲜（不再按年龄 TTL）。
+    // live 会话：内存快照即时读取（廉价且权威），不入索引。
+    let stat: SessionFileStat | null = null;
+    let cached: SessionIndexRecord | undefined;
     if (!record.live) {
-      const cached = svc.index.get(record.header.id);
-      if (cached !== undefined && cached.v === INDEX_VERSION && now - cached.builtAt < INDEX_TTL_MS) {
+      stat = statOf(record.header.id);
+      cached = svc.index.get(record.header.id);
+      if (isIndexFresh(cached, stat)) {
+        if (perf !== undefined) perf.indexHits += 1;
         views.push({
           sessionId: cached.sessionId,
           buckets: cached.buckets as SessionBucketView["buckets"],
           titles: cached.titles,
         });
+        // P0.1 缓存复用：salvage 来源的索引继续披露"恢复自损坏日志"。
+        if (cached.salvaged === true) {
+          recoveredSessions += 1;
+          recoveredRecords += cached.salvagedRecords ?? 0;
+          droppedRecords += cached.salvagedDropped ?? 0;
+        }
+        // 旧条目（无指纹）回填指纹：不重建，仅补齐身份信息。
+        if (cached.src === undefined && stat !== null) {
+          void svc.index.put(record.header.id, { ...cached, src: stat }).catch(() => {});
+        }
         return;
+      }
+      if (cached !== undefined) {
+        if (perf !== undefined) perf.invalidations += 1;
       }
     }
     try {
+      const tRead = Date.now();
       const snapshot = await svc.sessionQuery.readSession(record.header.id);
+      if (perf !== undefined) {
+        perf.reads += 1;
+        perf.readMs += Date.now() - tRead;
+      }
+      // 全量分桶（不带 stopAfter）：缓存索引必须完整覆盖会话全部事件，
+      // 否则旧缓存会在后续更晚周期的生成中漏掉新追加事件。
       const built = bucketizeOwnEvents(
         snapshot.session.id,
         snapshot.events,
         snapshot.session.seedLength ?? 0,
-        period.to,
       );
       views.push({ sessionId: snapshot.session.id, buckets: built.buckets, titles: built.titles });
       if (!record.live) {
         await svc.index.put(record.header.id, {
           sessionId: snapshot.session.id,
           v: INDEX_VERSION,
-          builtAt: now,
+          builtAt: Date.now(),
           lastSeq: built.lastSeq,
           lastMs: built.lastMs,
           buckets: built.buckets,
           titles: built.titles,
+          src: stat ?? undefined,
         });
       }
     } catch (error) {
       // P0 salvage：官方读取器拒读（如尾部 spliced seq 校验失败 / torn tail）时，
       // 尝试只读恢复：逐帧解压 + 完整 JSONL record 进入聚合，残缺尾部丢弃。
       // 只在 zstd 无法解压 / 中间 corruption / 无 header 时 fallback 到整 session skip。
-      const salvaged = trySalvageSession(svc, record.header.id, period.to);
+      // P0.1：恢复结果写入 session_index（带源文件指纹 + salvage 来源标记），
+      // 同一未变化的损坏文件第二次生成不再重复解压 22MB。
+      const tSal = Date.now();
+      const salvaged = trySalvageSession(pathMap.get(record.header.id) ?? null);
+      if (perf !== undefined) {
+        if (salvaged.ok) perf.salvages += 1;
+        perf.salvageMs += Date.now() - tSal;
+      }
       if (salvaged.ok) {
         views.push({
           sessionId: salvaged.sessionId ?? record.header.id,
@@ -199,6 +287,22 @@ export async function collectEvents(
         recoveredSessions += 1;
         recoveredRecords += salvaged.recoveredRecords;
         droppedRecords += salvaged.droppedRecords;
+        if (!record.live && stat === null) stat = statOf(record.header.id);
+        void svc.index
+          .put(record.header.id, {
+            sessionId: salvaged.sessionId ?? record.header.id,
+            v: INDEX_VERSION,
+            builtAt: Date.now(),
+            lastSeq: salvaged.lastSeq,
+            lastMs: salvaged.lastMs,
+            buckets: salvaged.buckets,
+            titles: salvaged.titles,
+            src: stat ?? undefined,
+            salvaged: true,
+            salvagedRecords: salvaged.recoveredRecords,
+            salvagedDropped: salvaged.droppedRecords,
+          })
+          .catch(() => {});
         return;
       }
       // 单会话损坏/读取失败且无法安全恢复：跳过，不影响其他会话；只记 id + 粗分类原因。
@@ -231,27 +335,29 @@ export async function collectEvents(
   // 它们的缺失通过 partial 披露（缺失 ≠ 0），不按"无活动"处理。
   // salvage 恢复的会话正常计入聚合（与健康会话同路径）。
   const coveredHeaders = skippedCount > 0 ? headers.filter((h) => !skippedIdSet.has(h.id)) : headers;
-  return aggregateBuckets(views, period, coveredHeaders, partial);
+  const tAgg = Date.now();
+  const out = aggregateBuckets(views, period, coveredHeaders, partial);
+  if (perf !== undefined) perf.aggregateMs = Date.now() - tAgg;
+  return out;
 }
 
-/** P0 salvage 尝试：官方读取器失败后，直读 ~/.dsh 日志做只读恢复。 */
+/** P0 salvage 尝试：官方读取器失败后，直读 ~/.dsh 日志做只读恢复（全量分桶，供索引缓存）。 */
 function trySalvageSession(
-  svc: ReportServices,
-  sessionId: string,
-  periodTo: number,
-): { ok: boolean; sessionId?: string; buckets: SessionBucketView["buckets"]; titles: string[]; recoveredRecords: number; droppedRecords: number } | { ok: false } {
+  path: string | null,
+): { ok: boolean; sessionId?: string; buckets: SessionBucketView["buckets"]; titles: string[]; lastSeq: number; lastMs: number; recoveredRecords: number; droppedRecords: number } | { ok: false } {
+  if (path === null) return { ok: false };
   try {
-    const path = findSessionLogPath(resolveDshHome(), sessionId);
-    if (path === null) return { ok: false };
     const salvaged = salvageSessionFile(path);
     if (!salvaged.ok || salvaged.sessionId === undefined) return { ok: false };
-    const built = bucketizeOwnEvents(salvaged.sessionId, salvaged.events, 0, periodTo);
-    // 恢复的会话不进 session_index（数据源是只读修复，避免污染索引缓存语义）。
+    // 全量分桶（不带 stopAfter）：恢复结果要进 session_index，必须覆盖全部事件。
+    const built = bucketizeOwnEvents(salvaged.sessionId, salvaged.events, 0);
     return {
       ok: true,
       sessionId: salvaged.sessionId,
       buckets: built.buckets,
       titles: built.titles,
+      lastSeq: built.lastSeq,
+      lastMs: built.lastMs,
       recoveredRecords: salvaged.recoveredRecords,
       droppedRecords: salvaged.droppedRecords,
     };
@@ -261,17 +367,25 @@ function trySalvageSession(
 }
 
 /**
- * 后台预热：为所有持久化会话预建索引（无时间上限）。
+ * 后台预热：为缺失/失效索引的持久化会话预建索引（无时间上限）。
  * 首次生成报告的 50s 成本移到启动后的一次性后台任务里，
  * 之后的每次生成都命中索引（实测 0.1-0.3s）。
+ * P0.2：只重建"无索引 / 源文件已变化"的会话 —— 已按指纹验证未变的直接跳过。
  */
 export async function warmIndex(svc: ReportServices): Promise<void> {
   const sessions = await svc.sessionQuery.listSessions();
-  const toBuild = sessions.filter((record) => !record.live && svc.index.get(record.header.id) === undefined);
+  const pathMap = buildSessionPathMap(resolveDshHome());
+  const toBuild = sessions.filter((record) => {
+    if (record.live) return false;
+    const path = pathMap.get(record.header.id);
+    const stat = path === undefined ? null : statSessionFile(path);
+    return !isIndexFresh(svc.index.get(record.header.id), stat);
+  });
   await mapWithConcurrency(toBuild, 4, async (record) => {
     try {
       const snapshot = await svc.sessionQuery.readSession(record.header.id);
       const built = bucketizeOwnEvents(snapshot.session.id, snapshot.events, snapshot.session.seedLength ?? 0);
+      const path = pathMap.get(record.header.id);
       await svc.index.put(record.header.id, {
         sessionId: snapshot.session.id,
         v: INDEX_VERSION,
@@ -280,6 +394,7 @@ export async function warmIndex(svc: ReportServices): Promise<void> {
         lastMs: built.lastMs,
         buckets: built.buckets,
         titles: built.titles,
+        src: path === undefined ? undefined : (statSessionFile(path) ?? undefined),
       });
     } catch {
       // 单会话失败不影响预热整体
@@ -314,8 +429,9 @@ export async function generateReportData(
   svc: ReportServices,
   preset: string,
   range: { from: number; to: number },
+  perf?: GenerationPerf,
 ): Promise<ReportGeneration> {
-  const stats = await collectEvents(svc, range);
+  const stats = await collectEvents(svc, range, perf);
   // 峰谷计价：按 dayHourDetail 的每小时模型用量 × 该时段价格分段累加。
   // 旧报告/无小时明细时回退 computeCost 总量估算。
   let cost: CostBreakdown;
@@ -365,9 +481,12 @@ export async function generateReportData(
   stats.sessionsDetail.sort((a, b) => b.cost - a.cost);
   stats.sessionsDetail = stats.sessionsDetail.slice(0, 20);
   (stats as unknown as Record<string, unknown>).plugins = svc.plugins ?? [];
-  const key = periodKey(preset, range.to);
-  const prevKey = previousPeriodKey(preset, range.to);
+  // custom 区间用独立 key（custom-<from>-<to>），绝不写进自然周趋势 period_stats；
+  // 无自然"上一周期"，prev 基线为 null（与 24h 同语义）。
+  const key = preset === "custom" ? customPeriodKey(range.from, range.to) : periodKey(preset, range.to);
+  const prevKey = preset === "custom" ? null : previousPeriodKey(preset, range.to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
+  const tImprove = Date.now();
   const insights = computeInsights({ stats, prev: prev ?? undefined, cost });
   // Improve（v0.5）：基于聚合证据的确定性建议；不重扫原始事件，无额外 IO。
   const improvements = computeImprovements({
@@ -377,6 +496,7 @@ export async function generateReportData(
     failedSessions: stats.toolFailedSessions,
     corrections: stats.correctionSignals,
   });
+  if (perf !== undefined) perf.improveMs = Date.now() - tImprove;
   // 生成本报告消耗：DeepTrace 的 stats → insights → 鲸评 → 导出全为本地确定性代码，
   // 不调用任何模型 API —— 报告生成本身消耗 0 token（这是产品事实，不是估算）。
   const reportGeneration = {

@@ -25,13 +25,17 @@ import { summarizeSessionEvents } from "./stats.js";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { periodKey } from "./insights.js";
+import { isTrendRowIncluded, periodKey } from "./insights.js";
 import { computeCostTimed } from "./pricing.js";
 import { buildProviderBreakdown } from "./usage.js";
-import { generateReportData, toPeriodRecord, type ReportServices } from "./tools.js";
+import { generateReportData, newGenerationPerf, toPeriodRecord, type ReportServices } from "./tools.js";
 import { adapterOf, queryBalance } from "./balance.js";
+import { createSingleFlight } from "./single-flight.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** P0.3 单飞：相同 period 的 summary 生成共享同一个 in-flight Promise。 */
+const summaryFlight = createSingleFlight<string, ReportRecord>();
 
 /** P1 comparison scope：按 provider 拆分的用量（与 DeepSeek Platform 对账时只取 deepseek-official）。 */
 function withProviderScope(record: ReportRecord): ReportRecord & {
@@ -250,7 +254,8 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   // 进行中周期：key 命中当前自然周期。custom 无自然周期 → 恒 false。
                   isCurrent: currentKey !== null && record.key === currentKey,
                 }))
-                .filter((r) => prefix === "" || r.key.startsWith(prefix))
+                // 读取侧兼容：标准周期趋势排除旧版 custom 污染记录（preset=custom 且 key 为 wk-…）。
+                .filter((r) => isTrendRowIncluded(r.key, r.preset, prefix))
                 .sort((a, b) => (a.key < b.key ? -1 : 1))
                 .slice(-limit);
               writeJson(res, 200, { ok: true, trends: rows });
@@ -362,6 +367,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
             }
             if (req.method === "POST" && method === "summary") {
               // 仪表盘数据：当前周期已有报告则复用，否则现场生成并落库。
+              const tAll = Date.now();
               const payload = (await readJsonBody(req)) as { preset?: unknown; from?: unknown; to?: unknown };
               const preset = (payload.preset as ReportPreset) ?? "weekly";
               const now = Date.now();
@@ -369,32 +375,41 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 preset === "custom"
                   ? { from: parseTime(payload.from, now - 7 * DAY_MS), to: parseTime(payload.to, now) }
                   : presetRange(preset, now);
+              // P0 性能细账（随响应透出，前端不消费；验收计时用）。
+              const perf = newGenerationPerf();
+              let serializeMs = 0;
               // 自定义区间每次重新生成（key 语义与周期预设不同，不复用）。
               if (preset === "custom") {
-                const gen = await generateReportData(svc, preset, range);
-                await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
-                const record: ReportRecord = {
-                  sem: REPORT_SEM,
-                  id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-                  preset,
-                  from: range.from,
-                  to: range.to,
-                  createdAt: now,
-                  sessions: gen.stats.sessions,
-                  turns: gen.stats.turns,
-                  totalEvents: gen.stats.totalEvents,
-                  stats: gen.stats as unknown,
-                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
-                  cost: gen.cost,
-                  insights: gen.insights,
-                  improvements: gen.improvements,
-                  reportGeneration: gen.reportGeneration,
-                  prev: gen.prev
-                    ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
-                    : undefined,
-                };
-                await table.put(record.id, record);
-                writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record) });
+                const flightKey = `summary|custom|${range.from}|${range.to}`;
+                const record = await summaryFlight(flightKey, async () => {
+                  const gen = await generateReportData(svc, preset, range, perf);
+                  const tSer = Date.now();
+                  await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+                  const record: ReportRecord = {
+                    sem: REPORT_SEM,
+                    id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                    preset,
+                    from: range.from,
+                    to: range.to,
+                    createdAt: now,
+                    sessions: gen.stats.sessions,
+                    turns: gen.stats.turns,
+                    totalEvents: gen.stats.totalEvents,
+                    stats: gen.stats as unknown,
+                    markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
+                    cost: gen.cost,
+                    insights: gen.insights,
+                    improvements: gen.improvements,
+                    reportGeneration: gen.reportGeneration,
+                    prev: gen.prev
+                      ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                      : undefined,
+                  };
+                  await table.put(record.id, record);
+                  serializeMs = Date.now() - tSer;
+                  return record;
+                });
+                writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
                 return;
               }
               const key = periodKey(preset, range.to);
@@ -413,33 +428,40 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 }
               }
               if (found !== undefined && now - found.createdAt < SUMMARY_FRESHNESS_MS) {
-                writeJson(res, 200, { ok: true, fresh: false, report: withProviderScope(found) });
+                writeJson(res, 200, { ok: true, fresh: false, report: withProviderScope(found), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
                 return;
               }
-              const gen = await generateReportData(svc, preset, range);
-              await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
-              const record: ReportRecord = {
-                sem: REPORT_SEM,
-                id: found !== undefined ? found.id : `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-                preset,
-                from: range.from,
-                to: range.to,
-                createdAt: now,
-                sessions: gen.stats.sessions,
-                turns: gen.stats.turns,
-                totalEvents: gen.stats.totalEvents,
-                stats: gen.stats as unknown,
-                markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
-                cost: gen.cost,
-                insights: gen.insights,
-                improvements: gen.improvements,
-                reportGeneration: gen.reportGeneration,
-                prev: gen.prev
-                  ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
-                  : undefined,
-              };
-              await table.put(record.id, record);
-              writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record) });
+              // P0.3：相同 period 的生成单飞 —— 并发请求（如超时后点重试）共享同一套生成。
+              const flightKey = `summary|${preset}|${key}`;
+              const record = await summaryFlight(flightKey, async () => {
+                const gen = await generateReportData(svc, preset, range, perf);
+                const tSer = Date.now();
+                await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
+                const record: ReportRecord = {
+                  sem: REPORT_SEM,
+                  id: found !== undefined ? found.id : `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                  preset,
+                  from: range.from,
+                  to: range.to,
+                  createdAt: now,
+                  sessions: gen.stats.sessions,
+                  turns: gen.stats.turns,
+                  totalEvents: gen.stats.totalEvents,
+                  stats: gen.stats as unknown,
+                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
+                  cost: gen.cost,
+                  insights: gen.insights,
+                  improvements: gen.improvements,
+                  reportGeneration: gen.reportGeneration,
+                  prev: gen.prev
+                    ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                    : undefined,
+                };
+                await table.put(record.id, record);
+                serializeMs = Date.now() - tSer;
+                return record;
+              });
+              writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
               return;
             }
             if (req.method === "POST") {

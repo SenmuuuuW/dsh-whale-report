@@ -245,6 +245,14 @@ interface ToolHealthAcc {
     /** 失败发生的会话集合（Improve 跨 session 证据；只存 id）。 */
     failedSessions: Set<string>;
 }
+/**
+ * 分桶级工具健康累加器：failedSessions 用数组。
+ * 分桶会经 JSON 持久化进 session_index —— Set 会被序列化成 {}，
+ * 复用索引时聚合端 for...of 会抛 "object is not iterable"（custom/月/年窗口 400 的根因）。
+ */
+export type BucketToolHealthAcc = Omit<ToolHealthAcc, "failedSessions"> & {
+    failedSessions: string[];
+};
 /** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
 export declare function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth;
 /** 全量固化：按名称排序保证确定性（展示层再按关注度排序）。 */
@@ -387,7 +395,7 @@ export interface HourBucket {
         lateConstraints: number;
     };
     /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
-    toolHealth: Record<string, ToolHealthAcc>;
+    toolHealth: Record<string, BucketToolHealthAcc>;
     /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
     corrections: {
         category: CorrectionCategory;

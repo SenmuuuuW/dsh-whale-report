@@ -16,8 +16,8 @@
  * 绝不修改 ~/.dsh 原文件（只读）。
  */
 import { decompress } from "fzstd";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import type { RawEvent } from "./stats.js";
 
@@ -76,6 +76,48 @@ export function findSessionLogPath(dshHome: string, sessionId: string): string |
     }
   }
   return null;
+}
+
+/** 一次遍历建立 sessionId → session.jsonl.zstd 路径映射（避免为每个会话重复全树扫描）。 */
+export function buildSessionPathMap(dshHome: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const sessionsRoot = join(dshHome, "sessions");
+  if (!existsSync(sessionsRoot)) return map;
+  const stack = [sessionsRoot];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(p);
+      } else if (entry.name === "session.jsonl.zstd") {
+        // 会话日志的归属目录名 = 会话 id（与 findSessionLogPath 同语义）。
+        map.set(basename(dir), p);
+      }
+    }
+  }
+  return map;
+}
+
+/** 源文件指纹（P0.2）：mtime + size，用于判定会话日志是否发生变化。 */
+export interface SessionFileStat {
+  mtimeMs: number;
+  size: number;
+}
+
+export function statSessionFile(path: string): SessionFileStat | null {
+  try {
+    const s = statSync(path);
+    return { mtimeMs: s.mtimeMs, size: s.size };
+  } catch {
+    return null;
+  }
 }
 
 /** 当前 DSH home（与 harness 同源；读取失败返回 ~/.dsh）。 */

@@ -300,6 +300,17 @@ function newToolHealthAcc(name: string): ToolHealthAcc {
   return { name, calls: 0, completed: 0, failed: 0, incomplete: 0, durations: [], errorCodes: {}, failedSessions: new Set() };
 }
 
+/**
+ * 分桶级工具健康累加器：failedSessions 用数组。
+ * 分桶会经 JSON 持久化进 session_index —— Set 会被序列化成 {}，
+ * 复用索引时聚合端 for...of 会抛 "object is not iterable"（custom/月/年窗口 400 的根因）。
+ */
+export type BucketToolHealthAcc = Omit<ToolHealthAcc, "failedSessions"> & { failedSessions: string[] };
+
+function newBucketToolHealthAcc(name: string): BucketToolHealthAcc {
+  return { name, calls: 0, completed: 0, failed: 0, incomplete: 0, durations: [], errorCodes: {}, failedSessions: [] };
+}
+
 /** 把内部聚合态固化为报告结构（确定性；排序由调用方决定）。 */
 export function finalizeToolHealth(acc: ToolHealthAcc): ToolHealth {
   const sorted = [...acc.durations].sort((a, b) => a - b);
@@ -1098,7 +1109,7 @@ export interface HourBucket {
   /** 协作信号（确定性词表检测；协作复盘用）。 */
   collab: { revisions: number; lateConstraints: number };
   /** 工具健康聚合（确定性配对；跨桶配对在 bucketize 会话级 pending 中完成）。 */
-  toolHealth: Record<string, ToolHealthAcc>;
+  toolHealth: Record<string, BucketToolHealthAcc>;
   /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
   corrections: { category: CorrectionCategory; sessionId: string }[];
 }
@@ -1250,7 +1261,7 @@ export function bucketizeOwnEvents(
           const callId = (data as Record<string, unknown>)?.callId;
           if (typeof callId === "string" && callId !== "") {
             toolPending.set(callId, { name: tname, time: event.time });
-            const acc = (bucket.toolHealth[tname] ??= newToolHealthAcc(tname));
+            const acc = (bucket.toolHealth[tname] ??= newBucketToolHealthAcc(tname));
             acc.calls += 1;
           }
         }
@@ -1303,11 +1314,11 @@ export function bucketizeOwnEvents(
           const pair = callId !== "" ? toolPending.get(callId) : undefined;
           if (pair !== undefined) {
             toolPending.delete(callId);
-            const acc = (bucket.toolHealth[pair.name] ??= newToolHealthAcc(pair.name));
+            const acc = (bucket.toolHealth[pair.name] ??= newBucketToolHealthAcc(pair.name));
             acc.completed += 1;
             if (failed) {
               acc.failed += 1;
-              acc.failedSessions.add(sessionId);
+              if (!acc.failedSessions.includes(sessionId)) acc.failedSessions.push(sessionId);
               const code = errorCodeOf(data as Record<string, unknown>);
               acc.errorCodes[code] = (acc.errorCodes[code] ?? 0) + 1;
             }
@@ -1348,7 +1359,7 @@ export function bucketizeOwnEvents(
   if (toolPending.size > 0 && byHour.size > 0) {
     const lastBucket = [...byHour.values()].sort((a, b) => a.h - b.h)[byHour.size - 1];
     for (const pending of toolPending.values()) {
-      const acc = (lastBucket.toolHealth[pending.name] ??= newToolHealthAcc(pending.name));
+      const acc = (lastBucket.toolHealth[pending.name] ??= newBucketToolHealthAcc(pending.name));
       acc.incomplete += 1;
     }
   }
@@ -1526,7 +1537,13 @@ export function aggregateBuckets(
         for (const [code, n] of Object.entries(acc.errorCodes ?? {})) {
           target.errorCodes[code] = (target.errorCodes[code] ?? 0) + n;
         }
-        for (const sid of acc.failedSessions ?? []) target.failedSessions.add(sid);
+        // failedSessions 兼容三种形态：内存 Set / 新持久化数组 / 旧持久化 {}（Set 被 JSON 序列化，无可恢复成员）。
+        const failed = acc.failedSessions as unknown;
+        if (failed instanceof Set) {
+          for (const sid of failed) target.failedSessions.add(sid);
+        } else if (Array.isArray(failed)) {
+          for (const sid of failed) target.failedSessions.add(sid);
+        }
         toolHealthMerged.set(name, target);
       }
       // Improve 证据：人工纠正（会话级去重；与 direct 路径同口径）。

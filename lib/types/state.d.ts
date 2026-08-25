@@ -35,6 +35,13 @@ export declare const SessionIndexSchema: z.ZodObject<{
     lastMs: z.ZodNumber;
     buckets: z.ZodUnknown;
     titles: z.ZodArray<z.ZodString>;
+    src: z.ZodOptional<z.ZodObject<{
+        mtimeMs: z.ZodNumber;
+        size: z.ZodNumber;
+    }, z.core.$strip>>;
+    salvaged: z.ZodOptional<z.ZodBoolean>;
+    salvagedRecords: z.ZodOptional<z.ZodNumber>;
+    salvagedDropped: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
 /** 周期基线（compact 统计，供"对比上周"与洞察引擎用）。 */
@@ -96,6 +103,13 @@ export declare const whaleDomain: {
             lastMs: number;
             buckets: unknown;
             titles: string[];
+            src?: {
+                mtimeMs: number;
+                size: number;
+            } | undefined;
+            salvaged?: boolean | undefined;
+            salvagedRecords?: number | undefined;
+            salvagedDropped?: number | undefined;
         }>;
         period_stats: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
             key: string;

@@ -30,6 +30,7 @@ import {
   type ThemeChoice,
   type ThemeDeps,
 } from "./theme.js";
+import { FETCH_TIMEOUT_MS, describeFetchError, fetchWithTimeout, isAbortError } from "./refresh.js";
 
 export const name = "whale-report-client";
 export const inject: string[] = [];
@@ -277,6 +278,25 @@ const CSS = `
   animation: dshload 1s ease-in-out infinite;
 }
 @keyframes dshload { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* ── 刷新失败提示（stale-while-refresh：保留上次数据 + 重试） ── */
+[data-whale-report-refresherr] {
+  display: flex; align-items: center; gap: 10px; margin: 0 2px 10px; padding: 8px 12px;
+  border: 1px solid var(--dt-warn-border, var(--dt-border)); border-left: 4px solid var(--dt-amber, var(--dt-up));
+  border-radius: 10px; font-size: 12.5px; color: var(--dt-ink);
+  background: var(--dt-surface);
+}
+[data-whale-report-refresherr] i {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--dt-amber, var(--dt-up));
+}
+[data-whale-report-refresherr] span:first-of-type { font-weight: 700; white-space: nowrap; }
+[data-whale-report-refresherr] span:nth-of-type(2) { color: var(--dt-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-whale-report-retry] {
+  flex: none; border: 1px solid var(--dt-blue); color: var(--dt-blue); background: transparent;
+  border-radius: 8px; padding: 4px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+[data-whale-report-retry]:hover { background: var(--dt-blue); color: #fff; }
 
 /* ── 加载骨架 ── */
 [data-whale-report-skeleton] { display: flex; flex-direction: column; gap: 8px; }
@@ -2145,11 +2165,15 @@ interface StatsJson {
 }
 
 async function api<T>(method: string, payload?: unknown): Promise<T> {
-  const response = await fetch(`/whale/api/${method}`, {
-    method: payload === undefined ? "GET" : "POST",
-    headers: payload === undefined ? undefined : { "content-type": "application/json" },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  });
+  const response = await fetchWithTimeout(
+    `/whale/api/${method}`,
+    {
+      method: payload === undefined ? "GET" : "POST",
+      headers: payload === undefined ? undefined : { "content-type": "application/json" },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+    },
+    FETCH_TIMEOUT_MS.light,
+  );
   const body = (await response.json()) as { ok: boolean; error?: { message?: string } } & T;
   if (!response.ok || body.ok === false) {
     throw new Error(body.error?.message ?? `HTTP ${response.status}`);
@@ -3094,7 +3118,7 @@ function insightPreview(insight: InsightJson, s: StatsJson): string | null {
   }
 }
 
-class WhaleContent extends Component<Record<string, never>, ContentState> {
+export class WhaleContent extends Component<Record<string, never>, ContentState> {
   state: ContentState = {
     toast: null,
     view: "dashboard",
@@ -3109,6 +3133,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
   };
 
   requestSeq = 0;
+  requestAbort: AbortController | null = null;
   customDebounce: number | undefined;
 
   componentDidMount(): void {
@@ -3122,20 +3147,29 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
     }, 4000);
   }
 
-  /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。 */
+  /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。
+   * 韧性（v0.5.1）：超时预算 + finally 兜底 + 竞态门 + 旧请求 abort；
+   * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。 */
   async loadDashboard(preset: ContentState["preset"]): Promise<void> {
     const seq = ++this.requestSeq;
+    if (this.requestAbort !== null) this.requestAbort.abort();
+    this.requestAbort = new AbortController();
     this.setState({ loading: true, error: null });
     try {
       const payload =
         preset === "custom"
           ? { preset: "custom", from: this.state.from, to: this.state.to }
           : { preset };
-      const response = await fetch("/whale/api/summary", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetchWithTimeout(
+        "/whale/api/summary",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        FETCH_TIMEOUT_MS.summary,
+        this.requestAbort.signal,
+      );
       const body = (await response.json()) as { ok: boolean; report: ReportFull; error?: { message?: string } };
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
       // 只应用最新一次请求的结果（快速切换周期时旧响应不得覆盖新响应）。
@@ -3143,8 +3177,12 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       this.setState({ dashboard: body.report, current: body.report, loading: false, view: "dashboard" });
     } catch (error) {
       if (seq !== this.requestSeq) return;
-      this.setState({ loading: false });
-      this.setToast(error instanceof Error ? error.message : String(error));
+      // 失败保留上次数据：只清 loading + 落 refresh 失败提示（不打断已有内容）。
+      this.setState({ loading: false, error: describeFetchError(error, FETCH_TIMEOUT_MS.summary) });
+    } finally {
+      // 兜底：无论成功、失败还是超时，最新请求结束后 loading 必须回落，
+      // 否则页面永久停留在「更新中…」+ 骨架屏。
+      if (seq === this.requestSeq) this.setState({ loading: false });
     }
   }
 
@@ -3153,20 +3191,32 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       const body = await api<{ reports: ReportMeta[] }>("list");
       this.setState({ history: body.reports });
     } catch (error) {
-      this.setToast(error instanceof Error ? error.message : String(error));
+      this.setToast(describeFetchError(error, FETCH_TIMEOUT_MS.light));
     }
   }
 
   async openHistory(id: string): Promise<void> {
+    const seq = ++this.requestSeq;
+    if (this.requestAbort !== null) this.requestAbort.abort();
+    this.requestAbort = new AbortController();
     this.setState({ loading: true, error: null });
     try {
-      const response = await fetch(`/whale/api/get?id=${encodeURIComponent(id)}`);
+      const response = await fetchWithTimeout(
+        `/whale/api/get?id=${encodeURIComponent(id)}`,
+        {},
+        FETCH_TIMEOUT_MS.report,
+        this.requestAbort.signal,
+      );
       const json = (await response.json()) as { ok: boolean; report: ReportFull };
       if (!response.ok || json.ok === false) throw new Error("报告不存在");
+      if (seq !== this.requestSeq) return;
       this.setState({ current: json.report, loading: false, view: "report" });
     } catch (error) {
+      if (seq !== this.requestSeq) return;
       this.setState({ loading: false });
-      this.setToast(error instanceof Error ? error.message : String(error));
+      this.setToast(describeFetchError(error, FETCH_TIMEOUT_MS.report));
+    } finally {
+      if (seq === this.requestSeq) this.setState({ loading: false });
     }
   }
 
@@ -3175,7 +3225,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
       await api<{ ok: boolean }>("delete", { id });
       this.setState({ current: null, dashboard: null, history: null, view: "dashboard" });
     } catch (error) {
-      this.setToast(error instanceof Error ? error.message : String(error));
+      this.setToast(describeFetchError(error, FETCH_TIMEOUT_MS.light));
     }
   }
 
@@ -3222,6 +3272,7 @@ class WhaleContent extends Component<Record<string, never>, ContentState> {
               }, 400);
             }}
             onOpenReport={() => this.setState({ view: "report" })}
+            onRetry={() => void this.loadDashboard(this.state.preset)}
           />
         )}
 
@@ -3445,7 +3496,7 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
     let alive = true;
     setTrends(null);
     setHoverIndex(null);
-    fetch(`/whale/api/trends?preset=${encodeURIComponent(preset)}&limit=8`)
+    fetchWithTimeout(`/whale/api/trends?preset=${encodeURIComponent(preset)}&limit=8`, {}, FETCH_TIMEOUT_MS.light)
       .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; trends: TrendPoint[] }>) : Promise.reject(new Error("HTTP"))))
       .then((json) => {
         if (alive && Array.isArray(json.trends)) setTrends(json.trends);
@@ -3657,7 +3708,7 @@ function LiveSessionCard(): ReactNode {
   const [sessions, setSessions] = useState<LiveSessionJson[] | null>(null);
   const [error, setError] = useState(false);
   const load = (): void => {
-    fetch("/whale/api/live-session")
+    fetchWithTimeout("/whale/api/live-session", {}, FETCH_TIMEOUT_MS.light)
       .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; sessions: LiveSessionJson[] }>) : Promise.reject(new Error("HTTP"))))
       .then((json) => {
         setSessions(Array.isArray(json.sessions) ? json.sessions : []);
@@ -3722,11 +3773,17 @@ function ProviderBalanceCard(): ReactNode {
   const prevTotalRef = useRef<number | null>(null);
   const load = (refresh: boolean, silent = false): void => {
     if (!silent) setLoading(true);
-    fetch(`/whale/api/balance${refresh ? "?refresh=1" : ""}`)
+    fetchWithTimeout(`/whale/api/balance${refresh ? "?refresh=1" : ""}`, {}, FETCH_TIMEOUT_MS.balance)
       .then((r) => (r.ok ? (r.json() as Promise<{ ok: boolean; balance: BalanceJson }>) : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((json) => setData(json.balance))
-      .catch(() =>
-        setData({ provider: "deepseek", name: "DeepSeek", status: "unavailable", checkedAt: Date.now(), error: "NETWORK" }),
+      .catch((error: unknown) =>
+        setData({
+          provider: "deepseek",
+          name: "DeepSeek",
+          status: isAbortError(error) ? "timeout" : "unavailable",
+          checkedAt: Date.now(),
+          error: isAbortError(error) ? "TIMEOUT" : "NETWORK",
+        }),
       )
       .finally(() => setLoading(false));
   };
@@ -3814,7 +3871,11 @@ function ProviderBalanceCard(): ReactNode {
           <div data-whale-report-balanceval>
             ——<small>{data.error ?? "UNAVAILABLE"}</small>
           </div>
-          <div data-whale-report-balancebreak>{BALANCE_STATUS_LABEL[data.status]}，本期费用仍按本地事件估算。</div>
+          <div data-whale-report-balancebreak>
+            {data.status === "invalid-key"
+              ? "余额不可用，本期费用仍按本地事件估算。"
+              : `${BALANCE_STATUS_LABEL[data.status]}，本期费用仍按本地事件估算。`}
+          </div>
         </>
       )}
       <div data-whale-report-balancefoot>
@@ -3836,8 +3897,9 @@ function Dashboard(props: {
   onPreset: (p: ContentState["preset"]) => void;
   onCustom: (from: string, to: string) => void;
   onOpenReport: () => void;
+  onRetry: () => void;
 }): ReactNode {
-  const { state, onPreset, onCustom, onOpenReport } = props;
+  const { state, onPreset, onCustom, onOpenReport, onRetry } = props;
   const { preset, loading, error, dashboard, from, to } = state;
   const report = dashboard;
   const s = report?.stats;
@@ -3944,6 +4006,15 @@ function Dashboard(props: {
         </div>
       )}
 
+      {!loading && error !== null && (
+        <div data-whale-report-refresherr role="alert">
+          <i />
+          <span>{report !== null ? "REFRESH FAILED · 保留上次数据" : "REFRESH FAILED"}</span>
+          <span>{error}</span>
+          <button data-whale-report-retry onClick={onRetry}>重试</button>
+        </div>
+      )}
+
       {loading && report === null && (
         <div data-whale-report-skeleton>
           <div data-whale-report-sk-hero />
@@ -3952,7 +4023,7 @@ function Dashboard(props: {
           <div data-whale-report-sk-line />
         </div>
       )}
-      {!loading && report === null && (
+      {!loading && report === null && error === null && (
         <div data-whale-report-loading>暂无数据，点击上方周期生成</div>
       )}
 

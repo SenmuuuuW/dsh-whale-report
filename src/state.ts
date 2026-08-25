@@ -49,6 +49,12 @@ export const SessionIndexSchema = z.object({
   /** HourBucket[]（结构由 stats.ts 定义，这里宽松存放）。 */
   buckets: z.unknown(),
   titles: z.array(z.string()),
+  /** 源文件指纹（P0.2）：mtime + size。文件未变 → 索引可复用；变化 → 失效重建。旧记录可缺省。 */
+  src: z.object({ mtimeMs: z.number(), size: z.number() }).optional(),
+  /** P0.1 salvage 缓存：索引来自只读恢复；复用时继续披露数据来源。 */
+  salvaged: z.boolean().optional(),
+  salvagedRecords: z.number().int().min(0).optional(),
+  salvagedDropped: z.number().int().min(0).optional(),
 });
 
 export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;

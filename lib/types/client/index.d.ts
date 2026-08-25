@@ -1,3 +1,18 @@
+/**
+ * 「深迹 DeepTrace」客户端 half。
+ *
+ * 呈现形态两级：
+ * 1. Tab 优先 —— 若装了 DSH-better-sidebar（ctx.betterSidebar 服务存在），
+ *    就往它的工作台注册一个「深迹」Tab，报告面板成为侧栏的
+ *    原生一员（第三方扩展的官方接缝 registerTab）。
+ * 2. 悬浮球兜底 —— 没有 better-sidebar 时，右下角入口按钮 + 抽屉面板。
+ *
+ * 数据不经过聊天：面板直接 fetch /whale/api（宿主 half 的围栏路由）。
+ * 客户端插件通过 window.__ModuleLoader__.load({id, factory}) 注册，
+ * cordis 客户端内核负责装配；betterSidebar 服务用惰性注入消费
+ * （服务缺失只跳过回调，绝不阻塞装配 —— 与宿主 half 的兼容策略一致）。
+ */
+import { Component, type ReactNode } from "react";
 export declare const name = "whale-report-client";
 export declare const inject: string[];
 interface ReportMeta {
@@ -213,12 +228,59 @@ interface StatsJson {
         };
     };
 }
+declare const PRESETS: readonly [{
+    readonly key: "daily";
+    readonly label: "日报";
+}, {
+    readonly key: "24h";
+    readonly label: "24小时";
+}, {
+    readonly key: "weekly";
+    readonly label: "周报";
+}, {
+    readonly key: "monthly";
+    readonly label: "月报";
+}, {
+    readonly key: "yearly";
+    readonly label: "年报";
+}, {
+    readonly key: "custom";
+    readonly label: "自定义";
+}];
 /** 模型用量表（对齐 DS 开放平台用量页的展示习惯）。 */
 /** 工具健康确定性排序：异常工具（失败明显）优先，健康工具按调用次数。 */
 export declare function sortToolHealth(health: NonNullable<StatsJson["toolHealth"]>): {
     tool: NonNullable<StatsJson["toolHealth"]>[number];
     abnormal: boolean;
 }[];
+interface ContentState {
+    toast: string | null;
+    view: "dashboard" | "report" | "history";
+    preset: (typeof PRESETS)[number]["key"];
+    from: string;
+    to: string;
+    loading: boolean;
+    error: string | null;
+    dashboard: ReportFull | null;
+    current: ReportFull | null;
+    history: ReportMeta[] | null;
+}
+export declare class WhaleContent extends Component<Record<string, never>, ContentState> {
+    state: ContentState;
+    requestSeq: number;
+    requestAbort: AbortController | null;
+    customDebounce: number | undefined;
+    componentDidMount(): void;
+    setToast(message: string): void;
+    /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。
+     * 韧性（v0.5.1）：超时预算 + finally 兜底 + 竞态门 + 旧请求 abort；
+     * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。 */
+    loadDashboard(preset: ContentState["preset"]): Promise<void>;
+    loadHistory(): Promise<void>;
+    openHistory(id: string): Promise<void>;
+    deleteReport(id: string): Promise<void>;
+    render(): ReactNode;
+}
 /** 周期短标签：wk-2026-W33 → W33；day-2026-08-16 → 08/16；mo-2026-06 → 2026-06；yr-2026 → 2026。 */
 export declare function periodShortLabel(key: string): string;
 /**

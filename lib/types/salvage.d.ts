@@ -16,6 +16,14 @@ export interface SalvageResult {
 }
 /** 在 $DSH_HOME/sessions 下按会话 id 定位日志文件（只读扫描）。 */
 export declare function findSessionLogPath(dshHome: string, sessionId: string): string | null;
+/** 一次遍历建立 sessionId → session.jsonl.zstd 路径映射（避免为每个会话重复全树扫描）。 */
+export declare function buildSessionPathMap(dshHome: string): Map<string, string>;
+/** 源文件指纹（P0.2）：mtime + size，用于判定会话日志是否发生变化。 */
+export interface SessionFileStat {
+    mtimeMs: number;
+    size: number;
+}
+export declare function statSessionFile(path: string): SessionFileStat | null;
 /** 当前 DSH home（与 harness 同源；读取失败返回 ~/.dsh）。 */
 export declare function resolveDshHome(): string;
 /**

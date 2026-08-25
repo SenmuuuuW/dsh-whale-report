@@ -246,6 +246,10 @@ export function toolHealthInsight(health: readonly ToolHealthLike[] | undefined)
  *   yr-YYYY         年报
  */
 export function periodKey(preset: string, toMs: number): string {
+  if (preset === "custom") {
+    // custom 区间无自然周期 key（不落入 weekly 分支，避免污染周趋势 period_stats）。
+    throw new Error("custom 区间无自然周期 key，请用 customPeriodKey(from, to)");
+  }
   const d = new Date(toMs);
   const iso = d.toISOString();
   if (preset === "daily") return `day-${shanghaiDateKey(toMs)}`;
@@ -275,8 +279,19 @@ export function shanghaiDateKey(ms: number): string {
   return new Date(ms + SHANGHAI_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * custom 区间独立 key：deterministic，前缀 `custom-` 绝不与自然周期
+ * （day-/24h-/wk-/mo-/yr-）冲突；相同 from/to → 相同 key，不同 from/to → 不同 key。
+ * 只有 custom 报告用它写 period_stats，标准周期趋势读取时按前缀天然隔离。
+ */
+export function customPeriodKey(from: number, to: number): string {
+  return `custom-${from}-${to}`;
+}
+
 /** 上一周期 key。24h 为滚动窗口，没有干净的自然"上一周期"→ 返回 null（不对比）。 */
 export function previousPeriodKey(preset: string, toMs: number): string | null {
+  // custom 同样无自然"上一周期"（对比上一周没有语义），返回 null。
+  if (preset === "custom") return null;
   const d = new Date(toMs);
   if (preset === "daily") return periodKey("daily", d.getTime() - 86400000);
   if (preset === "24h") return null;
@@ -289,6 +304,17 @@ export function previousPeriodKey(preset: string, toMs: number): string | null {
     return periodKey("yearly", p.getTime());
   }
   return periodKey("weekly", d.getTime() - 7 * 86400000);
+}
+
+/**
+ * 趋势行是否纳入查询（读取侧兼容旧污染）：
+ * - custom 查询（prefix ""）→ 全部纳入（既有语义：自定义趋势看所有周期）；
+ * - 标准周期查询 → key 必须匹配前缀，且排除 preset=custom 的记录
+ *   （旧版本 custom 报告曾以 wk-… 写入 period_stats；不迁移，读取时过滤）。
+ */
+export function isTrendRowIncluded(key: string, recordPreset: string, prefix: string): boolean {
+  if (prefix === "") return true;
+  return key.startsWith(prefix) && recordPreset !== "custom";
 }
 
 // ─────────────────────────── 插件/工具族排行（生态向） ───────────────────────────

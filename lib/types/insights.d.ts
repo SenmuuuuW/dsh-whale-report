@@ -75,8 +75,21 @@ export declare const SHANGHAI_OFFSET_MS: number;
 export declare function shanghaiDayStart(ms: number): number;
 /** 上海时区某时刻的日期 key（如 2026-08-20）。 */
 export declare function shanghaiDateKey(ms: number): string;
+/**
+ * custom 区间独立 key：deterministic，前缀 `custom-` 绝不与自然周期
+ * （day-/24h-/wk-/mo-/yr-）冲突；相同 from/to → 相同 key，不同 from/to → 不同 key。
+ * 只有 custom 报告用它写 period_stats，标准周期趋势读取时按前缀天然隔离。
+ */
+export declare function customPeriodKey(from: number, to: number): string;
 /** 上一周期 key。24h 为滚动窗口，没有干净的自然"上一周期"→ 返回 null（不对比）。 */
 export declare function previousPeriodKey(preset: string, toMs: number): string | null;
+/**
+ * 趋势行是否纳入查询（读取侧兼容旧污染）：
+ * - custom 查询（prefix ""）→ 全部纳入（既有语义：自定义趋势看所有周期）；
+ * - 标准周期查询 → key 必须匹配前缀，且排除 preset=custom 的记录
+ *   （旧版本 custom 报告曾以 wk-… 写入 period_stats；不迁移，读取时过滤）。
+ */
+export declare function isTrendRowIncluded(key: string, recordPreset: string, prefix: string): boolean;
 /** 按工具调用数归族排序（面板与 markdown 共用）。 */
 export declare function toolFamilies(toolCalls: Record<string, number>): {
     family: string;
