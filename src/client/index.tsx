@@ -279,8 +279,34 @@ const CSS = `
 }
 @keyframes dshload { 0% { left: -40%; } 100% { left: 100%; } }
 
-/* ── 刷新失败提示（stale-while-refresh：保留上次数据 + 重试） ── */
-[data-whale-report-refresherr] {
+/* ── v0.5.2 快照口径行（LAST COMPLETED SNAPSHOT / LAST UPDATED / 手动刷新） ── */
+[data-whale-report-snapmeta] {
+  display: flex; align-items: center; gap: 8px; margin: 8px 2px 12px; padding: 6px 10px;
+  border: 1px solid var(--dt-line-soft); border-radius: 10px; font-size: 11.5px;
+  color: var(--dt-muted); background: var(--dt-surface); flex-wrap: wrap;
+}
+[data-whale-report-snaplabel] { font-weight: 750; letter-spacing: .04em; color: var(--dt-ink); }
+[data-whale-report-snaptime] { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+[data-whale-report-snapnote] { color: var(--dt-faint); flex: 1; min-width: 160px; }
+[data-whale-report-snapstale] { color: var(--dt-amber, var(--dt-up)); font-weight: 700; }
+[data-whale-report-refresh] {
+  flex: none; border: 1px solid var(--dt-blue); color: var(--dt-blue); background: transparent;
+  border-radius: 8px; padding: 3px 12px; font-size: 11.5px; font-weight: 650; cursor: pointer;
+}
+[data-whale-report-refresh]:hover:not(:disabled) { background: var(--dt-blue); color: #fff; }
+[data-whale-report-refresh]:disabled { opacity: .5; cursor: default; }
+
+/* ── v0.5.2 详情下沉折叠（活跃扫描 / 模型分配 / 会话轨迹） ── */
+[data-whale-report-details] { margin-top: 26px; }
+[data-whale-report-details] > summary {
+  cursor: pointer; user-select: none; color: var(--dt-blue); font-size: 12.5px; font-weight: 700;
+  padding: 8px 10px; border: 1px dashed var(--dt-line-soft); border-radius: 10px; list-style: none;
+}
+[data-whale-report-details] > summary::-webkit-details-marker { display: none; }
+[data-whale-report-details] > summary::before { content: "▸ "; }
+[data-whale-report-details][open] > summary::before { content: "▾ "; }
+
+/* ── 刷新失败提示（stale-while-refresh：保留上次数据 + 重试） ── */[data-whale-report-refresherr] {
   display: flex; align-items: center; gap: 10px; margin: 0 2px 10px; padding: 8px 12px;
   border: 1px solid var(--dt-warn-border, var(--dt-border)); border-left: 4px solid var(--dt-amber, var(--dt-up));
   border-radius: 10px; font-size: 12.5px; color: var(--dt-ink);
@@ -3088,7 +3114,15 @@ interface ContentState {
   dashboard: ReportFull | null;
   current: ReportFull | null;
   history: ReportMeta[] | null;
+  /** v0.5.2：当前 dashboard 是否来自只读快照（口径 = LAST COMPLETED SNAPSHOT）。 */
+  snapshotMode: boolean;
+  /** 快照/完整数据完成时刻（LAST UPDATED）。 */
+  snapshotAt: number | null;
 }
+
+/** v0.5.2 快照新鲜度决策（与服务端 SUMMARY_FRESHNESS_MS 对齐）。 */
+const SNAPSHOT_FRESH_MS = 5 * 60 * 1000;
+const SNAPSHOT_STALE_NOTICE_MS = 15 * 60 * 1000;
 
 /** 洞察预览行（紧凑 Feed：标题 + 一行数据预览）。 */
 function insightPreview(insight: InsightJson, s: StatsJson): string | null {
@@ -3130,14 +3164,25 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
     dashboard: null,
     current: null,
     history: null,
+    snapshotMode: false,
+    snapshotAt: null,
   };
 
   requestSeq = 0;
   requestAbort: AbortController | null = null;
   customDebounce: number | undefined;
+  overviewTimer: number | undefined;
 
   componentDidMount(): void {
-    void this.loadDashboard(this.state.preset);
+    void this.refreshOverview(this.state.preset);
+    // v0.5.2：低频只读快照轮询（60s）—— 只读，绝不触发 summary 生成。
+    this.overviewTimer = window.setInterval(() => {
+      void this.pollOverview(this.state.preset);
+    }, 60_000);
+  }
+
+  componentWillUnmount(): void {
+    if (this.overviewTimer !== undefined) window.clearInterval(this.overviewTimer);
   }
 
   setToast(message: string): void {
@@ -3147,10 +3192,82 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
     }, 4000);
   }
 
+  /**
+   * v0.5.2 Fast Path：先读只读快照立即显示，再按快照年龄决定是否后台生成。
+   * - <5min：不生成 summary（快照即最新）
+   * - 5–15min：后台静默 refresh
+   * - >15min：后台 refresh + UI 显示"数据较旧"
+   * - 无快照：走完整 summary（骨架屏）
+   */
+  async refreshOverview(preset: ContentState["preset"]): Promise<void> {
+    const seq = ++this.requestSeq;
+    if (this.requestAbort !== null) this.requestAbort.abort();
+    this.requestAbort = new AbortController();
+    try {
+      const response = await fetchWithTimeout(
+        `/whale/api/overview?preset=${encodeURIComponent(preset)}`,
+        {},
+        FETCH_TIMEOUT_MS.overview,
+        this.requestAbort.signal,
+      );
+      const body = (await response.json()) as {
+        ok: boolean;
+        snapshot: boolean;
+        lastUpdated: number | null;
+        ageMs: number | null;
+        report?: ReportFull;
+      };
+      if (!response.ok || body.ok === false) throw new Error("overview 读取失败");
+      if (seq !== this.requestSeq) return;
+      if (body.snapshot === true && body.report !== undefined) {
+        this.setState({
+          dashboard: body.report,
+          current: body.report,
+          snapshotMode: true,
+          snapshotAt: body.lastUpdated ?? Date.now(),
+          loading: false,
+          error: null,
+          view: "dashboard",
+        });
+        const age = body.ageMs ?? 0;
+        if (age >= SNAPSHOT_FRESH_MS) {
+          // 后台刷新（5–15min 静默；>15min 由 Dashboard 按 snapshotAt 标注"数据较旧"）。
+          void this.loadDashboard(preset, { background: true });
+        }
+      } else {
+        // 无快照 → 完整生成兜底
+        void this.loadDashboard(preset, {});
+      }
+    } catch (error) {
+      if (seq !== this.requestSeq) return;
+      // overview 失败不阻塞：直接走完整 summary 兜底
+      void this.loadDashboard(preset, {});
+    }
+  }
+
+  /** 只读轮询：其他端可能已生成新快照 —— 静默替换显示，绝不触发生成。 */
+  async pollOverview(preset: ContentState["preset"]): Promise<void> {
+    try {
+      const response = await fetchWithTimeout(
+        `/whale/api/overview?preset=${encodeURIComponent(preset)}`,
+        {},
+        FETCH_TIMEOUT_MS.overview,
+      );
+      const body = (await response.json()) as { ok: boolean; snapshot: boolean; lastUpdated: number | null; report?: ReportFull };
+      if (!response.ok || body.ok === false || body.snapshot !== true || body.report === undefined) return;
+      if (body.lastUpdated !== null && (this.state.snapshotAt === null || body.lastUpdated > this.state.snapshotAt)) {
+        this.setState({ dashboard: body.report, current: body.report, snapshotMode: true, snapshotAt: body.lastUpdated });
+      }
+    } catch {
+      // 轮询失败静默忽略（快照仍显示）
+    }
+  }
+
   /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。
    * 韧性（v0.5.1）：超时预算 + finally 兜底 + 竞态门 + 旧请求 abort；
-   * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。 */
-  async loadDashboard(preset: ContentState["preset"]): Promise<void> {
+   * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。
+   * v0.5.2：background 后台刷新（快照保留显示）；成功后切换为完整数据并更新时间戳。 */
+  async loadDashboard(preset: ContentState["preset"], opts?: { background?: boolean }): Promise<void> {
     const seq = ++this.requestSeq;
     if (this.requestAbort !== null) this.requestAbort.abort();
     this.requestAbort = new AbortController();
@@ -3174,7 +3291,14 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
       // 只应用最新一次请求的结果（快速切换周期时旧响应不得覆盖新响应）。
       if (seq !== this.requestSeq) return;
-      this.setState({ dashboard: body.report, current: body.report, loading: false, view: "dashboard" });
+      this.setState({
+        dashboard: body.report,
+        current: body.report,
+        loading: false,
+        view: "dashboard",
+        snapshotMode: false,
+        snapshotAt: Date.now(),
+      });
     } catch (error) {
       if (seq !== this.requestSeq) return;
       // 失败保留上次数据：只清 loading + 落 refresh 失败提示（不打断已有内容）。
@@ -3261,7 +3385,8 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
             state={this.state}
             onPreset={(p) => {
               this.setState({ preset: p });
-              void this.loadDashboard(p);
+              // v0.5.2：只处理当前 period —— 先快照立即显示，按 age 决定是否后台生成
+              void this.refreshOverview(p);
             }}
             onCustom={(from, to) => {
               this.setState({ from, to });
@@ -3273,6 +3398,7 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
             }}
             onOpenReport={() => this.setState({ view: "report" })}
             onRetry={() => void this.loadDashboard(this.state.preset)}
+            onRefresh={() => void this.loadDashboard(this.state.preset)}
           />
         )}
 
@@ -3740,7 +3866,7 @@ function LiveSessionCard(): ReactNode {
       </div>
       <div data-whale-report-livefoot>
         <span>LAST EVENT {liveTime} · 30s AUTO REFRESH</span>
-        <span>READ ONLY</span>
+        <span>快照后仍在发生的实时活动</span>
       </div>
     </div>
   );
@@ -3898,15 +4024,17 @@ function Dashboard(props: {
   onCustom: (from: string, to: string) => void;
   onOpenReport: () => void;
   onRetry: () => void;
+  onRefresh: () => void;
 }): ReactNode {
-  const { state, onPreset, onCustom, onOpenReport, onRetry } = props;
-  const { preset, loading, error, dashboard, from, to } = state;
+  const { state, onPreset, onCustom, onOpenReport, onRetry, onRefresh } = props;
+  const { preset, loading, error, dashboard, from, to, snapshotMode, snapshotAt } = state;
   const report = dashboard;
   const s = report?.stats;
   const cost = report?.cost?.total;
   const delta = report?.prev !== undefined && report.prev.cost > 0 && cost !== undefined
     ? Math.round(((cost - report.prev.cost) / report.prev.cost) * 100)
     : null;
+  const staleNotice = snapshotMode && snapshotAt !== null && Date.now() - snapshotAt > SNAPSHOT_STALE_NOTICE_MS;
   const levelWeight: Record<string, number> = { critical: 0, warning: 1, tip: 2 };
   const insights = (report?.insights ?? [])
     .filter((i) => i.level !== "info")
@@ -4055,6 +4183,27 @@ function Dashboard(props: {
             </div>
           </div>
 
+          {/* v0.5.2：快照/完整口径 + LAST UPDATED + 手动刷新 */}
+          {snapshotAt !== null && (
+            <div data-whale-report-snapmeta>
+              <span data-whale-report-snaplabel>
+                {snapshotMode ? "LAST COMPLETED SNAPSHOT" : "LAST UPDATED"}
+              </span>
+              <span data-whale-report-snaptime>
+                {new Date(snapshotAt).toLocaleTimeString("zh-CN", { hour12: false })}
+              </span>
+              {snapshotMode ? (
+                <span data-whale-report-snapnote>数字截至快照时刻 · 快照后实时活动见 LIVE SESSION</span>
+              ) : (
+                <span data-whale-report-snapnote>完整统计（含进行中会话）</span>
+              )}
+              {staleNotice && <span data-whale-report-snapstale>数据较旧</span>}
+              <button data-whale-report-refresh disabled={loading} onClick={onRefresh}>
+                {loading ? "更新中…" : "刷新"}
+              </button>
+            </div>
+          )}
+
           <TrendSection preset={preset} />
 
           {(report.improvements ?? []).length > 0 && <ImproveSection items={report.improvements ?? []} />}
@@ -4088,43 +4237,47 @@ function Dashboard(props: {
             );
           })()}
 
-          <section data-whale-report-section>
-            <SectionHeader index="03" title="活跃扫描" meta={`SONAR / NIGHT ${night}%`} />
-            <div data-whale-report-zone>
-              <div data-whale-report-scanmeta>
-                <span>SCAN <b>00—24</b></span><span>DEPTH <b>4,096m</b></span><span>PING <b>OK</b></span><span>NIGHT <b>{night}%</b></span>
-              </div>
-              <ActivityStrip report={report} />
-            </div>
-          </section>
-
-          {modelRows.length > 0 && (
+          {/* v0.5.2 UI 减法：详情下沉，展开才看（数据同源，不额外请求） */}
+          <details data-whale-report-details>
+            <summary>更多详情：活跃扫描 / 模型分配 / 会话轨迹</summary>
             <section data-whale-report-section>
-              <SectionHeader index="04" title="模型分配" meta="RESOURCE / ALLOCATION" />
-              <div data-whale-report-modeltable>
-                {modelRows.map((m, index) => (
-                  <div key={m.model} data-whale-report-modelrow>
-                    <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
-                    <div data-whale-report-modelhead>
-                      <div data-whale-report-modelname>
-                        <b>{m.modelName}</b>
-                        {m.provider !== null && <em data-whale-report-modelprov>{m.provider.toUpperCase()}</em>}
-                      </div>
-                      <span>{m.share}% / ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
-                    </div>
-                    <div data-whale-report-modelbar>
-                      <i style={{ width: `${m.share}%`, background: "var(--dt-blue)" }} />
-                    </div>
-                    <div data-whale-report-modelnums>TOTAL {fmt(m.total)} TOKEN</div>
-                  </div>
-                ))}
+              <SectionHeader index="03" title="活跃扫描" meta={`SONAR / NIGHT ${night}%`} />
+              <div data-whale-report-zone>
+                <div data-whale-report-scanmeta>
+                  <span>SCAN <b>00—24</b></span><span>DEPTH <b>4,096m</b></span><span>PING <b>OK</b></span><span>NIGHT <b>{night}%</b></span>
+                </div>
+                <ActivityStrip report={report} />
               </div>
             </section>
-          )}
 
-          {(s.sessionsDetail ?? []).length > 0 && (
-            <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} totalCost={cost} index="05" />
-          )}
+            {modelRows.length > 0 && (
+              <section data-whale-report-section>
+                <SectionHeader index="04" title="模型分配" meta="RESOURCE / ALLOCATION" />
+                <div data-whale-report-modeltable>
+                  {modelRows.map((m, index) => (
+                    <div key={m.model} data-whale-report-modelrow>
+                      <span data-whale-report-modelrank>{String(index + 1).padStart(2, "0")}</span>
+                      <div data-whale-report-modelhead>
+                        <div data-whale-report-modelname>
+                          <b>{m.modelName}</b>
+                          {m.provider !== null && <em data-whale-report-modelprov>{m.provider.toUpperCase()}</em>}
+                        </div>
+                        <span>{m.share}% / ¥{typeof m.cost === "number" ? m.cost.toFixed(1) : "—"}</span>
+                      </div>
+                      <div data-whale-report-modelbar>
+                        <i style={{ width: `${m.share}%`, background: "var(--dt-blue)" }} />
+                      </div>
+                      <div data-whale-report-modelnums>TOTAL {fmt(m.total)} TOKEN</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {(s.sessionsDetail ?? []).length > 0 && (
+              <SessionDrilldown sessions={(s.sessionsDetail ?? []).slice(0, 5)} totalCost={cost} index="05" />
+            )}
+          </details>
 
           <button data-whale-report-btn data-whale-report-fullbtn onClick={onOpenReport}>
             Open full research report →

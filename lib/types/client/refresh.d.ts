@@ -17,6 +17,8 @@ export declare const FETCH_TIMEOUT_MS: {
     readonly summary: 60000;
     readonly report: 30000;
     readonly light: 20000;
+    /** v0.5.2 Fast Path：overview 只读快照，预算从宽（正常 <50ms）。 */
+    readonly overview: 10000;
 };
 /** 带超时预算的 fetch：超时 → 以 AbortError 拒绝；支持外部 signal（竞态取消旧请求）。 */
 export declare function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, extraSignal?: AbortSignal): Promise<Response>;

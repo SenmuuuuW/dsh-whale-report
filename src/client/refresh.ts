@@ -17,6 +17,8 @@ export const FETCH_TIMEOUT_MS = {
   summary: 60_000,
   report: 30_000,
   light: 20_000,
+  /** v0.5.2 Fast Path：overview 只读快照，预算从宽（正常 <50ms）。 */
+  overview: 10_000,
 } as const;
 
 /** AbortController 在非浏览器环境（Node ≥18）同样是全局可用。 */

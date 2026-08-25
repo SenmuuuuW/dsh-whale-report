@@ -66,6 +66,17 @@ function makeFetchRouter(): FetchRouter {
         reject(err);
       }
     });
+    // v0.5.2：旧测试语义 = "无快照" → overview 自动返回空快照，走 full summary fallback
+    if (String(url).includes("/whale/api/overview")) {
+      queueMicrotask(() => {
+        resolve(
+          new Response(JSON.stringify({ ok: true, snapshot: false, lastUpdated: null, ageMs: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }) as Response & { ok: boolean },
+        );
+      });
+    }
     return promise;
   });
   return router;

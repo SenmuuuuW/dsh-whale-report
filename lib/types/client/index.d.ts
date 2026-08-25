@@ -264,18 +264,37 @@ interface ContentState {
     dashboard: ReportFull | null;
     current: ReportFull | null;
     history: ReportMeta[] | null;
+    /** v0.5.2：当前 dashboard 是否来自只读快照（口径 = LAST COMPLETED SNAPSHOT）。 */
+    snapshotMode: boolean;
+    /** 快照/完整数据完成时刻（LAST UPDATED）。 */
+    snapshotAt: number | null;
 }
 export declare class WhaleContent extends Component<Record<string, never>, ContentState> {
     state: ContentState;
     requestSeq: number;
     requestAbort: AbortController | null;
     customDebounce: number | undefined;
+    overviewTimer: number | undefined;
     componentDidMount(): void;
+    componentWillUnmount(): void;
     setToast(message: string): void;
+    /**
+     * v0.5.2 Fast Path：先读只读快照立即显示，再按快照年龄决定是否后台生成。
+     * - <5min：不生成 summary（快照即最新）
+     * - 5–15min：后台静默 refresh
+     * - >15min：后台 refresh + UI 显示"数据较旧"
+     * - 无快照：走完整 summary（骨架屏）
+     */
+    refreshOverview(preset: ContentState["preset"]): Promise<void>;
+    /** 只读轮询：其他端可能已生成新快照 —— 静默替换显示，绝不触发生成。 */
+    pollOverview(preset: ContentState["preset"]): Promise<void>;
     /** 仪表盘：当前周期数据（有则复用，无则生成）。preset 显式传入，避免 setState 异步竞态。
      * 韧性（v0.5.1）：超时预算 + finally 兜底 + 竞态门 + 旧请求 abort；
-     * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。 */
-    loadDashboard(preset: ContentState["preset"]): Promise<void>;
+     * stale-while-refresh —— 失败时保留上次数据，仅提示 + 重试，骨架屏只在无缓存数据时出现。
+     * v0.5.2：background 后台刷新（快照保留显示）；成功后切换为完整数据并更新时间戳。 */
+    loadDashboard(preset: ContentState["preset"], opts?: {
+        background?: boolean;
+    }): Promise<void>;
     loadHistory(): Promise<void>;
     openHistory(id: string): Promise<void>;
     deleteReport(id: string): Promise<void>;

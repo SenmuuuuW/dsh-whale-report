@@ -38,7 +38,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const summaryFlight = createSingleFlight<string, ReportRecord>();
 
 /** P1 comparison scope：按 provider 拆分的用量（与 DeepSeek Platform 对账时只取 deepseek-official）。 */
-function withProviderScope(record: ReportRecord): ReportRecord & {
+function withProviderScope(record: ReportRecord | Omit<ReportRecord, "markdown">): (ReportRecord | Omit<ReportRecord, "markdown">) & {
   providerBreakdown: ReturnType<typeof buildProviderBreakdown>;
 } {
   const stats = record.stats as { models?: Record<string, { input: number; output: number; cacheRead: number; reasoning: number }> } | undefined;
@@ -318,6 +318,39 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   },
                 });
               }
+              return;
+            }
+            if (req.method === "GET" && method === "overview") {
+              // v0.5.2 Fast Path：只读 reports table 最近快照 —— 0 计算，
+              // 绝不触发 collectEvents / readSession / aggregate / salvage。
+              const url = new URL(req.url ?? "/", "http://dsh.internal");
+              const preset = url.searchParams.get("preset") ?? "weekly";
+              const now = Date.now();
+              let found: ReportRecord | undefined;
+              for (const [, record] of table.entries()) {
+                if (
+                  record.preset === preset &&
+                  record.sem === REPORT_SEM &&
+                  record.cost !== undefined &&
+                  (found === undefined || record.createdAt > found.createdAt)
+                ) {
+                  found = record;
+                }
+              }
+              if (found === undefined) {
+                writeJson(res, 200, { ok: true, snapshot: false, lastUpdated: null, ageMs: null });
+                return;
+              }
+              // 快照不带 markdown（Report 视图走 /get，那里仍由落库记录提供全文）。
+              const { markdown: _unused, ...snapshot } = found;
+              writeJson(res, 200, {
+                ok: true,
+                snapshot: true,
+                fresh: now - found.createdAt < SUMMARY_FRESHNESS_MS,
+                lastUpdated: found.createdAt,
+                ageMs: now - found.createdAt,
+                report: withProviderScope(snapshot),
+              });
               return;
             }
             if (req.method === "GET" && method === "list") {
