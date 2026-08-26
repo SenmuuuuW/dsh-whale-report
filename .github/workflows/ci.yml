@@ -26,7 +26,7 @@ jobs:
       # harness 包已发布在公共 npm（@deepseek-ai/dsh-*）。
       # 插件运行时由 profile 提供这些 peer；CI 里从 npm 装上即可做完整 typecheck。
       - name: Install harness peers from npm
-        run: pnpm add -D @deepseek-ai/dsh-tools@0.1.0-rc.6 @deepseek-ai/dsh-session@0.1.0-rc.6 @deepseek-ai/dsh-session-query@0.1.0-rc.6 @deepseek-ai/cordis@4.0.1 @deepseek-ai/schemastery@3.18.1
+        run: pnpm add -D @deepseek-ai/dsh-tools@0.1.1-rc.2 @deepseek-ai/dsh-session@0.1.1-rc.2 @deepseek-ai/dsh-session-query@0.1.1-rc.2 @deepseek-ai/cordis@4.0.1 @deepseek-ai/schemastery@3.18.1
 
       - name: Typecheck
         run: pnpm typecheck
