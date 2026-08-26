@@ -95,6 +95,16 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 <sub>The full DeepTrace report — findings, collaboration review, activity, resources, risks and session trace.</sub>
 
+## Snapshot-first overview（v0.5.2）
+
+Overview 打开即显示最近一次**已完成快照**，不再等待完整报告生成：
+
+- 页面标注 **LAST COMPLETED SNAPSHOT**（数字截至快照时刻）与 **LAST UPDATED**（完整刷新完成时刻）；快照之后的实时活动见 **LIVE SESSION**（30s 独立轻量刷新），两者口径明确区分
+- 刷新策略按快照年龄：**<5min** 不触发完整生成；**5–15min** 先显示快照、后台静默更新；**>15min** 显示旧数据并标注 stale、后台更新；手动「刷新」才强制重新生成
+- Live Session（30s）与 Provider Balance（60s）独立刷新，永不触发完整 summary；Full Report / History / 详情按需加载
+- 活跃扫描 / 模型分配 / 会话轨迹已下沉到「更多详情」折叠区
+- 自定义区间使用独立周期 key（`custom-<from>-<to>`），与 daily / 24h / weekly / monthly / yearly 完全隔离，不污染标准周期趋势
+
 ## What it measures
 
 | | |
@@ -182,7 +192,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.0 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.2 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -240,7 +250,7 @@ Web / HTML / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 226 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出
+pnpm test       # 288 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 刷新韧性 / Fast Path
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 

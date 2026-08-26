@@ -2,6 +2,38 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.5.2] - 2026-08-25
+
+LESS, FASTER：Overview 打开即见，不再等待完整报告生成。
+
+### 新增
+- **Snapshot-first Overview Fast Path**：`GET /whale/api/overview` 只读最近已完成快照（不触发 collect / readSession / aggregate），Overview 打开即显示；实测 endpoint <1ms、冷挂载首屏约 10ms
+- **快照年龄刷新策略**：<5min 不触发完整 summary；5–15min 先显示快照、后台静默更新；>15min 显示旧数据并标注 stale、后台更新；手动「刷新」才强制重新生成
+- **数据口径 UI**：LAST COMPLETED SNAPSHOT（数字截至快照时刻）与 LAST UPDATED（完整统计，含进行中会话）明确区分；Live Session 标注「快照后仍在发生的实时活动」
+- 活跃扫描 / 模型分配 / 会话轨迹下沉到「更多详情」折叠区（数据同源，不额外请求）
+
+### 优化
+- Live Session（30s）与 Provider Balance（60s）保持独立轻量刷新，永不触发完整 summary；60s Overview polling 仅只读快照，不触发计算
+- 巨大 live session / 冷 summary 不再阻塞 Overview 首屏
+
+### 验证
+- 288 tests 全绿；typecheck / build 通过；DSH 0.1.1-rc.2 verified（daily / weekly / monthly / yearly / custom 全预设 200）
+
+## [0.5.1] - 2026-08-25
+
+Refresh / 性能修复热修。
+
+### 修复
+- **Web Refresh 卡死**：请求超时预算 + `finally` 兜底 + 竞态门 + 旧请求 abort；stale-while-refresh（失败保留上次数据 + REFRESH FAILED + 重试），不再永久停在「更新中…」
+- **session index 改为 source fingerprint 失效**（mtime + size），不再每 10 分钟全量重放历史会话；旧条目按「最后写入 ≤ 最后索引事件」回填指纹，无破坏性迁移
+- **torn/corrupt session salvage 结果可缓存**（带指纹 + salvage 来源标记）：同一未变化的损坏文件不再重复解压（22MB 会话 14.5s → 0），来源披露跨生成保留
+- **same-period summary single-flight**：并发 / 重试请求共享同一份生成，避免重复 99-session 重放
+- **monthly / yearly / custom 热索引下 `object is not iterable`**：分桶 `toolHealth.failedSessions` 的 Set 被 JSON 序列化为 `{}`（窗口相关崩溃），改为数组形态 + 聚合端兼容三种形态
+- **custom period 污染 weekly History Trend**：custom 独立周期 key（`custom-<from>-<to>`），读取侧过滤旧污染记录（preset=custom 且 key=wk-…），无破坏性迁移
+
+### 验证
+- 277 tests 全绿；DSH 0.1.1-rc.2 verified；warm refresh 从约 15s 降至通常 <200ms
+
 ## [0.5.0] - 2026-08-23
 
 正式发布：TRACE → DIAGNOSE → **IMPROVE** → **VERIFY-ready**。
@@ -11,7 +43,7 @@
 
 ### 新增（v0.5 — TRACE → DIAGNOSE → IMPROVE → VERIFY-ready）
 - **IMPROVE 引擎**：Finding 回答"发生了什么"，Improve 回答"值不值得改、怎么改"
-  - 五类确定性规则：Repeated Tool Failure（跨会话同错误码根因）/ Retry Workflow Waste（跨会话命令重试）/ Repeated User Correction（有限分类，EXPERIMENTAL）/ Peak Cost Opportunity（高峰集中 + 夜间批量证据）/ 全部只读建议，不改任何 skill / workflow / 仓库文件
+  - 四类确定性规则：Repeated Tool Failure（跨会话同错误码根因）/ Retry Workflow Waste（跨会话命令重试）/ Repeated User Correction（有限分类，EXPERIMENTAL）/ Peak Cost Opportunity（高峰集中 + 夜间批量证据）/ 全部只读建议，不改任何 skill / workflow / 仓库文件
   - Evidence-first：每条建议带 metrics / affectedSessions / 置信度 / VERIFY 基线 → 目标；stable id 跨周期不变；0 额外 LLM token
   - 人工纠正只存类别与计数，绝不保存用户原句；命令/路径/hash 全部脱敏
   - 全出口可见：markdown Improve 段 + 面板 IMPROVE 区（默认 Top3，展开看证据）+ 独立 HTML 02 / IMPROVE 章节（含 VERIFY 行）
