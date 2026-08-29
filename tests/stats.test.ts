@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { aggregate, aggregateBuckets, bucketizeOwnEvents, emptyStats, nightOwlIndex, formatTokens, formatSpan } from "../src/stats.js";
+import { shanghaiDayStart } from "../src/shanghai.js";
 import { renderReport, presetRange, PRESET_LABELS } from "../src/report.js";
 import type { RawEvent, RawSessionHeader } from "../src/stats.js";
 
@@ -96,8 +97,8 @@ describe("aggregate — 工具与危险命令", () => {
 
 describe("作息画像", () => {
   it("凌晨事件占比 = 熬夜指数", () => {
-    // 用本地时区零点起算，避免测试随运行机器时区漂移。
-    const localMidnight = new Date(2026, 7, 10).getTime();
+    // 用上海时区零点起算（口径统一 Asia/Shanghai，与运行机器时区无关）。
+    const localMidnight = shanghaiDayStart(Date.parse("2026-08-10T00:00:00+08:00"));
     const events = [
       ev("step/start", localMidnight + 2 * H), // 凌晨 2 点
       ev("step/start", localMidnight + 3 * H), // 凌晨 3 点

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { aggregate, aggregateBuckets, bucketizeOwnEvents, activityLevel, summarizeSessionEvents, type RawEvent } from "../src/stats.js";
 import { isPeakHourCST, computeCostTimed, PEAK_PRICES, OFFPEAK_PRICES } from "../src/pricing.js";
 import { periodShortLabel } from "../src/client/index.js";
+import { shanghaiDayStart } from "../src/shanghai.js";
 
 function ev(type: string, time: number, data: Record<string, unknown> = {}): RawEvent {
   return { type, time, data: { ...data, sessionId: "s1" } };
@@ -16,7 +17,7 @@ function ev(type: string, time: number, data: Record<string, unknown> = {}): Raw
 
 describe("dayHourDetail 双路径等价", () => {
   it("aggregate 与 aggregateBuckets 的小时级明细完全一致", () => {
-    const base = new Date(2026, 7, 10, 0, 0, 0).getTime(); // 本地零点
+    const base = shanghaiDayStart(Date.parse("2026-08-10T00:00:00+08:00")); // 上海零点（口径统一，与机器时区无关）
     const events: RawEvent[] = [
       ev("request/header", base + 1000, { header: { config: { model: "deepseek-v4-flash" } } }),
       ev("turn/start", base + 2000, {}),
@@ -49,7 +50,7 @@ describe("dayHourDetail 双路径等价", () => {
   });
 
   it("空小时补零、固定 24 项", () => {
-    const base = new Date(2026, 7, 10, 0, 0, 0).getTime();
+    const base = shanghaiDayStart(Date.parse("2026-08-10T00:00:00+08:00"));
     const stats = aggregate([ev("turn/start", base + 1000, {})], { from: base - 1, to: base + 2000 });
     expect(stats.dayHourDetail[0].hours.length).toBe(24);
     expect(stats.dayHourDetail[0].hours[23]).toEqual({ tokens: 0, sessions: 0, turns: 0, toolCalls: 0, modelTokens: {}, cost: 0 });
