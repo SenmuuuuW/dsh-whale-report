@@ -105,6 +105,18 @@ Overview 打开即显示最近一次**已完成快照**，不再等待完整报�
 - 活跃扫描 / 模型分配 / 会话轨迹已下沉到「更多详情」折叠区
 - 自定义区间使用独立周期 key（`custom-<from>-<to>`），与 daily / 24h / weekly / monthly / yearly 完全隔离，不污染标准周期趋势
 
+## Query Engine（v0.5.3）
+
+DeepTrace 架构为 **INGEST ONCE → QUERY MANY**：
+
+- **普通 Refresh 不重放 Session**：只读 canonical index（10 分钟分桶 + 精确边界行），零 readSession / 零解压 —— 毫秒级查询（真实生产 p50 ~6–9ms）
+- **rolling 24h 精确窗口** `[now-24h, now)`；PeriodSpec 是唯一时间窗口真相源
+- **live incremental ingestion**：session/event firehose 逐事件增量（baseline + seq 去重），live-session 卡片 <1ms
+- **exact boundary accounting**：窗口边界逐事件精确过滤，Raw Oracle 对账 costDiff=0.0000
+- salvage 重解压移入 worker_threads，不阻塞查询
+
+当前 version：**v0.5.3**（兼容基线 DSH 0.1.1-rc.2）
+
 ## What it measures
 
 | | |
@@ -192,7 +204,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.2 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.3 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -250,7 +262,7 @@ Web / HTML / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 288 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 刷新韧性 / Fast Path
+pnpm test       # 314 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 刷新韧性 / Fast Path / Query Engine / 时区矩阵 / persistence
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 

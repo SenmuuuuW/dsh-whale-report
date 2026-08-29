@@ -3116,6 +3116,8 @@ interface ContentState {
   history: ReportMeta[] | null;
   /** v0.5.2：当前 dashboard 是否来自只读快照（口径 = LAST COMPLETED SNAPSHOT）。 */
   snapshotMode: boolean;
+  /** v0.5.x repair：ingest 追赶中（显示 INDEXING LIVE DATA…）。 */
+  indexing: boolean;
   /** 快照/完整数据完成时刻（LAST UPDATED）。 */
   snapshotAt: number | null;
 }
@@ -3166,6 +3168,7 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
     history: null,
     snapshotMode: false,
     snapshotAt: null,
+    indexing: false,
   };
 
   requestSeq = 0;
@@ -3199,49 +3202,54 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
    * - >15min：后台 refresh + UI 显示"数据较旧"
    * - 无快照：走完整 summary（骨架屏）
    */
+  /**
+   * v0.5.x repair：Refresh = Query Engine 实时查询（服务端只读 index）。
+   * 不再按快照年龄触发完整生成；ingest 追赶时显示 INDEXING LIVE DATA…。
+   */
   async refreshOverview(preset: ContentState["preset"]): Promise<void> {
     const seq = ++this.requestSeq;
     if (this.requestAbort !== null) this.requestAbort.abort();
     this.requestAbort = new AbortController();
+    this.setState({ loading: true, error: null });
     try {
+      const payload =
+        preset === "custom"
+          ? `&from=${encodeURIComponent(this.state.from)}&to=${encodeURIComponent(this.state.to)}`
+          : "";
       const response = await fetchWithTimeout(
-        `/whale/api/overview?preset=${encodeURIComponent(preset)}`,
+        `/whale/api/overview?preset=${encodeURIComponent(preset)}${payload}`,
         {},
         FETCH_TIMEOUT_MS.overview,
         this.requestAbort.signal,
       );
       const body = (await response.json()) as {
         ok: boolean;
-        snapshot: boolean;
-        lastUpdated: number | null;
-        ageMs: number | null;
         report?: ReportFull;
+        lastUpdated: number | null;
+        indexing: boolean;
+        missing: number;
+        indexedThrough: number;
       };
       if (!response.ok || body.ok === false) throw new Error("overview 读取失败");
       if (seq !== this.requestSeq) return;
-      if (body.snapshot === true && body.report !== undefined) {
-        this.setState({
-          dashboard: body.report,
-          current: body.report,
-          snapshotMode: true,
-          snapshotAt: body.lastUpdated ?? Date.now(),
-          loading: false,
-          error: null,
-          view: "dashboard",
-        });
-        const age = body.ageMs ?? 0;
-        if (age >= SNAPSHOT_FRESH_MS) {
-          // 后台刷新（5–15min 静默；>15min 由 Dashboard 按 snapshotAt 标注"数据较旧"）。
-          void this.loadDashboard(preset, { background: true });
-        }
-      } else {
-        // 无快照 → 完整生成兜底
-        void this.loadDashboard(preset, {});
-      }
+      if (body.report === undefined) throw new Error("overview 无数据");
+      // P0 invariant 纵深防御：响应 period 必须匹配请求 preset（custom 由渲染层再校验 from/to）
+      if (body.report.preset !== preset) return;
+      this.setState({
+        dashboard: body.report,
+        current: body.report,
+        snapshotMode: false,
+        snapshotAt: body.indexedThrough ?? body.lastUpdated ?? Date.now(),
+        indexing: body.indexing === true,
+        loading: false,
+        error: null,
+        view: "dashboard",
+      });
     } catch (error) {
       if (seq !== this.requestSeq) return;
-      // overview 失败不阻塞：直接走完整 summary 兜底
-      void this.loadDashboard(preset, {});
+      this.setState({ loading: false, error: describeFetchError(error, FETCH_TIMEOUT_MS.overview) });
+    } finally {
+      if (seq === this.requestSeq) this.setState({ loading: false });
     }
   }
 
@@ -3253,10 +3261,10 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
         {},
         FETCH_TIMEOUT_MS.overview,
       );
-      const body = (await response.json()) as { ok: boolean; snapshot: boolean; lastUpdated: number | null; report?: ReportFull };
+      const body = (await response.json()) as { ok: boolean; snapshot: boolean; lastUpdated: number | null; indexing?: boolean; report?: ReportFull };
       if (!response.ok || body.ok === false || body.snapshot !== true || body.report === undefined) return;
       if (body.lastUpdated !== null && (this.state.snapshotAt === null || body.lastUpdated > this.state.snapshotAt)) {
-        this.setState({ dashboard: body.report, current: body.report, snapshotMode: true, snapshotAt: body.lastUpdated });
+        this.setState({ dashboard: body.report, current: body.report, snapshotMode: false, snapshotAt: body.lastUpdated, indexing: body.indexing === true });
       }
     } catch {
       // 轮询失败静默忽略（快照仍显示）
@@ -3289,6 +3297,8 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
       );
       const body = (await response.json()) as { ok: boolean; report: ReportFull; error?: { message?: string } };
       if (!response.ok || body.ok === false) throw new Error(body.error?.message ?? "生成失败");
+      // P0 invariant 纵深防御：响应 period 必须匹配请求 preset
+      if (body.report.preset !== preset) throw new Error("响应周期不匹配");
       // 只应用最新一次请求的结果（快速切换周期时旧响应不得覆盖新响应）。
       if (seq !== this.requestSeq) return;
       this.setState({
@@ -3384,7 +3394,17 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
           <Dashboard
             state={this.state}
             onPreset={(p) => {
-              this.setState({ preset: p });
+              // P0 invariant：切换 period 立即作废旧周期数据 —— 新数据返回前绝不
+              // 把旧 period 报告套上新 period 标签（DISPLAYED PERIOD === REPORT PERIOD）。
+              this.setState({
+                preset: p,
+                dashboard: null,
+                current: null,
+                snapshotAt: null,
+                snapshotMode: false,
+                loading: true,
+                error: null,
+              });
               // v0.5.2：只处理当前 period —— 先快照立即显示，按 age 决定是否后台生成
               void this.refreshOverview(p);
             }}
@@ -3393,12 +3413,14 @@ export class WhaleContent extends Component<Record<string, never>, ContentState>
               if (this.customDebounce !== undefined) window.clearTimeout(this.customDebounce);
               this.customDebounce = window.setTimeout(() => {
                 this.customDebounce = undefined;
-                void this.loadDashboard("custom");
+                // P0 invariant：custom 切换同样作废旧数据
+                this.setState({ dashboard: null, current: null, snapshotAt: null, loading: true, error: null });
+                void this.refreshOverview("custom");
               }, 400);
             }}
             onOpenReport={() => this.setState({ view: "report" })}
-            onRetry={() => void this.loadDashboard(this.state.preset)}
-            onRefresh={() => void this.loadDashboard(this.state.preset)}
+            onRetry={() => void this.refreshOverview(this.state.preset)}
+            onRefresh={() => void this.refreshOverview(this.state.preset)}
           />
         )}
 
@@ -4027,14 +4049,23 @@ function Dashboard(props: {
   onRefresh: () => void;
 }): ReactNode {
   const { state, onPreset, onCustom, onOpenReport, onRetry, onRefresh } = props;
-  const { preset, loading, error, dashboard, from, to, snapshotMode, snapshotAt } = state;
-  const report = dashboard;
+  const { preset, loading, error, dashboard, from, to, snapshotMode, snapshotAt, indexing } = state;
+  // P0 invariant：渲染层强制 DISPLAYED PERIOD === REPORT PERIOD。
+  // report.preset 不匹配当前选中 period 时视为无数据（骨架/切换态），绝不伪装展示。
+  const report =
+    dashboard !== null && dashboard.preset === preset
+      ? (preset === "custom" && Date.parse(from) === dashboard.from && Date.parse(to) === dashboard.to
+          ? dashboard
+          : preset !== "custom"
+            ? dashboard
+            : null)
+      : null;
   const s = report?.stats;
   const cost = report?.cost?.total;
   const delta = report?.prev !== undefined && report.prev.cost > 0 && cost !== undefined
     ? Math.round(((cost - report.prev.cost) / report.prev.cost) * 100)
     : null;
-  const staleNotice = snapshotMode && snapshotAt !== null && Date.now() - snapshotAt > SNAPSHOT_STALE_NOTICE_MS;
+  const staleNotice = snapshotAt !== null && Date.now() - snapshotAt > SNAPSHOT_STALE_NOTICE_MS;
   const levelWeight: Record<string, number> = { critical: 0, warning: 1, tip: 2 };
   const insights = (report?.insights ?? [])
     .filter((i) => i.level !== "info")
@@ -4186,18 +4217,16 @@ function Dashboard(props: {
           {/* v0.5.2：快照/完整口径 + LAST UPDATED + 手动刷新 */}
           {snapshotAt !== null && (
             <div data-whale-report-snapmeta>
-              <span data-whale-report-snaplabel>
-                {snapshotMode ? "LAST COMPLETED SNAPSHOT" : "LAST UPDATED"}
-              </span>
+              <span data-whale-report-snaplabel>LAST UPDATED</span>
               <span data-whale-report-snaptime>
                 {new Date(snapshotAt).toLocaleTimeString("zh-CN", { hour12: false })}
               </span>
-              {snapshotMode ? (
-                <span data-whale-report-snapnote>数字截至快照时刻 · 快照后实时活动见 LIVE SESSION</span>
+              {indexing ? (
+                <span data-whale-report-snapnote>INDEXING LIVE DATA…（数据截至已索引事件）</span>
               ) : (
-                <span data-whale-report-snapnote>完整统计（含进行中会话）</span>
+                <span data-whale-report-snapnote>完整统计（含进行中会话，截至 LAST UPDATED 时刻）</span>
               )}
-              {staleNotice && <span data-whale-report-snapstale>数据较旧</span>}
+              {staleNotice && !indexing && <span data-whale-report-snapstale>数据较旧</span>}
               <button data-whale-report-refresh disabled={loading} onClick={onRefresh}>
                 {loading ? "更新中…" : "刷新"}
               </button>

@@ -104,7 +104,7 @@ afterEach(() => {
 
 describe("isIndexFresh（指纹判定，纯函数）", () => {
   const stat = { mtimeMs: 1000, size: 100 };
-  const entry: SessionIndexRecord = { sessionId: "s", v: 14, builtAt: 5000, lastSeq: 1, lastMs: 900, buckets: [], titles: [], src: { mtimeMs: 1000, size: 100 } };
+  const entry: SessionIndexRecord = { sessionId: "s", v: 16, builtAt: 5000, lastSeq: 1, lastMs: 900, buckets: [], titles: [], src: { mtimeMs: 1000, size: 100 } };
 
   it("指纹完全一致 → 新鲜", () => {
     expect(isIndexFresh(entry, stat)).toBe(true);
@@ -119,7 +119,7 @@ describe("isIndexFresh（指纹判定，纯函数）", () => {
   });
 
   it("版本不匹配 → 失效", () => {
-    expect(isIndexFresh({ ...entry, v: 13 }, stat)).toBe(false);
+    expect(isIndexFresh({ ...entry, v: 15 }, stat)).toBe(false);
   });
 
   it("无条目 → 失效", () => {
@@ -127,7 +127,7 @@ describe("isIndexFresh（指纹判定，纯函数）", () => {
   });
 
   it("旧条目（无指纹）：文件最后写入 ≤ 最后索引事件/建索引时刻 → 复用", () => {
-    const legacy = { sessionId: "s", v: 14, builtAt: 5000, lastSeq: 1, lastMs: 9000, buckets: [], titles: [] };
+    const legacy = { sessionId: "s", v: 16, builtAt: 5000, lastSeq: 1, lastMs: 9000, buckets: [], titles: [] };
     expect(isIndexFresh(legacy, { mtimeMs: 8000, size: 100 })).toBe(true);
     expect(isIndexFresh(legacy, { mtimeMs: 9000, size: 100 })).toBe(true);
     // 最后写入晚于最后索引事件 → 可能漏新事件 → 失效重建
@@ -150,7 +150,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -175,7 +175,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -205,7 +205,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -229,7 +229,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     // 注入一个"看起来新鲜"的条目（src 与实际文件无关）
     await svc.index.put("s-ghost", {
       sessionId: "s-ghost",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: 1,
       lastMs: T0 + 60_000,
@@ -252,7 +252,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     // 即使有条目（理论上不会发生），live 也必须重读
     await svc.index.put("s-live", {
       sessionId: "s-live",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: 5,
       lastMs: T0 + 60_000 + 5000,
@@ -425,7 +425,7 @@ describe("toolHealth.failedSessions 持久化形态（custom/月/年 400 根因�
     }
     await svc.index.put("s-th", {
       sessionId: "s-th",
-      v: 14,
+      v: 16,
       builtAt: Date.now(),
       lastSeq: 1,
       lastMs: T0 + 60_000,

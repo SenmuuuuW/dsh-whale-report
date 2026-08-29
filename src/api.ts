@@ -26,6 +26,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isTrendRowIncluded, periodKey } from "./insights.js";
+import { customPeriodKey, naturalPeriodKey, resolvePeriod, type PeriodPreset, type PeriodSpec } from "./period.js";
+import { queryPeriod } from "./query-engine.js";
+import type { IngestEngine } from "./ingest.js";
+import type { BucketizedResult, ModelUsage } from "./stats.js";
+import { buildReportFromStats } from "./tools.js";
 import { computeCostTimed } from "./pricing.js";
 import { buildProviderBreakdown } from "./usage.js";
 import { generateReportData, newGenerationPerf, toPeriodRecord, type ReportServices } from "./tools.js";
@@ -58,6 +63,49 @@ export interface WebServerLike {
 
 export interface ApiServices extends ReportServices {
   domain: Domain<typeof whaleDomain>;
+  ingest: IngestEngine;
+}
+
+/** 后台持久化写失败：bounded 诊断（计数 + 每 10 次采样一条日志），绝不 unhandled rejection。 */
+const writeFailureCounts = new Map<string, number>();
+function trackWriteFailure(scope: string, error: unknown): void {
+  const n = (writeFailureCounts.get(scope) ?? 0) + 1;
+  writeFailureCounts.set(scope, n);
+  if (n <= 3 || n % 10 === 0) {
+    console.error(`[whale] ${scope} 写失败（第 ${n} 次）:`, error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** live 桶 → live-session 卡片聚合（零 readSession）。 */
+function summarizeLiveBuckets(
+  sessionId: string,
+  snap: BucketizedResult,
+): { title: string; turns: number; toolCalls: number; tokens: { input: number; output: number; cacheRead: number; reasoning: number }; totalTokens: number; hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[]; lastTime: number } {
+  let turns = 0;
+  let toolCalls = 0;
+  const tokens = { input: 0, output: 0, cacheRead: 0, reasoning: 0 };
+  const hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[] = [];
+  let lastTime = 0;
+  for (const b of snap.buckets) {
+    turns += b.turns;
+    toolCalls += b.toolCallsTotal;
+    tokens.input += b.input;
+    tokens.output += b.output;
+    tokens.cacheRead += b.cacheRead;
+    tokens.reasoning += b.reasoning;
+    hourModelTokens.push({ hour: new Date(b.h).getHours(), modelTokens: b.modelUsage });
+    const end = b.h + 10 * 60 * 1000;
+    if (end > lastTime) lastTime = end;
+  }
+  return {
+    title: snap.titles[0] ?? "",
+    turns,
+    toolCalls,
+    tokens,
+    totalTokens: tokens.input + tokens.cacheRead + tokens.output,
+    hourModelTokens,
+    lastTime,
+  };
 }
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
@@ -262,32 +310,27 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               return;
             }
             if (req.method === "GET" && method === "live-session") {
-              // 当前会话消耗：读 live 会话事件实时聚合（轻量，不落库）。
-              const sessions = await svc.sessionQuery.listSessions();
-              const live = sessions.filter((r) => r.live === true);
-              const results = [];
-              for (const rec of live.slice(0, 5)) {
-                try {
-                  const snapshot = await svc.sessionQuery.readSession(rec.header.id);
-                  const summary = summarizeSessionEvents(rec.header.id, snapshot.events);
-                  if (summary.totalTokens === 0 && summary.turns === 0 && summary.toolCalls === 0) continue;
-                  // 峰谷计价：按小时的模型用量 × 该时段价格。
-                  const cost = computeCostTimed(summary.hourModelTokens);
-                  results.push({
-                    sessionId: summary.sessionId,
-                    title: summary.title,
-                    turns: summary.turns,
-                    toolCalls: summary.toolCalls,
-                    tokens: summary.tokens,
-                    totalTokens: summary.totalTokens,
-                    cost: cost.total,
-                    costSource: "peak-offpeak",
-                    peakShare: cost.peakShare,
-                    lastTime: summary.lastTime,
-                  });
-                } catch {
-                  // 单个会话读取失败不影响其余
-                }
+              // v0.5.x repair：live 消耗从内存增量桶聚合 —— 绝不 readSession 全量（<50ms）。
+              const ingest = svc.ingest;
+              const results: Record<string, unknown>[] = [];
+              for (const id of [...ingest.statusOf().liveIds].slice(0, 5)) {
+                const snap = ingest.liveSnapshot(id);
+                if (snap === null) continue;
+                const summary = summarizeLiveBuckets(id, snap);
+                if (summary.totalTokens === 0 && summary.turns === 0 && summary.toolCalls === 0) continue;
+                const cost = computeCostTimed(summary.hourModelTokens);
+                results.push({
+                  sessionId: id,
+                  title: summary.title,
+                  turns: summary.turns,
+                  toolCalls: summary.toolCalls,
+                  tokens: summary.tokens,
+                  totalTokens: summary.totalTokens,
+                  cost: cost.total,
+                  costSource: "peak-offpeak",
+                  peakShare: cost.peakShare,
+                  lastTime: summary.lastTime,
+                });
               }
               writeJson(res, 200, { ok: true, sessions: results });
               return;
@@ -321,35 +364,55 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               return;
             }
             if (req.method === "GET" && method === "overview") {
-              // v0.5.2 Fast Path：只读 reports table 最近快照 —— 0 计算，
-              // 绝不触发 collectEvents / readSession / aggregate / salvage。
+              // v0.5.x repair：Overview = Query Engine 实时结果（不再以 reports 表为真相）。
               const url = new URL(req.url ?? "/", "http://dsh.internal");
-              const preset = url.searchParams.get("preset") ?? "weekly";
+              const preset = (url.searchParams.get("preset") ?? "weekly") as PeriodPreset;
               const now = Date.now();
-              let found: ReportRecord | undefined;
-              for (const [, record] of table.entries()) {
-                if (
-                  record.preset === preset &&
-                  record.sem === REPORT_SEM &&
-                  record.cost !== undefined &&
-                  (found === undefined || record.createdAt > found.createdAt)
-                ) {
-                  found = record;
-                }
-              }
-              if (found === undefined) {
-                writeJson(res, 200, { ok: true, snapshot: false, lastUpdated: null, ageMs: null });
+              let spec: PeriodSpec;
+              try {
+                spec = resolvePeriod({
+                  preset,
+                  now,
+                  from: url.searchParams.get("from") ?? undefined,
+                  to: url.searchParams.get("to") ?? undefined,
+                });
+              } catch (error) {
+                writeJson(res, 400, { ok: false, error: { code: "bad-request", message: error instanceof Error ? error.message : String(error) } });
                 return;
               }
-              // 快照不带 markdown（Report 视图走 /get，那里仍由落库记录提供全文）。
-              const { markdown: _unused, ...snapshot } = found;
+              void svc.ingest.bootstrap();
+              const meta = svc.ingest.statusOf();
+              const { stats } = queryPeriod(svc.index, spec, meta.headers, meta);
+              const gen = await buildReportFromStats(svc, preset, spec.from, spec.to, stats);
+              const report: Omit<ReportRecord, "markdown"> = {
+                sem: REPORT_SEM,
+                id: `overview-${spec.queryId}`,
+                preset,
+                from: spec.from,
+                to: spec.to,
+                createdAt: now,
+                sessions: gen.stats.sessions,
+                turns: gen.stats.turns,
+                totalEvents: gen.stats.totalEvents,
+                stats: gen.stats as unknown,
+                cost: gen.cost,
+                insights: gen.insights,
+                improvements: gen.improvements,
+                reportGeneration: gen.reportGeneration,
+                prev: gen.prev
+                  ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                  : undefined,
+              };
               writeJson(res, 200, {
                 ok: true,
                 snapshot: true,
-                fresh: now - found.createdAt < SUMMARY_FRESHNESS_MS,
-                lastUpdated: found.createdAt,
-                ageMs: now - found.createdAt,
-                report: withProviderScope(snapshot),
+                fresh: !meta.indexing,
+                lastUpdated: meta.indexedThrough,
+                ageMs: 0,
+                indexing: meta.indexing,
+                missing: meta.missing,
+                indexedThrough: meta.indexedThrough,
+                report: withProviderScope(report),
               });
               return;
             }
@@ -399,102 +462,75 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               return;
             }
             if (req.method === "POST" && method === "summary") {
-              // 仪表盘数据：当前周期已有报告则复用，否则现场生成并落库。
+              // v0.5.x repair：Summary = Query Engine（只读 index）+ 报告构建 + 落库 artifact。
+              // 普通 Refresh 不再触发 session replay / readSession / salvage。
               const tAll = Date.now();
               const payload = (await readJsonBody(req)) as { preset?: unknown; from?: unknown; to?: unknown };
-              const preset = (payload.preset as ReportPreset) ?? "weekly";
+              const preset = (payload.preset as PeriodPreset) ?? "weekly";
               const now = Date.now();
-              const range =
-                preset === "custom"
-                  ? { from: parseTime(payload.from, now - 7 * DAY_MS), to: parseTime(payload.to, now) }
-                  : presetRange(preset, now);
-              // P0 性能细账（随响应透出，前端不消费；验收计时用）。
-              const perf = newGenerationPerf();
-              let serializeMs = 0;
-              // 自定义区间每次重新生成（key 语义与周期预设不同，不复用）。
-              if (preset === "custom") {
-                const flightKey = `summary|custom|${range.from}|${range.to}`;
-                const record = await summaryFlight(flightKey, async () => {
-                  const gen = await generateReportData(svc, preset, range, perf);
-                  const tSer = Date.now();
-                  await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
-                  const record: ReportRecord = {
-                    sem: REPORT_SEM,
-                    id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-                    preset,
-                    from: range.from,
-                    to: range.to,
-                    createdAt: now,
-                    sessions: gen.stats.sessions,
-                    turns: gen.stats.turns,
-                    totalEvents: gen.stats.totalEvents,
-                    stats: gen.stats as unknown,
-                    markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
-                    cost: gen.cost,
-                    insights: gen.insights,
-                    improvements: gen.improvements,
-                    reportGeneration: gen.reportGeneration,
-                    prev: gen.prev
-                      ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
-                      : undefined,
-                  };
-                  await table.put(record.id, record);
-                  serializeMs = Date.now() - tSer;
-                  return record;
-                });
-                writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
-                return;
-              }
-              const key = periodKey(preset, range.to);
-              // 复用条件：周期匹配 + 语义版本匹配 + 含 cost + 在新鲜度窗口内
-              // （超过 5 分钟视为过期：本周进行中，新会话要能反映出来）。
-              let found: ReportRecord | undefined;
-              for (const [, record] of table.entries()) {
-                if (
-                  record.preset === preset &&
-                  record.sem === REPORT_SEM &&
-                  record.cost !== undefined &&
-                  periodKey(record.preset, record.to) === key &&
-                  (found === undefined || record.createdAt > found.createdAt)
-                ) {
-                  found = record;
-                }
-              }
-              if (found !== undefined && now - found.createdAt < SUMMARY_FRESHNESS_MS) {
-                writeJson(res, 200, { ok: true, fresh: false, report: withProviderScope(found), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
-                return;
-              }
-              // P0.3：相同 period 的生成单飞 —— 并发请求（如超时后点重试）共享同一套生成。
-              const flightKey = `summary|${preset}|${key}`;
-              const record = await summaryFlight(flightKey, async () => {
-                const gen = await generateReportData(svc, preset, range, perf);
-                const tSer = Date.now();
-                await svc.periodStats!.put(gen.key, toPeriodRecord(gen.key, preset, range, gen));
-                const record: ReportRecord = {
-                  sem: REPORT_SEM,
-                  id: found !== undefined ? found.id : `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+              let spec: PeriodSpec;
+              try {
+                spec = resolvePeriod({
                   preset,
-                  from: range.from,
-                  to: range.to,
-                  createdAt: now,
-                  sessions: gen.stats.sessions,
-                  turns: gen.stats.turns,
-                  totalEvents: gen.stats.totalEvents,
-                  stats: gen.stats as unknown,
-                  markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
-                  cost: gen.cost,
-                  insights: gen.insights,
-                  improvements: gen.improvements,
-                  reportGeneration: gen.reportGeneration,
-                  prev: gen.prev
-                    ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
-                    : undefined,
-                };
-                await table.put(record.id, record);
-                serializeMs = Date.now() - tSer;
-                return record;
+                  now,
+                  from: payload.from as string | undefined,
+                  to: payload.to as string | undefined,
+                });
+              } catch (error) {
+                writeJson(res, 400, { ok: false, error: { code: "bad-request", message: error instanceof Error ? error.message : String(error) } });
+                return;
+              }
+              void svc.ingest.bootstrap();
+              const meta = svc.ingest.statusOf();
+              const { stats } = queryPeriod(svc.index, spec, meta.headers, meta);
+              const gen = await buildReportFromStats(svc, preset, spec.from, spec.to, stats);
+              const perf: Record<string, number> = { queryMs: Date.now() - tAll };
+              // 24h rolling 不落 artifact（每次实时 query）；自然周期与 custom 落库供 History/Export。
+              const record: ReportRecord = {
+                sem: REPORT_SEM,
+                id: `whale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                preset,
+                from: spec.from,
+                to: spec.to,
+                createdAt: now,
+                sessions: gen.stats.sessions,
+                turns: gen.stats.turns,
+                totalEvents: gen.stats.totalEvents,
+                stats: gen.stats as unknown,
+                markdown: renderReport(gen.stats, preset, gen.cost, gen.prev, gen.insights, gen.improvements),
+                cost: gen.cost,
+                insights: gen.insights,
+                improvements: gen.improvements,
+                reportGeneration: gen.reportGeneration,
+                prev: gen.prev
+                  ? { key: gen.prev.key, cost: gen.prev.cost, sessions: gen.prev.sessions, turns: gen.prev.turns, cacheHitRate: gen.prev.cacheHitRate, nightRatio: gen.prev.nightRatio, dangerCount: gen.prev.dangerCount }
+                  : undefined,
+              };
+              if (preset !== "24h") {
+                const tSer = Date.now();
+                void svc.periodStats!.put(spec.queryId, toPeriodRecord(spec.queryId, preset, { from: spec.from, to: spec.to }, gen)).catch((e: unknown) => trackWriteFailure("period_stats", e));
+                // 同周期覆盖式落库（复用已有 id，避免 History 膨胀）。
+                for (const [, existing] of table.entries()) {
+                  if (existing.preset === preset && existing.sem === REPORT_SEM && existing.cost !== undefined) {
+                    const existingKey = spec.queryId.startsWith("custom-") ? customPeriodKey(existing.from, existing.to) : naturalPeriodKey(existing.preset as PeriodPreset, existing.to);
+                    if (existingKey === spec.queryId) {
+                      record.id = existing.id;
+                      break;
+                    }
+                  }
+                }
+                void table.put(record.id, record).catch((e: unknown) => trackWriteFailure("reports", e));
+                perf.serializeMs = Date.now() - tSer;
+              }
+              writeJson(res, 200, {
+                ok: true,
+                fresh: true,
+                indexing: meta.indexing,
+                missing: meta.missing,
+                indexedThrough: meta.indexedThrough,
+                perf,
+                report: withProviderScope(record),
               });
-              writeJson(res, 200, { ok: true, fresh: true, report: withProviderScope(record), perf: { ...perf, serializeMs, totalMs: Date.now() - tAll } });
               return;
             }
             if (req.method === "POST") {

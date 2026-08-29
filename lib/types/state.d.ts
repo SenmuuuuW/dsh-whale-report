@@ -40,6 +40,7 @@ export declare const SessionIndexSchema: z.ZodObject<{
         size: z.ZodNumber;
     }, z.core.$strip>>;
     salvaged: z.ZodOptional<z.ZodBoolean>;
+    live: z.ZodOptional<z.ZodBoolean>;
     salvagedRecords: z.ZodOptional<z.ZodNumber>;
     salvagedDropped: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
@@ -108,6 +109,7 @@ export declare const whaleDomain: {
                 size: number;
             } | undefined;
             salvaged?: boolean | undefined;
+            live?: boolean | undefined;
             salvagedRecords?: number | undefined;
             salvagedDropped?: number | undefined;
         }>;
