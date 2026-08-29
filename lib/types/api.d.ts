@@ -14,6 +14,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Domain } from "@deepseek-ai/dsh-storage-domain";
 import { whaleDomain } from "./state.js";
+import type { IngestEngine } from "./ingest.js";
 import { type ReportServices } from "./tools.js";
 export interface WebServerLike {
     register(route: {
@@ -24,6 +25,7 @@ export interface WebServerLike {
 }
 export interface ApiServices extends ReportServices {
     domain: Domain<typeof whaleDomain>;
+    ingest: IngestEngine;
 }
 /** 鲸鱼娘素材路由：白名单文件名，防路径穿越。 */
 export declare function registerAssetRoutes(ctx: Context, server: WebServerLike): void;

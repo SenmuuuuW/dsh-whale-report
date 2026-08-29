@@ -401,6 +401,31 @@ export interface HourBucket {
         category: CorrectionCategory;
         sessionId: string;
     }[];
+    /**
+     * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5），供 [from,to) 精确过滤。
+     * 不含任何原始 payload。纯计数事件（k=6，占比 99%）不存行 —— 进 ts delta 数组。
+     * k: 0=turn/start 1=step/start 2=user/message 3=assistant/message(usage)
+     *    4=tool/call 5=tool/result 错误
+     */
+    rows?: CompactRow[];
+    /**
+     * 本桶全部事件的时间（delta 编码）：首元素为绝对 ms，其后为与前一项的差值。
+     * 用于边界桶精确的 totalEvents / hourHistogram / 活跃度（紧凑：~2B/事件）。
+     */
+    ts?: number[];
+}
+/** 桶内逐事件贡献行（compact，JSON 序列化进 session_index）。 */
+export interface CompactRow {
+    /** 事件时间（ms） */
+    t: number;
+    /** 事件类别（见 HourBucket.rows 注释） */
+    k: number;
+    /** assistant usage: [input, cacheRead, output, reasoning] */
+    u?: [number, number, number, number];
+    /** 归属 model key（assistant usage 用） */
+    m?: string;
+    /** 工具名（tool/call 用） */
+    n?: string;
 }
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
 export declare const BUCKET_MS: number;
@@ -411,16 +436,32 @@ export declare const BUCKET_MS: number;
  * @param ownStart - seedLength：seq 小于它的继承事件不计入。
  * @param stopAfter - 可选：时间上限（ms），超过即停止（时间单调）。
  */
+export interface BucketizedResult {
+    buckets: HourBucket[];
+    titles: string[];
+    lastSeq: number;
+    lastMs: number;
+}
+/** 薄封装：全量事件折叠（历史/基线路径）。 */
 export declare function bucketizeOwnEvents(sessionId: string, events: {
     type: string;
     seq?: number;
     time: number;
     data?: unknown;
-}[], ownStart: number, stopAfter?: number): {
-    buckets: HourBucket[];
-    titles: string[];
-    lastSeq: number;
-    lastMs: number;
+}[], ownStart: number, stopAfter?: number): BucketizedResult;
+/**
+ * 可增量的事件折叠器（v0.5.x repair：session/event firehose 逐事件应用）。
+ * 状态跨事件保持（toolPending 配对 / 命令连击 / 用户消息计数）。
+ * apply 返回 false 表示应停止（stopAfter 边界）。
+ */
+export declare function createOwnEventBucketizer(sessionId: string, ownStart: number, stopAfter?: number): {
+    apply: (event: {
+        type: string;
+        seq?: number;
+        time: number;
+        data?: unknown;
+    }) => boolean;
+    snapshot: () => BucketizedResult;
 };
 /** 索引聚合视图：一个会话的分桶 + 标题。 */
 export interface SessionBucketView {

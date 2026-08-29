@@ -31,6 +31,8 @@ export declare const BUILTIN_PRICES: Record<"flash" | "pro", Prices>;
  * 高峰时段判定：北京时间（UTC+8）9:00–12:00、14:00–18:00。
  * 确定性纯函数；输入为 epoch ms 或本地小时。
  */
+/** 北京时间小时（0-23）是否高峰（9-12、14-18）。纯小时判定（dayHourDetail 小时桶计价用，无时区歧义）。 */
+export declare function isPeakCstHour(hour: number): boolean;
 export declare function isPeakHourCST(ms: number): boolean;
 /** 当前时刻价格（峰/谷）。 */
 export declare function pricesForTime(ms: number): Record<"flash" | "pro", Prices>;

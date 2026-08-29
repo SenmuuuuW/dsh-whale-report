@@ -266,6 +266,8 @@ interface ContentState {
     history: ReportMeta[] | null;
     /** v0.5.2：当前 dashboard 是否来自只读快照（口径 = LAST COMPLETED SNAPSHOT）。 */
     snapshotMode: boolean;
+    /** v0.5.x repair：ingest 追赶中（显示 INDEXING LIVE DATA…）。 */
+    indexing: boolean;
     /** 快照/完整数据完成时刻（LAST UPDATED）。 */
     snapshotAt: number | null;
 }
@@ -284,6 +286,10 @@ export declare class WhaleContent extends Component<Record<string, never>, Conte
      * - 5–15min：后台静默 refresh
      * - >15min：后台 refresh + UI 显示"数据较旧"
      * - 无快照：走完整 summary（骨架屏）
+     */
+    /**
+     * v0.5.x repair：Refresh = Query Engine 实时查询（服务端只读 index）。
+     * 不再按快照年龄触发完整生成；ingest 追赶时显示 INDEXING LIVE DATA…。
      */
     refreshOverview(preset: ContentState["preset"]): Promise<void>;
     /** 只读轮询：其他端可能已生成新快照 —— 静默替换显示，绝不触发生成。 */

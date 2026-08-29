@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
-import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, isPeakHourCST, type CostBreakdown } from "./pricing.js";
+import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, isPeakCstHour, isPeakHourCST, type CostBreakdown } from "./pricing.js";
 import { computeInsights, customPeriodKey, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { computeImprovements, type ImprovementItem } from "./improvements.js";
 import { aggregateBuckets, bucketizeOwnEvents, emptyPartial, SKIP_IDS_CAP, type DataPartial, type RawEvent, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
@@ -83,7 +83,7 @@ function parseTime(value: string | undefined, fallback: number): number {
 }
 
 /** 有限并发映射：报告生成要读几十个会话的完整日志，串行太慢。 */
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -99,7 +99,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 }
 
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 14;
+export const INDEX_VERSION = 16;
 
 /**
  * 索引新鲜度（P0.2）：不再用"缓存年龄 TTL"判定 —— 历史会话在文件未变化时
@@ -431,7 +431,23 @@ export async function generateReportData(
   range: { from: number; to: number },
   perf?: GenerationPerf,
 ): Promise<ReportGeneration> {
+  // 工具/一次性生成路径：先 ingest 式收集（读 session），再统一报告构建。
   const stats = await collectEvents(svc, range, perf);
+  return await buildReportFromStats(svc, preset, range.from, range.to, stats, perf);
+}
+
+/**
+ * v0.5.x repair：由「已索引查询出的 stats」构建完整报告（无任何 session IO）。
+ * summary/overview 的 query 路径与工具路径共用这一段，保证口径单一。
+ */
+export async function buildReportFromStats(
+  svc: ReportServices,
+  preset: string,
+  from: number,
+  to: number,
+  stats: ReportStats,
+  perf?: GenerationPerf,
+): Promise<ReportGeneration> {
   // 峰谷计价：按 dayHourDetail 的每小时模型用量 × 该时段价格分段累加。
   // 旧报告/无小时明细时回退 computeCost 总量估算。
   let cost: CostBreakdown;
@@ -468,7 +484,7 @@ export async function generateReportData(
   for (const day of stats.dayHourDetail) {
     for (let hour = 0; hour < 24; hour++) {
       const h = day.hours[hour];
-      const priceSet = isPeakHourCST(hour * 3600_000) ? PEAK_PRICES : OFFPEAK_PRICES;
+      const priceSet = isPeakCstHour(hour) ? PEAK_PRICES : OFFPEAK_PRICES;
       let hourCost = 0;
       for (const [model, usage] of Object.entries(h.modelTokens)) {
         const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
@@ -483,8 +499,8 @@ export async function generateReportData(
   (stats as unknown as Record<string, unknown>).plugins = svc.plugins ?? [];
   // custom 区间用独立 key（custom-<from>-<to>），绝不写进自然周趋势 period_stats；
   // 无自然"上一周期"，prev 基线为 null（与 24h 同语义）。
-  const key = preset === "custom" ? customPeriodKey(range.from, range.to) : periodKey(preset, range.to);
-  const prevKey = preset === "custom" ? null : previousPeriodKey(preset, range.to);
+  const key = preset === "custom" ? customPeriodKey(from, to) : periodKey(preset, to);
+  const prevKey = preset === "custom" || preset === "24h" ? null : previousPeriodKey(preset, to);
   const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
   const tImprove = Date.now();
   const insights = computeInsights({ stats, prev: prev ?? undefined, cost });

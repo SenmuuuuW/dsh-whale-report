@@ -2,6 +2,60 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.5.3] - 2026-08-28
+
+Query Engine Rewrite：INGEST ONCE → QUERY MANY。
+
+### Correctness
+
+- 修复 period switch 跨周期串数据：24h 标签不再可能显示 weekly report（渲染层 + 响应层双不变量）
+- rolling 24h 改为精确 [now-24h, now)（不再使用自然日 identity）
+- PeriodSpec 成为唯一时间窗口真相源（API / cache / period_stats / report / client 统一消费）
+- 修复 10min boundary bucket 整桶丢失（最近 0–10 分钟数据此前被静默丢弃）
+- edge bucket 改为 exact [from,to) filtering（compact rows，无比例近似）
+- 修复峰谷小时 CST 错位造成成本低估（14–17 点 peak 用量被按 offpeak 计价）
+- daily / weekly / monthly / yearly / Activity 时间口径统一 Asia/Shanghai（TZ matrix ×3 全过）
+- Raw Oracle equivalence gate（整数完全一致、cost <¥0.01，真实数据 costDiff=0.0000）
+
+### Query Engine
+
+Refresh 不再 readSession / decompress / aggregate 原始事件：INGEST ONCE（fingerprint / salvage / firehose）→ CANONICAL INDEX（INDEX_VERSION 16）→ QUERY MANY（零 session IO）。
+
+### Live incremental
+
+- 使用 DSH session/event firehose（baseline + buffered events + seq dedupe）
+- session/created / disposed / flush 生命周期 + fingerprint reconcile fallback
+- live-session 不再每 30s full readSession
+
+### Performance（真实生产数据）
+
+- Refresh：31s 级 → p50 ~6–9ms（×100：p95 8.3ms / max 11.3ms）
+- Live endpoint：6.5s → <1ms steady state
+- Period switch：毫秒级
+
+### Index
+
+- INDEX_VERSION 16：exact rows 存储优化（纯计数事件 → ts delta 数组）
+- v15 whale.json 377MB → v16 ~74–81MB（exact accounting 不变，无比例近似）
+
+### Persistence
+
+- DIRTY IN MEMORY → 5min coalesced checkpoint → force on dispose/shutdown
+- revision-safe persistence；写失败保持 dirty 重试
+- 写放大：187MB/min（46 rewrites/20min）→ 17.5MB/min（~4 rewrites/20min）
+
+### Resilience
+
+- salvage heavy decode 移入 worker_threads（22MB 执行中 Query 不阻塞：Refresh p50 7.8ms / max 14.6ms）
+- restart / pre-checkpoint recovery：无漏计、无双计
+
+### Validation
+
+- 314 tests；typecheck / build；真实 3080 production acceptance
+- Raw Oracle costDiff = 0.0000；24h 与 weekly 真实窗口独立
+
+Compatibility：官方基线 DSH 0.1.1-rc.2；另经 DSH 0.1.2-alpha.1 运行时验证（0.1.2-alpha.1 is runtime-tested only and is not included in the current npm peer semver range）。
+
 ## [0.5.2] - 2026-08-25
 
 LESS, FASTER：Overview 打开即见，不再等待完整报告生成。

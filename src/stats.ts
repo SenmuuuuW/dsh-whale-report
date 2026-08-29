@@ -10,6 +10,7 @@
  *    对未知事件类型全部宽容跳过，只聚合我们认识的那几种。
  */
 import { classifyCorrectionText, type CorrectionAggregate, type CorrectionCategory } from "./improvements.js";
+import { shanghaiDateKey, shanghaiHour } from "./shanghai.js";
 
 /** 一行原始会话事件的宽松形态（插件只关心这几个字段）。 */
 export interface RawEvent {
@@ -457,7 +458,7 @@ export function summarizeSessionEvents(
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
           // 按小时分段（峰谷计价）：hour 为本地小时。
-          const hour = new Date(event.time).getHours();
+          const hour = shanghaiHour(event.time);
           let hm = hourMap.get(hour);
           if (hm === undefined) { hm = {}; hourMap.set(hour, hm); }
           const hm2 = (hm[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
@@ -721,11 +722,11 @@ export function aggregate(
     stats.totalEvents += 1;
 
     const d = new Date(event.time);
-    const hour = d.getHours();
+    const hour = shanghaiHour(event.time);
     stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + 1;
     stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += 1;
 
-    const day = new Date(event.time).toISOString().slice(0, 10);
+    const day = shanghaiDateKey(event.time);
     days.set(day, (days.get(day) ?? 0) + 1);
     let dayHour = dayHourMap.get(day);
     if (dayHour === undefined) {
@@ -757,7 +758,7 @@ export function aggregate(
         stats.turns += 1;
         aggOf(sessionId, event.time).turns += 1;
         {
-          const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+          const hkey = `${shanghaiDateKey(event.time)}T${String(shanghaiHour(event.time)).padStart(2, "0")}`;
           const hd = hourDetail.get(hkey);
           if (hd !== undefined) hd.turns += 1;
         }
@@ -808,7 +809,7 @@ export function aggregate(
         const usage = usageOf(data);
         if (usage) {
           {
-            const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+            const hkey = `${shanghaiDateKey(event.time)}T${String(shanghaiHour(event.time)).padStart(2, "0")}`;
             const hd = hourDetail.get(hkey);
             if (hd !== undefined) {
               hd.tokens += (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.reasoning ?? 0);
@@ -856,7 +857,7 @@ export function aggregate(
         const name = typeof data?.name === "string" ? data.name : "(unknown)";
         stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + 1;
         {
-          const hkey = `${new Date(event.time).toISOString().slice(0, 10)}T${String(new Date(event.time).getHours()).padStart(2, "0")}`;
+          const hkey = `${shanghaiDateKey(event.time)}T${String(shanghaiHour(event.time)).padStart(2, "0")}`;
           const hd = hourDetail.get(hkey);
           if (hd !== undefined) hd.toolCalls += 1;
         }
@@ -1112,6 +1113,32 @@ export interface HourBucket {
   toolHealth: Record<string, BucketToolHealthAcc>;
   /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
   corrections: { category: CorrectionCategory; sessionId: string }[];
+  /**
+   * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5），供 [from,to) 精确过滤。
+   * 不含任何原始 payload。纯计数事件（k=6，占比 99%）不存行 —— 进 ts delta 数组。
+   * k: 0=turn/start 1=step/start 2=user/message 3=assistant/message(usage)
+   *    4=tool/call 5=tool/result 错误
+   */
+  rows?: CompactRow[];
+  /**
+   * 本桶全部事件的时间（delta 编码）：首元素为绝对 ms，其后为与前一项的差值。
+   * 用于边界桶精确的 totalEvents / hourHistogram / 活跃度（紧凑：~2B/事件）。
+   */
+  ts?: number[];
+}
+
+/** 桶内逐事件贡献行（compact，JSON 序列化进 session_index）。 */
+export interface CompactRow {
+  /** 事件时间（ms） */
+  t: number;
+  /** 事件类别（见 HourBucket.rows 注释） */
+  k: number;
+  /** assistant usage: [input, cacheRead, output, reasoning] */
+  u?: [number, number, number, number];
+  /** 归属 model key（assistant usage 用） */
+  m?: string;
+  /** 工具名（tool/call 用） */
+  n?: string;
 }
 
 /** 分桶粒度：10 分钟（区间边界的裁剪误差 ≤ 2×10min/会话）。 */
@@ -1125,8 +1152,7 @@ function hourOf(ms: number): number {
 function newBucket(h: number): HourBucket {
   return {
     h,
-    total: 0,
-    turns: 0,
+    total: 0,    turns: 0,
     steps: 0,
     userMessages: 0,
     assistantMessages: 0,
@@ -1146,6 +1172,8 @@ function newBucket(h: number): HourBucket {
     collab: { revisions: 0, lateConstraints: 0 },
     toolHealth: {},
     corrections: [],
+    rows: [],
+    ts: [],
   };
 }
 
@@ -1156,18 +1184,44 @@ function newBucket(h: number): HourBucket {
  * @param ownStart - seedLength：seq 小于它的继承事件不计入。
  * @param stopAfter - 可选：时间上限（ms），超过即停止（时间单调）。
  */
+export interface BucketizedResult {
+  buckets: HourBucket[];
+  titles: string[];
+  lastSeq: number;
+  lastMs: number;
+}
+
+/** 薄封装：全量事件折叠（历史/基线路径）。 */
 export function bucketizeOwnEvents(
   sessionId: string,
   events: { type: string; seq?: number; time: number; data?: unknown }[],
   ownStart: number,
   stopAfter?: number,
-): { buckets: HourBucket[]; titles: string[]; lastSeq: number; lastMs: number } {
+): BucketizedResult {
+  const bz = createOwnEventBucketizer(sessionId, ownStart, stopAfter);
+  for (const event of events) {
+    if (!bz.apply(event)) break;
+  }
+  return bz.snapshot();
+}
+
+/**
+ * 可增量的事件折叠器（v0.5.x repair：session/event firehose 逐事件应用）。
+ * 状态跨事件保持（toolPending 配对 / 命令连击 / 用户消息计数）。
+ * apply 返回 false 表示应停止（stopAfter 边界）。
+ */
+export function createOwnEventBucketizer(
+  sessionId: string,
+  ownStart: number,
+  stopAfter?: number,
+): { apply: (event: { type: string; seq?: number; time: number; data?: unknown }) => boolean; snapshot: () => BucketizedResult } {
   const byHour = new Map<number, HourBucket>();
   const titles: string[] = [];
   let currentModel = "unknown";
   let currentProvider = "unknown";
   let lastSeq = 0;
   let lastMs = 0;
+  let lastPushedT = 0;
   let lastCommand = "";
   let commandStreak = 0;
   let burstStart = 0;
@@ -1176,11 +1230,11 @@ export function bucketizeOwnEvents(
   const sessionUserMsgs = new Map<string, number>();
   // 工具健康：会话级 pending（跨 10 分钟分桶配对；事件顺序处理，无 O(N²)）。
   const toolPending = new Map<string, { name: string; time: number }>();
-  for (const event of events) {
+  const apply = (event: { type: string; seq?: number; time: number; data?: unknown }): boolean => {
     // seq 可缺省（salvage 直读日志的 record 可能无 seq）：缺省视为 >= ownStart（全量计入）。
-    if (event.seq !== undefined && event.seq < ownStart) continue;
-    if (stopAfter !== undefined && event.time >= stopAfter) break;
-    if (event.type.startsWith("whale/")) continue;
+    if (event.seq !== undefined && event.seq < ownStart) return true;
+    if (stopAfter !== undefined && event.time >= stopAfter) return false;
+    if (event.type.startsWith("whale/")) return true;
     if (event.seq !== undefined) lastSeq = event.seq;
     lastMs = event.time;
     const h = hourOf(event.time);
@@ -1190,16 +1244,23 @@ export function bucketizeOwnEvents(
       byHour.set(h, bucket);
     }
     bucket.total += 1;
+    // ts delta 数组：全部事件时间（边界桶精确计数/直方图用，紧凑表示）。
+    const tsArr = bucket.ts!;
+    tsArr.push(tsArr.length === 0 ? event.time : event.time - lastPushedT);
+    lastPushedT = event.time;
     const data = event.data as Record<string, unknown> | undefined;
     switch (event.type) {
       case "turn/start":
         bucket.turns += 1;
+        bucket.rows!.push({ t: event.time, k: 0 });
         break;
       case "step/start":
         bucket.steps += 1;
+        bucket.rows!.push({ t: event.time, k: 1 });
         break;
       case "user/message": {
         bucket.userMessages += 1;
+        bucket.rows!.push({ t: event.time, k: 2 });
         const seen = sessionUserMsgs.get(sessionId) ?? 0;
         sessionUserMsgs.set(sessionId, seen + 1);
         for (const text of textOfUserMessage(data)) {
@@ -1239,6 +1300,13 @@ export function bucketizeOwnEvents(
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
+          // 精确边界行：usage + model 归属
+          bucket.rows!.push({
+            t: event.time,
+            k: 3,
+            u: [usage.input ?? 0, usage.cacheRead ?? 0, usage.output ?? 0, usage.reasoning ?? 0],
+            m: key,
+          });
         }
         break;
       }
@@ -1256,6 +1324,7 @@ export function bucketizeOwnEvents(
         bucket.toolCallsTotal += 1;
         const tname = typeof data?.name === "string" ? data.name : "(unknown)";
         bucket.toolCalls[tname] = (bucket.toolCalls[tname] ?? 0) + 1;
+        bucket.rows!.push({ t: event.time, k: 4, n: tname });
         // 工具健康：记录 pending，result 到达时配对。
         {
           const callId = (data as Record<string, unknown>)?.callId;
@@ -1305,7 +1374,10 @@ export function bucketizeOwnEvents(
       }
       case "tool/result": {
         const failed = resultIsError(data);
-        if (failed) bucket.toolErrors += 1;
+        if (failed) {
+          bucket.toolErrors += 1;
+          bucket.rows!.push({ t: event.time, k: 5 });
+        }
         // 工具健康：按 callId 配对（跨桶由会话级 pending 完成）。
         {
           const msg = (data?.message as Record<string, unknown> | undefined) ?? {};
@@ -1353,7 +1425,9 @@ export function bucketizeOwnEvents(
       default:
         break;
     }
-  }
+    return true;
+  };
+  const snapshot = (): BucketizedResult => {
   const buckets = [...byHour.values()].sort((a, b) => a.h - b.h);
   // 工具健康：未配对的 pending 记为 incomplete（归入最后一个分桶，保证聚合端可见）。
   if (toolPending.size > 0 && byHour.size > 0) {
@@ -1364,6 +1438,8 @@ export function bucketizeOwnEvents(
     }
   }
   return { buckets, titles, lastSeq, lastMs };
+  };
+  return { apply, snapshot };
 }
 
 /** 索引聚合视图：一个会话的分桶 + 标题。 */
@@ -1437,6 +1513,102 @@ export function aggregateBuckets(
       agg = { firstTime: Infinity, lastTime: 0, events: 0, commands: 0, toolCalls: 0, retryBursts: 0, dangerCount: 0, redDanger: 0, modelTokens: {}, title: "", turns: 0, userMessages: 0, collabRevisions: 0, collabLateConstraints: 0 };
       sessionAgg.set(view.sessionId, agg);
     }
+    // v0.5.x repair：边界桶精确聚合（[from,to) 语义）—— 逐行过滤可加性字段。
+    // 非可加字段（toolHealth / collab / danger / secret / retryBursts / corrections）
+    // 保持桶级语义：边界桶不贡献（与整桶跳过等价的既有口径，不属于对账矩阵）。
+    const applyEdgeBucket = (bucket: HourBucket, sessionId: string): boolean => {
+      let touched = false;
+      const aggCur = agg!;
+      // 1) 全事件时间（ts delta 数组）→ totalEvents / 直方图 / 活跃度
+      const ts = bucket.ts ?? [];
+      if (ts.length > 0) {
+        let prev = ts[0];
+        for (let i = 0; i < ts.length; i++) {
+          const t = i === 0 ? ts[0] : (prev = prev + ts[i]);
+          if (t < period.from || t >= period.to) continue;
+          touched = true;
+          aggCur.events += 1;
+          aggCur.firstTime = Math.min(aggCur.firstTime, t);
+          aggCur.lastTime = Math.max(aggCur.lastTime, t);
+          stats.totalEvents += 1;
+          const d = new Date(t);
+          const hour = shanghaiHour(t);
+          stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + 1;
+          stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += 1;
+          const day = shanghaiDateKey(t);
+          days.set(day, (days.get(day) ?? 0) + 1);
+          let dayHour = dayHourMap.get(day);
+          if (dayHour === undefined) {
+            dayHour = new Array(24).fill(0) as number[];
+            dayHourMap.set(day, dayHour);
+          }
+          dayHour[hour] += 1;
+          const hkey = `${day}T${String(hour).padStart(2, "0")}`;
+          let hd = hourAgg.get(hkey);
+          if (hd === undefined) {
+            hd = { tokens: 0, turns: 0, toolCalls: 0, modelTokens: {}, sessions: new Set() };
+            hourAgg.set(hkey, hd);
+          }
+          hd.sessions.add(sessionId);
+        }
+      }
+      // 2) 贡献行（k 0-5）→ 可加字段
+      for (const row of bucket.rows ?? []) {
+        if (row.t < period.from || row.t >= period.to) continue;
+        touched = true;
+        if (row.k === 0) {
+          aggCur.turns += 1;
+          stats.turns += 1;
+          const hd = hourAgg.get(`${shanghaiDateKey(row.t)}T${String(shanghaiHour(row.t)).padStart(2, "0")}`);
+          if (hd !== undefined) hd.turns += 1;
+        } else if (row.k === 1) {
+          stats.steps += 1;
+        } else if (row.k === 2) {
+          aggCur.userMessages += 1;
+          stats.userMessages += 1;
+        } else if (row.k === 3) {
+          stats.assistantMessages += 1;
+          const u = row.u ?? [0, 0, 0, 0];
+          stats.tokens.input += u[0];
+          stats.tokens.cacheRead += u[1];
+          stats.tokens.output += u[2];
+          stats.tokens.reasoning += u[3];
+          const hd = hourAgg.get(`${shanghaiDateKey(row.t)}T${String(shanghaiHour(row.t)).padStart(2, "0")}`);
+          if (hd !== undefined) {
+            hd.tokens += u[0] + u[1] + u[2] + u[3];
+            if (row.m !== undefined) {
+              const hm = (hd.modelTokens[row.m] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+              hm.input += u[0];
+              hm.cacheRead += u[1];
+              hm.output += u[2];
+              hm.reasoning += u[3];
+            }
+          }
+          if (row.m !== undefined) {
+            const am = (aggCur.modelTokens[row.m] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+            am.input += u[0];
+            am.cacheRead += u[1];
+            am.output += u[2];
+            am.reasoning += u[3];
+            const sm = (stats.models[row.m] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
+            sm.input += u[0];
+            sm.cacheRead += u[1];
+            sm.output += u[2];
+            sm.reasoning += u[3];
+          }
+        } else if (row.k === 4) {
+          aggCur.toolCalls += 1;
+          stats.toolCallsTotal += 1;
+          const hd = hourAgg.get(`${shanghaiDateKey(row.t)}T${String(shanghaiHour(row.t)).padStart(2, "0")}`);
+          if (hd !== undefined) hd.toolCalls += 1;
+          if (row.n !== undefined) stats.toolCalls[row.n] = (stats.toolCalls[row.n] ?? 0) + 1;
+        } else if (row.k === 5) {
+          stats.toolErrors += 1;
+        }
+      }
+      return touched;
+    };
+
     for (const bucket of view.buckets) {
       // 分桶内事件可能在区间边界外（按小时取整后），做保守裁剪：
       // 桶整体落在区间内才计入（跨边界的小时由 nextHour 裁剪近似处理）。
@@ -1444,8 +1616,8 @@ export function aggregateBuckets(
       const inFrom = bucket.h >= period.from;
       const inTo = bucket.h + BUCKET_MS <= period.to;
       if (!inFrom || !inTo) {
-        // 边界桶：按比例近似计入事件总数与活跃度，细粒度计数不裁剪
-        // （报告用途可接受；精确值由未索引路径保证）。
+        // 边界桶：逐事件精确过滤 [from,to)（ts/rows 缺失的旧索引桶保持跳过语义）。
+        if (applyEdgeBucket(bucket, view.sessionId)) inWindow = true;
         continue;
       }
       inWindow = true;
@@ -1491,7 +1663,7 @@ export function aggregateBuckets(
       // 小时级明细：与统计同口径（边界裁剪后），按 10 分钟桶聚合到小时。
       {
         const bd = new Date(bucket.h);
-        const hkey = `${bd.toISOString().slice(0, 10)}T${String(bd.getHours()).padStart(2, "0")}`;
+        const hkey = `${shanghaiDateKey(bucket.h)}T${String(shanghaiHour(bucket.h)).padStart(2, "0")}`;
         let hd = hourAgg.get(hkey);
         if (hd === undefined) {
           hd = { tokens: 0, turns: 0, toolCalls: 0, modelTokens: {}, sessions: new Set() };
@@ -1558,17 +1730,17 @@ export function aggregateBuckets(
         if (agg.sampleIds.length < 8 && !agg.sampleIds.includes(c.sessionId)) agg.sampleIds.push(c.sessionId);
       }
       const d = new Date(bucket.h);
-      const hour = d.getHours();
+      const hour = shanghaiHour(bucket.h);
       stats.hourHistogram[hour] = (stats.hourHistogram[hour] ?? 0) + bucket.total;
       stats.halfHourHistogram[hour * 2 + (d.getMinutes() >= 30 ? 1 : 0)] += bucket.total;
-      const day = new Date(bucket.h).toISOString().slice(0, 10);
+      const day = shanghaiDateKey(bucket.h);
       days.set(day, (days.get(day) ?? 0) + bucket.total);
       let dayHour = dayHourMap.get(day);
       if (dayHour === undefined) {
         dayHour = new Array(24).fill(0) as number[];
         dayHourMap.set(day, dayHour);
       }
-      dayHour[new Date(bucket.h).getHours()] += bucket.total;
+      dayHour[shanghaiHour(bucket.h)] += bucket.total;
     }
     for (const title of view.titles) {
       if (!stats.titles.includes(title)) stats.titles.push(title);

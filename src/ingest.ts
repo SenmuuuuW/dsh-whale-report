@@ -1,0 +1,372 @@
+/**
+ * INGEST（v0.5.x architecture repair）：session → canonical index。
+ *
+ * 职责（可以慢、后台、single-flight，绝不阻塞 UI）：
+ * - 历史会话：source fingerprint 判定 → 仅变化/缺失者 readSession 重建；
+ * - 损坏会话：salvage（只读恢复）→ 索引；
+ * - live 会话：readSession 基线一次 + session/event firehose 逐事件增量；
+ * - session/flush：内存增量落盘（index.put）。
+ *
+ * 与 query 层彻底分离：query 只读 index，绝不 readSession / decompress。
+ */
+import type { SessionIndexRecord } from "./state.js";
+import { buildSessionPathMap, resolveDshHome, statSessionFile, type SessionFileStat } from "./salvage.js";
+import { salvageInWorker } from "./salvage-pool.js";
+import { createOwnEventBucketizer, type BucketizedResult } from "./stats.js";
+import {
+  INDEX_VERSION,
+  isIndexFresh,
+  mapWithConcurrency,
+  classifyReadError,
+  type SessionQueryLike,
+} from "./tools.js";
+
+export interface IngestHeader {
+  id: string;
+  createdAt: number;
+  cwd?: string;
+  delegationDepth?: number;
+}
+
+export interface IngestEvent {
+  type: string;
+  seq?: number;
+  time: number;
+  data?: unknown;
+}
+
+export interface IngestStatus {
+  headers: IngestHeader[];
+  liveIds: Set<string>;
+  /** 索引覆盖到的事件时间（lastMs 最大值，UI 显示 DATA UPDATED 用）。 */
+  indexedThrough: number;
+  /** 有会话缺失索引（追赶中）。 */
+  indexing: boolean;
+  /** 缺失索引的会话数。 */
+  missing: number;
+  /** ingest 判定损坏且无法恢复的会话（披露进 partial）。 */
+  skippedIds: Set<string>;
+  skippedReasons: Set<string>;
+}
+
+interface LiveState {
+  bucketizer: ReturnType<typeof createOwnEventBucketizer>;
+  lastSeq: number;
+  buffer: IngestEvent[];
+  buffering: boolean;
+  stat: SessionFileStat | null;
+  /** v0.5.3 Phase 3.1 persistence：dirty revision 追踪（降频 coalesced checkpoint）。 */
+  dirty: boolean;
+  revision: number;
+  persistedRevision: number;
+  lastPersistAt: number;
+}
+
+/** live checkpoint 最小间隔：DSH session log 本身就是 source of truth，index 是派生数据。 */
+const LIVE_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
+
+export class IngestEngine {
+  readonly svc: { sessionQuery: SessionQueryLike; index: { get: (k: string) => SessionIndexRecord | undefined; put: (k: string, v: SessionIndexRecord) => Promise<void> } };
+
+  private headers: IngestHeader[] = [];
+  private live: Map<string, LiveState> = new Map();
+  /** bootstrap 登记 live 之前到达的 firehose 事件（防丢：bootstrap 完成时回放）。 */
+  private prebuffer: Map<string, IngestEvent[]> = new Map();
+  private skippedIds = new Set<string>();
+  private skippedReasons = new Set<string>();
+  private bootstrapped = false;
+  private checkpointing = false;
+  private bootstrapPromise: Promise<void> | null = null;
+  private status: IngestStatus;
+
+  constructor(svc: IngestEngine["svc"]) {
+    this.svc = svc;
+    this.status = this.buildStatus();
+  }
+
+  /** 只读状态快照（query 层用）。 */
+  statusOf(): IngestStatus {
+    return this.buildStatus();
+  }
+
+  /** 单飞 bootstrap：建立 headers 快照 + 历史索引 + live 基线。 */
+  bootstrap(): Promise<void> {
+    if (this.bootstrapPromise !== null) return this.bootstrapPromise;
+    this.bootstrapPromise = this.runBootstrap().finally(() => {
+      this.bootstrapped = true;
+    });
+    return this.bootstrapPromise;
+  }
+
+  private async runBootstrap(): Promise<void> {
+    const sessions = await this.svc.sessionQuery.listSessions();
+    this.headers = sessions.map((r) => ({
+      id: r.header.id,
+      createdAt: r.header.createdAt,
+      cwd: r.header.cwd,
+      delegationDepth: r.header.delegationDepth,
+    }));
+    const pathMap = buildSessionPathMap(resolveDshHome());
+    const statOf = (id: string): SessionFileStat | null => {
+      const p = pathMap.get(id);
+      return p === undefined ? null : statSessionFile(p);
+    };
+    // live 会话：先挂 buffering 再读基线（防 race 丢事件）。
+    for (const record of sessions) {
+      if (record.live) {
+        this.live.set(record.header.id, { bucketizer: createOwnEventBucketizer(record.header.id, 0), lastSeq: -1, buffer: [], buffering: true, stat: statOf(record.header.id), dirty: false, revision: 0, persistedRevision: 0, lastPersistAt: 0 });
+        // 回放登记前到达的事件（buffering 中，baseline 完成后按 seq 去重应用）
+        const early = this.prebuffer.get(record.header.id);
+        if (early !== undefined) {
+          this.live.get(record.header.id)?.buffer.push(...early);
+          this.prebuffer.delete(record.header.id);
+        }
+      }
+    }
+    await mapWithConcurrency(sessions, 6, async (record) => {
+      const id = record.header.id;
+      if (record.live) {
+        try {
+          const snapshot = await this.svc.sessionQuery.readSession(id);
+          const bz = createOwnEventBucketizer(id, snapshot.session.seedLength ?? 0);
+          let maxSeq = -1;
+          for (const e of snapshot.events) {
+            bz.apply(e as IngestEvent);
+            if (e.seq !== undefined && e.seq > maxSeq) maxSeq = e.seq;
+          }
+          const state = this.live.get(id);
+          if (state === undefined) return;
+          state.bucketizer = bz;
+          state.lastSeq = maxSeq;
+          // 先应用 baseline 期间 buffered 的新事件（seq 去重），再落盘 —— 索引与内存一致。
+          const buffered = state.buffer;
+          state.buffer = [];
+          state.buffering = false;
+          for (const e of buffered) {
+            if (e.seq !== undefined && e.seq <= state.lastSeq) continue;
+            this.applyLive(state, e);
+          }
+          const result = bz.snapshot();
+          await this.svc.index.put(id, this.entryOf(id, result, state.stat, true));
+          // baseline 落盘即视为已持久化到当前 revision（含 buffer 回放的事件）
+          state.persistedRevision = state.revision;
+          state.lastPersistAt = Date.now();
+          state.dirty = state.revision > state.persistedRevision;
+        } catch {
+          // 基线失败（罕见）：保持 buffering 等 flush/下次 bootstrap 恢复
+        }
+        return;
+      }
+      // 历史会话：指纹判定
+      const stat = statOf(id);
+      const cached = this.svc.index.get(id);
+      if (isIndexFresh(cached, stat)) {
+        if (cached !== undefined && cached.src === undefined && stat !== null) {
+          void this.svc.index.put(id, { ...cached, src: stat }).catch(() => {});
+        }
+        return;
+      }
+      try {
+        const snapshot = await this.svc.sessionQuery.readSession(id);
+        const bz = createOwnEventBucketizer(id, snapshot.session.seedLength ?? 0);
+        for (const e of snapshot.events) bz.apply(e as IngestEvent);
+        const result = bz.snapshot();
+        await this.svc.index.put(id, this.entryOf(id, result, stat, false));
+      } catch {
+        // salvage：官方读取器拒读 → 只读恢复（worker 内解压，主线程不阻塞）
+        const path = pathMap.get(id) ?? null;
+        if (path !== null) {
+          const salvaged = await salvageInWorker(path);
+          if (salvaged.ok && salvaged.sessionId !== undefined) {
+            const bz = createOwnEventBucketizer(salvaged.sessionId, 0);
+            for (const e of salvaged.events) bz.apply(e as IngestEvent);
+            const result = bz.snapshot();
+            await this.svc.index.put(id, {
+              ...this.entryOf(id, result, stat, false),
+              salvaged: true,
+              salvagedRecords: salvaged.recoveredRecords,
+              salvagedDropped: salvaged.droppedRecords,
+            });
+            return;
+          }
+        }
+        this.skippedIds.add(id);
+        this.skippedReasons.add("corrupt-log");
+      }
+    });
+    this.status = this.buildStatus();
+  }
+
+  private entryOf(id: string, result: BucketizedResult, stat: SessionFileStat | null, live: boolean): SessionIndexRecord {
+    return {
+      sessionId: id,
+      v: INDEX_VERSION,
+      builtAt: Date.now(),
+      lastSeq: result.lastSeq,
+      lastMs: result.lastMs,
+      buckets: result.buckets,
+      titles: result.titles,
+      src: stat ?? undefined,
+      ...(live ? { live: true } : {}),
+    };
+  }
+
+  /** session/event firehose：只处理新增事件。 */
+  handleEvent(sessionId: string, event: IngestEvent): void {
+    const state = this.live.get(sessionId);
+    if (state === undefined) {
+      // bootstrap 尚未登记 live：暂存，完成时回放（不静默丢）
+      if (!this.bootstrapped) {
+        const buf = this.prebuffer.get(sessionId) ?? [];
+        buf.push(event);
+        this.prebuffer.set(sessionId, buf);
+      }
+      return; // 已 bootstrap 且非 live → 历史会话由 fingerprint reconcile 兜底
+    }
+    if (state.buffering) {
+      state.buffer.push(event);
+      return;
+    }
+    this.applyLive(state, event);
+  }
+
+  private applyLive(state: LiveState, event: IngestEvent): void {
+    if (event.seq !== undefined && event.seq <= state.lastSeq) return; // deterministic dedupe
+    if (event.seq !== undefined) state.lastSeq = event.seq;
+    state.bucketizer.apply(event);
+    // 只标 dirty，绝不直接 persistence（flush/定时 checkpoint 负责落盘）
+    state.revision += 1;
+    state.dirty = true;
+  }
+
+  /** session/created：新 live 会话登记（后续事件走 firehose）。 */
+  handleCreated(sessionId: string, ownStart = 0): void {
+    if (!this.live.has(sessionId)) {
+      this.live.set(sessionId, { bucketizer: createOwnEventBucketizer(sessionId, ownStart), lastSeq: -1, buffer: [], buffering: false, stat: null, dirty: false, revision: 0, persistedRevision: 0, lastPersistAt: 0 });
+    }
+  }
+
+  /** session/disposed：live 会话离开 —— 落盘最终态并移除内存态。 */
+  async handleDisposed(sessionId: string): Promise<void> {
+    const state = this.live.get(sessionId);
+    if (state === undefined) return;
+    const writingRevision = state.revision;
+    const result = state.bucketizer.snapshot();
+    try {
+      await this.svc.index.put(sessionId, { ...this.entryOf(sessionId, result, state.stat, false), src: state.stat ?? undefined });
+      state.persistedRevision = writingRevision;
+    } catch (error) {
+      this.trackPersistenceFailure(sessionId, error);
+    }
+    this.live.delete(sessionId);
+  }
+
+  /** session/flush：durability hint（降频 —— 由 checkpoint 策略决定是否真正落盘）。 */
+  flushSession(sessionId: string): void {
+    const state = this.live.get(sessionId);
+    if (state === undefined || !state.dirty) return;
+    void this.checkpoint(false);
+  }
+
+  /** 全局 checkpoint（coalesced，revision-safe，single-flight）：
+   *  收集所有 dirty live 会话，串行落盘；写失败保持 dirty 下轮重试。 */
+  async checkpoint(force: boolean): Promise<void> {
+    if (this.checkpointing) return;
+    this.checkpointing = true;
+    try {
+      const now = Date.now();
+      for (const [sessionId, state] of this.live) {
+        if (!state.dirty) continue;
+        if (!force && now - state.lastPersistAt < LIVE_CHECKPOINT_INTERVAL_MS) continue;
+        // revision-safe：捕获写入版本；写期间新事件只增加 revision，不干扰本次写入。
+        const writingRevision = state.revision;
+        const result = state.bucketizer.snapshot();
+        try {
+          await this.svc.index.put(sessionId, { ...this.entryOf(sessionId, result, state.stat, true), src: state.stat ?? undefined });
+          state.persistedRevision = writingRevision;
+          state.lastPersistAt = Date.now();
+          state.dirty = state.revision > state.persistedRevision;
+        } catch (error) {
+          // 写失败：dirty 保持 true、persistedRevision 不更新 → 下轮重试；bounded 诊断。
+          this.trackPersistenceFailure(sessionId, error);
+        }
+      }
+    } finally {
+      this.checkpointing = false;
+    }
+  }
+
+  private persistenceFailures = 0;
+
+  private trackPersistenceFailure(sessionId: string, error: unknown): void {
+    this.persistenceFailures += 1;
+    if (this.persistenceFailures <= 3 || this.persistenceFailures % 10 === 0) {
+      console.error(`[whale] live index checkpoint 写失败（第 ${this.persistenceFailures} 次，session ${sessionId}）:`, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** live 会话当前聚合快照（live-session endpoint 用；零 readSession）。 */
+  liveSnapshot(sessionId: string): BucketizedResult | null {
+    const state = this.live.get(sessionId);
+    if (state === undefined) return null;
+    return state.bucketizer.snapshot();
+  }
+
+  /** query 层入口：headers 快照 + 索引视图 + skipped 披露。 */
+  private buildStatus(): IngestStatus {
+    let indexedThrough = 0;
+    let missing = 0;
+    const bootstrapping = !this.bootstrapped;
+    for (const h of this.headers) {
+      const entry = this.svc.index.get(h.id);
+      if (entry === undefined || entry.v !== INDEX_VERSION) {
+        missing += 1;
+        continue;
+      }
+      if (entry.lastMs > indexedThrough) indexedThrough = entry.lastMs;
+    }
+    return {
+      headers: this.headers,
+      liveIds: new Set(this.live.keys()),
+      indexedThrough,
+      indexing: bootstrapping || missing > 0,
+      missing: bootstrapping ? Math.max(missing, this.headers.length === 0 ? 1 : missing) : missing,
+      skippedIds: this.skippedIds,
+      skippedReasons: this.skippedReasons,
+    };
+  }
+
+  get bootstrappedFlag(): boolean {
+    return this.bootstrapped;
+  }
+
+  /** 低频 fingerprint reconciliation（防御 firehose 完整性之外的兜底）：只查历史会话，绝不 readSession live。 */
+  async reconcile(): Promise<void> {
+    if (!this.bootstrapped) return;
+    const pathMap = buildSessionPathMap(resolveDshHome());
+    for (const h of this.headers) {
+      if (this.live.has(h.id)) continue; // live 由 firehose 负责
+      const path = pathMap.get(h.id);
+      const stat = path === undefined ? null : statSessionFile(path);
+      const cached = this.svc.index.get(h.id);
+      if (isIndexFresh(cached, stat)) continue;
+      try {
+        const snapshot = await this.svc.sessionQuery.readSession(h.id);
+        const bz = createOwnEventBucketizer(h.id, snapshot.session.seedLength ?? 0);
+        for (const e of snapshot.events) bz.apply(e as IngestEvent);
+        const result = bz.snapshot();
+        await this.svc.index.put(h.id, this.entryOf(h.id, result, stat, false));
+      } catch {
+        // 读取失败留给下次 reconcile / 显式 rebuild
+      }
+    }
+    this.status = this.buildStatus();
+  }
+
+  /** 插件卸载/进程退出前：强制落盘所有 dirty live 桶（durability）。 */
+  async dispose(): Promise<void> {
+    await this.checkpoint(true);
+  }
+}
+
+export { classifyReadError };
