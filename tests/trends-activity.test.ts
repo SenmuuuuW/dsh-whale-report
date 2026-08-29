@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { aggregate, aggregateBuckets, bucketizeOwnEvents, activityLevel, summarizeSessionEvents, type RawEvent } from "../src/stats.js";
 import { isPeakHourCST, computeCostTimed, PEAK_PRICES, OFFPEAK_PRICES } from "../src/pricing.js";
 import { periodShortLabel } from "../src/client/index.js";
-import { shanghaiDayStart } from "../src/shanghai.js";
+import { shanghaiDayStart, shanghaiHourStartOf } from "../src/shanghai.js";
 
 function ev(type: string, time: number, data: Record<string, unknown> = {}): RawEvent {
   return { type, time, data: { ...data, sessionId: "s1" } };
@@ -135,11 +135,11 @@ describe("峰谷定价", () => {
     expect(isPeakHourCST(at(2, 0))).toBe(false);
   });
 
-  it("computeCostTimed：高峰小时按高峰价、空闲小时按空闲价", () => {
+  it("computeCostTimed：高峰小时按高峰价、空闲小时按空闲价（time = 上海小时起点）", () => {
     const usage = { input: 1_000_000, output: 500_000, cacheRead: 0, reasoning: 0 };
     const r = computeCostTimed([
-      { hour: 10, modelTokens: { "deepseek-v4-pro": usage } }, // 高峰
-      { hour: 3, modelTokens: { "deepseek-v4-pro": usage } },  // 空闲
+      { time: shanghaiHourStartOf("2026-08-18", 10), modelTokens: { "deepseek-v4-pro": usage } }, // 周二 10:00 高峰
+      { time: shanghaiHourStartOf("2026-08-18", 3), modelTokens: { "deepseek-v4-pro": usage } },  // 周二 03:00 空闲
     ]);
     // 高峰 pro：miss 1M×9 + output 0.5M×27 = 22.5
     // 空闲 pro：miss 1M×4.5 + output 0.5M×13.5 = 11.25

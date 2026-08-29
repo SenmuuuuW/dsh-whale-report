@@ -10,9 +10,15 @@
  * 官方价格（2026-08-17 前，CNY / 1M token）：
  *   v4-flash: 命中 0.02 · 未命中 1 · 输出 2
  *   v4-pro:   命中 0.025 · 未命中 3 · 输出 6
+ *
+ * 峰谷规则（v0.5.4 起）：
+ * - 2026-08-23T00:00:00+08:00 之前：北京 9–12 / 14–18 高峰，其余低谷（不分周末）
+ * - 2026-08-23T00:00:00+08:00 起：工作日保持上述窗口；周六/周日全天低谷
+ * - 历史数据按事件所属真实时间回溯计价（pricingTierForTime 是唯一 truth source）
  */
 import type { ModelUsage } from "./stats.js";
 import { usageTotalTokens } from "./usage.js";
+import { shanghaiDayOfWeek, shanghaiHour } from "./shanghai.js";
 
 export interface Prices {
   cacheReadPerMillion: number;
@@ -25,7 +31,8 @@ export const PRICING_URL = "https://api-docs.deepseek.com/zh-cn/quick_start/pric
 /** 内置回退价（官方当前价，CNY / 1M）。 */
 /**
  * DeepSeek 官方峰谷价（2026-08-17 起，CNY / 1M token）。
- * 高峰时段（北京时间 9:00–12:00、14:00–18:00）价格为空闲时段两倍。
+ * 高峰时段（北京时间 9:00–12:00、14:00–18:00，工作日）价格为空闲时段两倍；
+ * 2026-08-23 起周末（周六/周日）全天按空闲价（见 pricingTierForTime）。
  */
 export const PEAK_PRICES: Record<"flash" | "pro", Prices> = {
   flash: { cacheReadPerMillion: 0.1, inputPerMillion: 3.0, outputPerMillion: 9.0 },
@@ -42,27 +49,51 @@ export const BUILTIN_PRICES: Record<"flash" | "pro", Prices> = {
 };
 
 /**
- * 高峰时段判定：北京时间（UTC+8）9:00–12:00、14:00–18:00。
- * 确定性纯函数；输入为 epoch ms 或本地小时。
+ * 高峰窗口判定（北京时间小时）：9–12、14–18。
+ * 纯小时窗口，无 weekday / 生效日期语义 —— 正式历史计费必须走 pricingTierForTime。
  */
-/** 北京时间小时（0-23）是否高峰（9-12、14-18）。纯小时判定（dayHourDetail 小时桶计价用，无时区歧义）。 */
+/** 北京时间小时（0-23）是否高峰窗口（9-12、14-18）。纯小时判定（仅窗口语义；正式计费见 pricingTierForTime）。 */
 export function isPeakCstHour(hour: number): boolean {
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18);
 }
 
+/** 高峰窗口判定（epoch ms → 北京时间小时）。纯窗口语义；正式计费见 pricingTierForTime。 */
 export function isPeakHourCST(ms: number): boolean {
-  // 北京时间 = UTC + 8
-  const cstHour = (new Date(ms).getUTCHours() + 8) % 24;
-  return (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
+  return isPeakCstHour(shanghaiHour(ms));
+}
+
+/** 定价时段（peak / offpeak）。 */
+export type PricingTier = "peak" | "offpeak";
+
+/**
+ * DeepSeek 官方周末全天低谷新规生效时刻（北京时间 2026-08-23 00:00:00，含）。
+ * 生效前历史必须按旧规则回溯，绝不把新周末规则前推。
+ */
+export const WEEKEND_OFFPEAK_EFFECTIVE_AT = Date.parse("2026-08-23T00:00:00+08:00");
+
+/**
+ * 唯一定价时刻表（v0.5.4）—— 所有计费路径的唯一 truth source：
+ * - ms < 生效时刻 → 旧规则：北京 9–12 / 14–18 高峰，其余低谷（与星期几无关）
+ * - ms ≥ 生效时刻 → 新规则：工作日同旧窗口；周六/周日全天低谷
+ * 全部基于 Asia/Shanghai（UTC+8 无 DST），绝不依赖机器本地时区。
+ */
+export function pricingTierForTime(ms: number): PricingTier {
+  if (ms < WEEKEND_OFFPEAK_EFFECTIVE_AT) return isPeakHourCST(ms) ? "peak" : "offpeak";
+  const dow = shanghaiDayOfWeek(ms); // 0=周日 … 6=周六
+  if (dow === 0 || dow === 6) return "offpeak";
+  return isPeakHourCST(ms) ? "peak" : "offpeak";
 }
 
 /** 当前时刻价格（峰/谷）。 */
 export function pricesForTime(ms: number): Record<"flash" | "pro", Prices> {
-  return isPeakHourCST(ms) ? PEAK_PRICES : OFFPEAK_PRICES;
+  return pricingTierForTime(ms) === "peak" ? PEAK_PRICES : OFFPEAK_PRICES;
 }
 
 /**
- * 按时段分段计价：输入 小时 → 模型用量，按各自时段价格累加。
+ * 按时间分段计价：输入 小时起点 epoch ms → 模型用量，按各自时段价格累加。
+ * time 必须是该小时的起点（shanghaiHourStart / shanghaiHourStartOf）——
+ * 同一 hour-of-day 在不同日期（如周五 10:00 vs 周六 10:00）必须分行传入，
+ * 由 pricingTierForTime(time) 按所属真实日期决定峰/谷，绝不跨天合并后定价。
  * 返回 perModel 费用（确定性）与时段统计。
  */
 export interface TimedCostResult {
@@ -75,26 +106,27 @@ export interface TimedCostResult {
 }
 
 export function computeCostTimed(
-  perHourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[],
+  perTimeModelTokens: { time: number; modelTokens: Record<string, ModelUsage> }[],
 ): TimedCostResult {
   const perModel: Record<string, number> = {};
   let total = 0;
   let peakCost = 0;
   let peakTokens = 0;
   let allTokens = 0;
-  for (const { hour, modelTokens } of perHourModelTokens) {
-    // hour 为本地小时；峰谷按北京时间（UTC+8）判定——本地为 UTC+8 时一致。
-    const priceSet = isPeakCstHour(hour) ? PEAK_PRICES : OFFPEAK_PRICES;
+  for (const { time, modelTokens } of perTimeModelTokens) {
+    // 时段由 pricingTierForTime（Asia/Shanghai + 周末规则 + 生效边界）唯一决定。
+    const tier = pricingTierForTime(time);
+    const priceSet = tier === "peak" ? PEAK_PRICES : OFFPEAK_PRICES;
     for (const [model, usage] of Object.entries(modelTokens)) {
       const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
-      const tier = modelTier(model);
+      const mTier = modelTier(model);
       const prices = provider === "opencode-go" ? OPENCODE_GO_PRICES : priceSet;
-      const cost = modelCost(usage, prices[tier]);
+      const cost = modelCost(usage, prices[mTier]);
       perModel[model] = (perModel[model] ?? 0) + cost;
       total += cost;
       const tokens = usageTotalTokens(usage);
       allTokens += tokens;
-      if (priceSet === PEAK_PRICES) {
+      if (tier === "peak") {
         peakCost += cost;
         peakTokens += tokens;
       }
@@ -231,7 +263,7 @@ export async function getPrices(): Promise<{ prices: Record<"flash" | "pro", Pri
     }
   }
   return {
-    prices: isPeakHourCST(now) ? priceCache.peak : priceCache.offpeak,
+    prices: pricingTierForTime(now) === "peak" ? priceCache.peak : priceCache.offpeak,
     source: priceCache.source,
     fetchedAt: priceCache.fetchedAt,
   };

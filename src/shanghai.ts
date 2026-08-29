@@ -21,6 +21,16 @@ export function shanghaiHour(ms: number): number {
   return (new Date(ms).getUTCHours() + 8) % 24;
 }
 
+/** 上海小时起点（UTC ms）：小时内任意时刻 → 该小时 00:00 CST（定价/分桶对齐用）。 */
+export function shanghaiHourStart(ms: number): number {
+  return shanghaiDayStart(ms) + shanghaiHour(ms) * 3600000;
+}
+
+/** 上海日期 key（YYYY-MM-DD）+ 小时（0-23）→ 该小时起点（UTC ms）；显式 +08:00 解析，机器时区无关。 */
+export function shanghaiHourStartOf(dateKey: string, hour: number): number {
+  return Date.parse(`${dateKey}T00:00:00+08:00`) + hour * 3600000;
+}
+
 /** 上海星期几（0=周日 … 6=周六；周一=1）。 */
 export function shanghaiDayOfWeek(ms: number): number {
   return new Date(shanghaiDayStart(ms) + SHANGHAI_OFFSET_MS).getUTCDay();

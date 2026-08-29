@@ -80,11 +80,11 @@ function trackWriteFailure(scope: string, error: unknown): void {
 function summarizeLiveBuckets(
   sessionId: string,
   snap: BucketizedResult,
-): { title: string; turns: number; toolCalls: number; tokens: { input: number; output: number; cacheRead: number; reasoning: number }; totalTokens: number; hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[]; lastTime: number } {
+): { title: string; turns: number; toolCalls: number; tokens: { input: number; output: number; cacheRead: number; reasoning: number }; totalTokens: number; timeModelTokens: { time: number; modelTokens: Record<string, ModelUsage> }[]; lastTime: number } {
   let turns = 0;
   let toolCalls = 0;
   const tokens = { input: 0, output: 0, cacheRead: 0, reasoning: 0 };
-  const hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[] = [];
+  const timeModelTokens: { time: number; modelTokens: Record<string, ModelUsage> }[] = [];
   let lastTime = 0;
   for (const b of snap.buckets) {
     turns += b.turns;
@@ -93,7 +93,9 @@ function summarizeLiveBuckets(
     tokens.output += b.output;
     tokens.cacheRead += b.cacheRead;
     tokens.reasoning += b.reasoning;
-    hourModelTokens.push({ hour: new Date(b.h).getHours(), modelTokens: b.modelUsage });
+    // b.h = 10 分钟桶起点 epoch ms：直接作为定价时间（pricingTierForTime 按上海日期+小时判定，
+    // 含周末新规；桶起点是 10 分钟整点，绝不跨越整点峰谷边界，且不依赖机器本地时区）。
+    timeModelTokens.push({ time: b.h, modelTokens: b.modelUsage });
     const end = b.h + 10 * 60 * 1000;
     if (end > lastTime) lastTime = end;
   }
@@ -103,7 +105,7 @@ function summarizeLiveBuckets(
     toolCalls,
     tokens,
     totalTokens: tokens.input + tokens.cacheRead + tokens.output,
-    hourModelTokens,
+    timeModelTokens,
     lastTime,
   };
 }
@@ -318,7 +320,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 if (snap === null) continue;
                 const summary = summarizeLiveBuckets(id, snap);
                 if (summary.totalTokens === 0 && summary.turns === 0 && summary.toolCalls === 0) continue;
-                const cost = computeCostTimed(summary.hourModelTokens);
+                const cost = computeCostTimed(summary.timeModelTokens);
                 results.push({
                   sessionId: id,
                   title: summary.title,

@@ -10,6 +10,10 @@ export declare function shanghaiDayStart(ms: number): number;
 export declare function shanghaiDateKey(ms: number): string;
 /** 上海小时（0-23）。 */
 export declare function shanghaiHour(ms: number): number;
+/** 上海小时起点（UTC ms）：小时内任意时刻 → 该小时 00:00 CST（定价/分桶对齐用）。 */
+export declare function shanghaiHourStart(ms: number): number;
+/** 上海日期 key（YYYY-MM-DD）+ 小时（0-23）→ 该小时起点（UTC ms）；显式 +08:00 解析，机器时区无关。 */
+export declare function shanghaiHourStartOf(dateKey: string, hour: number): number;
 /** 上海星期几（0=周日 … 6=周六；周一=1）。 */
 export declare function shanghaiDayOfWeek(ms: number): number;
 /** 上海"本周一 00:00"（UTC ms）。 */

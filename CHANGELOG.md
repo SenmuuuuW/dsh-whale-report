@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.5.4] - 2026-08-29
+
+### Pricing
+
+- Sync DeepSeek weekend off-peak pricing effective 2026-08-23 00:00 CST
+- Weekdays retain 09:00–12:00 and 14:00–18:00 peak windows
+- Saturdays and Sundays are all-day off-peak
+- Historical reports remain date-aware across the effective boundary
+- Live price badge, peak ratio/share and cost opportunity use the same pricing schedule
+
 ## [0.5.3] - 2026-08-28
 
 Query Engine Rewrite：INGEST ONCE → QUERY MANY。

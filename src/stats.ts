@@ -10,7 +10,7 @@
  *    对未知事件类型全部宽容跳过，只聚合我们认识的那几种。
  */
 import { classifyCorrectionText, type CorrectionAggregate, type CorrectionCategory } from "./improvements.js";
-import { shanghaiDateKey, shanghaiHour } from "./shanghai.js";
+import { shanghaiDateKey, shanghaiHour, shanghaiHourStart } from "./shanghai.js";
 
 /** 一行原始会话事件的宽松形态（插件只关心这几个字段）。 */
 export interface RawEvent {
@@ -407,8 +407,8 @@ export interface LiveSessionSummary {
   totalTokens: number;
   /** 按模型的 token 用量（费用折算用）。 */
   modelTokens: Record<string, ModelUsage>;
-  /** 按小时的模型用量（峰谷计价用；hour 为本地小时）。 */
-  hourModelTokens: { hour: number; modelTokens: Record<string, ModelUsage> }[];
+  /** 按小时起点（epoch ms）的模型用量（峰谷计价用；pricingTierForTime 按上海日期+小时判定，含周末新规）。 */
+  timeModelTokens: { time: number; modelTokens: Record<string, ModelUsage> }[];
   /** 最后事件时间。 */
   lastTime: number;
 }
@@ -429,7 +429,7 @@ export function summarizeSessionEvents(
     tokens,
     totalTokens: 0,
     modelTokens,
-    hourModelTokens: [],
+    timeModelTokens: [],
     lastTime: 0,
   };
   for (const event of events) {
@@ -457,10 +457,10 @@ export function summarizeSessionEvents(
           m.output += usage.output ?? 0;
           m.cacheRead += usage.cacheRead ?? 0;
           m.reasoning += usage.reasoning ?? 0;
-          // 按小时分段（峰谷计价）：hour 为本地小时。
-          const hour = shanghaiHour(event.time);
-          let hm = hourMap.get(hour);
-          if (hm === undefined) { hm = {}; hourMap.set(hour, hm); }
+          // 按小时起点分段（峰谷计价）：同一 hour-of-day 在不同日期分行，供 pricingTierForTime 判定价。
+          const hourStart = shanghaiHourStart(event.time);
+          let hm = hourMap.get(hourStart);
+          if (hm === undefined) { hm = {}; hourMap.set(hourStart, hm); }
           const hm2 = (hm[model] ??= { input: 0, output: 0, cacheRead: 0, reasoning: 0 });
           hm2.input += usage.input ?? 0;
           hm2.output += usage.output ?? 0;
@@ -479,9 +479,9 @@ export function summarizeSessionEvents(
     }
   }
   summary.totalTokens = summary.tokens.input + summary.tokens.output + summary.tokens.cacheRead + summary.tokens.reasoning;
-  summary.hourModelTokens = [...hourMap.entries()]
+  summary.timeModelTokens = [...hourMap.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([hour, modelTokens]) => ({ hour, modelTokens }));
+    .map(([time, modelTokens]) => ({ time, modelTokens }));
   return summary;
 }
 

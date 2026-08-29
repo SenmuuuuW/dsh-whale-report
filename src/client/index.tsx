@@ -3697,10 +3697,20 @@ function TrendSection({ preset }: { preset: string }): ReactNode {
   );
 }
 
-/** 峰谷时段判定（前端版；与 pricing.ts 同口径：北京时间 9–12、14–18 高峰）。 */
+/** 官方周末全天低谷新规生效时刻（北京时间 2026-08-23 00:00，与 pricing.ts 的 WEEKEND_OFFPEAK_EFFECTIVE_AT 同源）。 */
+const WEEKEND_OFFPEAK_AT = Date.parse("2026-08-23T00:00:00+08:00");
+/** 北京时间（UTC+8）星期几：0=周日 … 6=周六（与 shanghaiDayOfWeek 同口径）。 */
+function cstDayOfWeek(ms: number): number {
+  return new Date(ms + 8 * 3600_000).getUTCDay();
+}
+/** 峰谷时段判定（前端版；与 pricing.ts 的 pricingTierForTime 同口径：生效前旧窗口，生效后工作日窗口 + 周末全天谷时）。 */
 function isPeakNow(ms: number): boolean {
   const cstHour = (new Date(ms).getUTCHours() + 8) % 24;
-  return (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
+  const windowPeak = (cstHour >= 9 && cstHour < 12) || (cstHour >= 14 && cstHour < 18);
+  if (ms < WEEKEND_OFFPEAK_AT) return windowPeak;
+  const dow = cstDayOfWeek(ms);
+  if (dow === 0 || dow === 6) return false;
+  return windowPeak;
 }
 
 /** 当前价格时段 + 时段切换提醒（每分钟检查）。
@@ -3745,11 +3755,22 @@ function PricePeriodCard(): ReactNode {
   const now = new Date();
   const cstHour = (now.getUTCHours() + 8) % 24;
   const cstClock = cstHour * 60 + now.getUTCMinutes();
-  const next = PERIOD_BOUNDS.find((b) => b.m > cstClock) ?? { m: 33 * 60, label: "9:00", to: "peak" as const };
-  const minutesLeft = next.m - cstClock;
+  // 周末（生效新规后）：全天谷时，全天候条带全灰，下一次转高峰 = 周一 9:00。
+  const dow = cstDayOfWeek(now.getTime());
+  const weekend = now.getTime() >= WEEKEND_OFFPEAK_AT && (dow === 0 || dow === 6);
+  const hours = Array.from({ length: 24 }, (_, h) => !weekend && ((h >= 9 && h < 12) || (h >= 14 && h < 18)));
+  const next = weekend
+    ? (() => {
+        const sh = new Date(now.getTime() + 8 * 3600_000);
+        const dayStartUtc = Date.UTC(sh.getUTCFullYear(), sh.getUTCMonth(), sh.getUTCDate());
+        const daysAhead = dow === 6 ? 2 : 1; // 周六/周日 → 下周一
+        return { m: 9 * 60, label: "周一 9:00", to: "peak" as const, atMs: dayStartUtc + daysAhead * 86400000 + 9 * 3600_000 - 8 * 3600_000 };
+      })()
+    : null;
+  const weekdayNext = next === null ? (PERIOD_BOUNDS.find((b) => b.m > cstClock) ?? { m: 33 * 60, label: "9:00", to: "peak" as const }) : next;
+  const minutesLeft = next === null ? weekdayNext.m - cstClock : Math.ceil((next.atMs - now.getTime()) / 60000);
   const countdown =
     minutesLeft >= 60 ? `${Math.floor(minutesLeft / 60)}h ${String(minutesLeft % 60).padStart(2, "0")}m` : `${minutesLeft}m`;
-  const hours = Array.from({ length: 24 }, (_, h) => (h >= 9 && h < 12) || (h >= 14 && h < 18));
   return (
     <div data-whale-report-price data-period={period}>
       <div data-whale-report-pricehead>
@@ -3776,7 +3797,7 @@ function PricePeriodCard(): ReactNode {
       <div
         data-whale-report-pricestrip
         role="img"
-        aria-label="峰谷时段分布：高峰 9–12 与 14–18 时（琥珀色），其余为谷时（青色），指针标示当前时刻"
+        aria-label="峰谷时段分布：工作日 9–12 与 14–18 时高峰（琥珀色），其余谷时（青色）；周末全天谷时（2026-08-23 起）；指针标示当前时刻"
       >
         {hours.map((pk, h) => (
           <i key={h} data-peak={pk} data-now={h === cstHour} />
@@ -3791,7 +3812,9 @@ function PricePeriodCard(): ReactNode {
         <span>24</span>
       </div>
       <div data-whale-report-pricecount>
-        距 {next.label} 转{next.to === "peak" ? "高峰" : "谷时"} {countdown} · 高峰 9–12 / 14–18 北京时间
+        {next === null
+          ? <>距 {weekdayNext.label} 转{weekdayNext.to === "peak" ? "高峰" : "谷时"} {countdown}</>
+          : <>周末全天谷时 · 距 {next.label} 转高峰 {countdown}</>} · 工作日高峰 9–12 / 14–18 北京时间
         {peak ? " · 谷时 5 折" : " · 高峰 2×"}
       </div>
       {noticed && (

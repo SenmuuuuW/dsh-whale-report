@@ -87,8 +87,8 @@ export function computeInsights(input: InsightInput): Insight[] {
       id: "peak-shift",
       level: peakPct >= 60 ? "warning" : "tip",
       title: `高峰时段花费 ¥${peakCost.toFixed(1)}（占 ${peakPct}%）`,
-      detail: `本期峰谷计价：高峰 ¥${peakCost.toFixed(1)} / 谷时 ¥${valleyCost.toFixed(1)}。高峰为北京时间 9–12、14–18，官方峰谷差价 2:1。`,
-      action: "批量/渲染/长分析任务排到 12–14 或 18 点后执行。",
+      detail: `本期峰谷计价：高峰 ¥${peakCost.toFixed(1)} / 谷时 ¥${valleyCost.toFixed(1)}。工作日高峰为北京时间 9–12、14–18（2026-08-23 起周末全天谷时），官方峰谷差价 2:1。`,
+      action: "批量/渲染/长分析任务排到 12–14、18 点后或周末执行。",
       estimate: `全部挪到谷时执行约省 ¥${(peakCost * 0.5).toFixed(1)}/周期（按峰谷差价 2:1 估算）。`,
     });
   }
