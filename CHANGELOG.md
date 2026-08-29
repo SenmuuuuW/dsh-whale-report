@@ -29,7 +29,7 @@ Refresh 不再 readSession / decompress / aggregate 原始事件：INGEST ONCE�
 
 ### Performance（真实生产数据）
 
-- Refresh：31s 级 → p50 ~6–9ms（×100：p95 8.3ms / max 11.3ms）
+- Refresh：~31s → ~7ms median（×100：p95 8.3ms / max 11.3ms）
 - Live endpoint：6.5s → <1ms steady state
 - Period switch：毫秒级
 

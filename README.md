@@ -6,7 +6,7 @@
 
 <p align="center"><b>Your Agent, in numbers.</b></p>
 
-<p align="center">把 DSH 的 session、token、cost、tool call、风险与异常，<br/>转成可以真正读懂的 Agent 报告。</p>
+<p align="center">Agent 可观测（observability）→ 诊断（diagnosis）→ 改进（improvement）：<br/>把 DSH 的 session、token、cost、tool call、风险与异常，转成可以真正读懂的诊断结论与可验证的改进建议。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-whale-report"><img src="https://img.shields.io/npm/v/dsh-whale-report?label=npm&color=4d6bfe" alt="npm version"></a>
@@ -95,34 +95,44 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 <sub>The full DeepTrace report — findings, collaboration review, activity, resources, risks and session trace.</sub>
 
-## Snapshot-first overview（v0.5.2）
+## Query Engine
 
-Overview 打开即显示最近一次**已完成快照**，不再等待完整报告生成：
+DeepTrace 架构是一句话：**INGEST ONCE → QUERY MANY**。会话事件只在进入时被读取、聚合、落库一次，此后 Overview / Report / History 全部只查询建好的 canonical index——不再重放 Session、不再解压、不再重新聚合。
 
-- 页面标注 **LAST COMPLETED SNAPSHOT**（数字截至快照时刻）与 **LAST UPDATED**（完整刷新完成时刻）；快照之后的实时活动见 **LIVE SESSION**（30s 独立轻量刷新），两者口径明确区分
-- 刷新策略按快照年龄：**<5min** 不触发完整生成；**5–15min** 先显示快照、后台静默更新；**>15min** 显示旧数据并标注 stale、后台更新；手动「刷新」才强制重新生成
-- Live Session（30s）与 Provider Balance（60s）独立刷新，永不触发完整 summary；Full Report / History / 详情按需加载
-- 活跃扫描 / 模型分配 / 会话轨迹已下沉到「更多详情」折叠区
-- 自定义区间使用独立周期 key（`custom-<from>-<to>`），与 daily / 24h / weekly / monthly / yearly 完全隔离，不污染标准周期趋势
+### Ingest（进入一次）
 
-## Query Engine（v0.5.3）
+- DSH session/event firehose 逐事件增量摄入（baseline + seq 去重 + fingerprint reconcile 兜底）
+- 损坏会话只读 salvage：重解压移入 worker_threads，不阻塞查询
+- 持久化：canonical index 用 coalesced checkpoints 落盘，避免反复整库重写
 
-DeepTrace 架构为 **INGEST ONCE → QUERY MANY**：
+### Query（查询多次）
 
-- **普通 Refresh 不重放 Session**：只读 canonical index（10 分钟分桶 + 精确边界行），零 readSession / 零解压 —— 毫秒级查询（真实生产 p50 ~6–9ms）
-- **rolling 24h 精确窗口** `[now-24h, now)`；PeriodSpec 是唯一时间窗口真相源
-- **live incremental ingestion**：session/event firehose 逐事件增量（baseline + seq 去重），live-session 卡片 <1ms
-- **exact boundary accounting**：窗口边界逐事件精确过滤，Raw Oracle 对账 costDiff=0.0000
-- salvage 重解压移入 worker_threads，不阻塞查询
+- 所有页面把 PeriodSpec 解析成窗口后直接查询 canonical index（10 分钟分桶 + 精确边界行），零 readSession / 零解压
+- rolling 24h 是精确窗口 `[now-24h, now)`；PeriodSpec 是唯一时间窗口真相源，周期之间绝不串数据
 
-当前 version：**v0.5.3**（兼容基线 DSH 0.1.1-rc.2）
+### Exact accounting（精确对账）
+
+- 窗口边界逐事件精确过滤（无比例近似），Raw Oracle 对账 costDiff = 0.0000
+- 统计与周期口径统一 Asia/Shanghai（不依赖机器时区）
+
+当前 version：**v0.5.3**（官方兼容基线 DSH 0.1.1-rc.2）
+
+## Performance
+
+Benchmarked on the real production dataset used during v0.5.3 acceptance; results vary with environment.
+
+| 场景 | 之前 | v0.5.3 |
+| --- | --- | --- |
+| Refresh / Overview | ~31s（重放 + 重新聚合 session） | ~7ms median（纯索引查询） |
+| Live session | ~6.5s（每 30s 整读） | <1ms steady state（增量维护） |
+| Refresh ×100 压测 | — | p95 8.3ms / max 11.3ms |
 
 ## What it measures
 
 | | |
 | --- | --- |
 | **Cost** | 官方峰谷价分段计算（2026-08-17 起：高峰 9–12 / 14–18 为谷时 2 倍，定价页实时抓取、6h 缓存、内置价兜底），按模型与会话分账，报告带峰谷占比（peakShare / peakRatio）与「挪到谷时约省 ¥X」估算 |
-| **Live session** | 进行中会话实时计费（30s 刷新）：token 与费用按当前时段价折算，右上角常驻峰/谷徽标 + 双模型价目表 |
+| **Live session** | 进行中会话实时计费：由 session/event firehose **增量维护**（steady state <1ms，不再 30s 整读），token 与费用按当前时段价折算，右上角常驻峰/谷徽标 + 双模型价目表 |
 | **Tokens** | input / output / cache read / reasoning，按模型拆分 |
 | **Sessions** | 会话数、回合数、事件数、活跃天数、最忙日 |
 | **Activity** | 小时级活跃热力图（GitHub contribution 风格，基于 Tokens 的固定 log 阈值分级）；hover 显示每小时 Tokens / 会话 / 回合 / 工具 / 成本；峰值时段、活跃小时、夜猫指数 |
@@ -135,9 +145,9 @@ DeepTrace 架构为 **INGEST ONCE → QUERY MANY**：
 | **Baseline** | 每周期自动落库，报告带"较上周期 ▲/▼"（费用、会话、缓存命中率等） |
 | **Trends** | 多周期趋势曲线（成本 / 会话 / 缓存命中 / 夜间活跃），hover 显示每周期明细与日期范围，进行中周期标记 LIVE（不与完整周期混比） |
 | **Provider balance** | 模型平台实时余额（DeepSeek 已支持，可扩展）；key 只在本机服务端使用 |
-| **Usage accounting（v0.5.0）** | canonical 口径：total = input(miss) + cacheRead(hit) + output，reasoning 只作 output breakdown 不重复计；费用 = miss×输入价 + hit×缓存价 + output×输出价（不再二次减缓存）；TODAY = Asia/Shanghai 自然日（不依赖机器时区），24H = rolling；API 输出 `providerBreakdown`，与 DeepSeek Platform 对账只取 deepseek-official |
+| **Usage accounting（v0.5.0）** | canonical 口径：total = input(miss) + cacheRead(hit) + output，reasoning 只作 output breakdown 不重复计；费用 = miss×输入价 + hit×缓存价 + output×输出价（不再二次减缓存）；TODAY = Asia/Shanghai 自然日（不依赖机器时区），24H = 精确滚动窗口 `[now-24h, now)`（rolling 不落自然周期基线，无「上一个自然 24h」的伪造对比）；API 输出 `providerBreakdown`，与 DeepSeek Platform 对账只取 deepseek-official |
 | **Improve（v0.5）** | 值得改的行为建议：Repeated Tool Failure / Retry Workflow Waste / Repeated User Correction（EXPERIMENTAL）/ Peak Cost Opportunity；每条带 metrics、受影响会话、置信度与 VERIFY 基线 → 目标；stable id 跨周期不变，只读、不自动修改任何配置 |
-| **Data partial / salvage** | 单个会话日志损坏/不可读 → 优先**只读 salvage**（逐帧解压 + 完整 JSONL 记录进入聚合，仅残缺尾部丢弃，不修改 ~/.dsh 原文件）；无法安全恢复时才整段跳过并披露（只存会话 id + 粗分类原因，不含错误原文）；缺失数据不按 0 计；markdown / HTML / Web 三处非阻断提示 |
+| **Data partial / salvage** | 单个会话日志损坏/不可读 → 优先**只读 salvage**（worker_threads 中逐帧解压，22MB 解码不阻塞查询；完整 JSONL 记录进入聚合，仅残缺尾部丢弃，不修改 ~/.dsh 原文件）；无法安全恢复时才整段跳过并披露（只存会话 id + 粗分类原因，不含错误原文）；缺失数据不按 0 计；markdown / HTML / Web 三处非阻断提示 |
 
 ## Deterministic insights
 
@@ -184,13 +194,13 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 | Preset | 区间 | 口径 |
 | --- | --- | --- |
 | 日报 | 今天 0:00 → 现在 | 自然日 |
-| 24h | 过去滚动 24 小时 | 唯一滚动周期 |
+| 24h | 精确滚动窗口 [now-24h, now) | 唯一滚动周期 |
 | 周报 | 本周一 0:00 → 现在 | 自然周 |
 | 月报 | 本月 1 日 0:00 → 现在 | 自然月 |
 | 年报 | 本年 1 月 1 日 0:00 → 现在 | 自然年 |
 | 自定义 | 任意 from / to | 显式区间 |
 
-自然周期与滚动 24h 的区别：周/月/年按日历对齐（周一、1 号、1 月 1 日），"24h" 则是任意时刻起算的滚动窗口。周期 key 前缀隔离（`day-` / `24h-` / `wk-` / `mo-` / `yr-`），对比基线互不串扰。
+自然周期与滚动 24h 的区别：周/月/年按日历对齐（周一、1 号、1 月 1 日），"24h" 则是任意时刻起算的精确滚动窗口 `[now-24h, now)`；24h 没有自然「上一周期」，不产生跨期基线对比。周期 key 前缀隔离（`day-` / `24h-` / `wk-` / `mo-` / `yr-`），对比基线互不串扰。
 
 ## Export
 
@@ -204,7 +214,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.3 针对 DSH 0.1.1-rc.2 验证**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.3 的官方兼容基线是 DSH 0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -216,10 +226,12 @@ dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
 **② npm 包安装（仅依赖）** —— 把包装进你的项目：
 
 ```sh
-npm install dsh-whale-report
+npm install dsh-whale-report@0.5.3
 ```
 
 > 注意：`npm install` 只是安装包本身，**不会自动注册为 DSH 插件**。Web UI、`whale_report` 工具与实时计费都需要通过方式 ① 注册；方式 ② 适合直接 import 报告引擎 / 用 CLI 生成报告的场景。
+>
+> 兼容性说明：Runtime-tested against DSH 0.1.2-alpha.1 during development, but prerelease 0.1.2-alpha.1 is not included in the current npm peer range —— 官方兼容基线仍是 DSH 0.1.1-rc.2。
 
 两个入口：
 
@@ -242,16 +254,11 @@ CLI 直接读本机会话存档（`~/.dsh/sessions/*/session.jsonl.zstd`），�
 ## Architecture
 
 ```
-DSH session events
-        ↓
-aggregation / pricing / safety
-（损坏会话跳过 → partial，缺失 ≠ 0）
-        ↓
-deterministic findings + improve rules
-        ↓
-DeepTrace report（DATA PARTIAL 披露 + VERIFY-ready 建议）
-        ↓
-Web / HTML / PDF / PNG
+DSH session events（firehose + baseline + salvage）
+        ↓  incremental ingest（seq 去重 / fingerprint reconcile；损坏会话 worker_threads 解压）
+canonical index（10 分钟分桶 + 精确边界行；coalesced checkpoints 落盘）
+        ↓  query engine（PeriodSpec → 精确窗口 → 纯索引查询，零 session IO）
+Overview / Report / History（Web / HTML / PDF / PNG）
 ```
 
 细节（数据流、存储结构、兼容性策略）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
@@ -262,7 +269,7 @@ Web / HTML / PDF / PNG
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 314 个单测：引擎 / 洞察 / Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 刷新韧性 / Fast Path / Query Engine / 时区矩阵 / persistence
+pnpm test       # 314 个单测（28 个文件）：引擎与统计 / 洞察与 Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 客户端刷新韧性 / Query Engine 与周期不变量 / Oracle 对账 / 增量 ingest / 时区矩阵 / persistence
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
