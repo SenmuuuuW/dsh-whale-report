@@ -107,6 +107,10 @@ export interface ReportStats {
     tokens: TokenTotals;
     /** 各工具被调用次数。 */
     toolCalls: Record<string, number>;
+    /** v0.6（INDEX_VERSION 17）：按工具的确定性 timeout 计数（§29-A 双路径检测器；只存 tool identity + count）。 */
+    toolTimeouts: Record<string, number>;
+    /** v0.6（INDEX_VERSION 17）：tool → 出现 timeout 的会话 id（Proposal ≥3 会话阈值用；只存 id）。 */
+    toolTimeoutSessions: Record<string, string[]>;
     toolCallsTotal: number;
     /** tool/result 里的失败次数。 */
     toolErrors: number;
@@ -265,6 +269,17 @@ export declare function assembleHourDetail(raw: Map<string, {
     modelTokens: Record<string, ModelUsage>;
     sessions: Set<string>;
 }>): HourlyDetail[];
+/**
+ * v0.6 timeout 检测器（§29-A，确定性双路径，禁止模糊语义匹配）：
+ * - Path A: error.code === 'TOOL_TIMEOUT'（host timeout-policy wrapper 路径）
+ * - Path B: tool/result content 精确匹配 /\[timed out after \d+ms\]/
+ *           （executor 预算路径：bash-local 渲染的常量标记，Phase 0.5 实测 41 例）
+ * 不匹配 substring "timeout" 的任何其他形态。
+ * 注意真实事件形态：文本嵌套在 content[].{type:"tool-result"}.content[].text 里，
+ * 检测器做结构化递归（绝不模糊全文匹配）。
+ */
+export declare const TIMED_OUT_MARKER_RE: RegExp;
+export declare function isTimeoutResult(data: Record<string, unknown> | undefined): boolean;
 /** 协作信号聚合（报告级）。 */
 export interface CollabSignals {
     /** 用户消息总数。 */
@@ -356,6 +371,10 @@ export interface HourBucket {
     reasoning: number;
     toolCallsTotal: number;
     toolCalls: Record<string, number>;
+    /** v0.6（INDEX_VERSION 17）：按工具的 timeout 计数（tool identity + count；无 command/content）。 */
+    toolTimeouts?: Record<string, number>;
+    /** v0.6（INDEX_VERSION 17）：tool → timeout 会话 id（去重列表，上限 32）。 */
+    toolTimeoutSessions?: Record<string, string[]>;
     toolErrors: number;
     commands: number;
     /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */

@@ -32,12 +32,32 @@ import type { IngestEngine } from "./ingest.js";
 import type { BucketizedResult, ModelUsage } from "./stats.js";
 import { buildReportFromStats } from "./tools.js";
 import { computeCostTimed } from "./pricing.js";
+import { ApplyError } from "./apply/types.js";
 import { buildProviderBreakdown } from "./usage.js";
 import { generateReportData, newGenerationPerf, toPeriodRecord, type ReportServices } from "./tools.js";
 import { adapterOf, queryBalance } from "./balance.js";
 import { createSingleFlight } from "./single-flight.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** v0.6 Apply 结构化错误 → HTTP 状态（RFC §15；不把 raw DSH error 暴露给前端）。 */
+function applyErrorStatus(code: string): number {
+  switch (code) {
+    case "CONFIG_CHANGED":
+    case "IN_PROGRESS":
+    case "TARGET_CHANGED":
+    case "ALREADY_APPLIED":
+    case "ALREADY_REVERTED":
+      return 409;
+    case "INVALID_PROPOSAL":
+    case "NOT_APPLICABLE":
+      return 422;
+    case "SETTINGS_UNAVAILABLE":
+      return 503;
+    default:
+      return 500;
+  }
+}
 
 /** P0.3 单飞：相同 period 的 summary 生成共享同一个 in-flight Promise。 */
 const summaryFlight = createSingleFlight<string, ReportRecord>();
@@ -64,6 +84,8 @@ export interface WebServerLike {
 export interface ApiServices extends ReportServices {
   domain: Domain<typeof whaleDomain>;
   ingest: IngestEngine;
+  /** v0.6 Apply & Verify（settings seam 缺失时优雅降级 read-only）。 */
+  apply?: import("./apply/service.js").ApplyService;
 }
 
 /** 后台持久化写失败：bounded 诊断（计数 + 每 10 次采样一条日志），绝不 unhandled rejection。 */
@@ -416,6 +438,100 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                 indexedThrough: meta.indexedThrough,
                 report: withProviderScope(report),
               });
+              return;
+            }
+            // ── v0.6 Apply & Verify（RFC §15；settings seam 缺失 → SETTINGS_UNAVAILABLE）──
+            if (req.method === "POST" && method === "apply/proposals") {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用（settings seam 缺失）" } }); return; }
+              const payload = (await readJsonBody(req)) as { improvementId?: string };
+              try {
+                const proposal = await apply.createProposal({ improvementId: payload.improvementId });
+                if (proposal === null) {
+                  writeJson(res, 422, { ok: false, error: { code: "NOT_APPLICABLE", message: "当前无满足条件的 shell timeout proposal（阈值/归属/设置不可用）" } });
+                  return;
+                }
+                writeJson(res, 200, { ok: true, proposal });
+              } catch (error) {
+                if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }
+                throw error;
+              }
+              return;
+            }
+            if (req.method === "GET" && method.startsWith("apply/proposals/")) {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const id = method.slice("apply/proposals/".length);
+              const proposal = apply.getProposal(id);
+              if (proposal === undefined) { writeJson(res, 404, { ok: false, error: { code: "INVALID_PROPOSAL", message: "提案不存在" } }); return; }
+              writeJson(res, 200, { ok: true, proposal });
+              return;
+            }
+            if (req.method === "POST" && method.startsWith("apply/") && method.endsWith("/approve")) {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const id = method.slice("apply/".length, method.length - "/approve".length);
+              const payload = (await readJsonBody(req)) as { applyId?: string; expectedRevision?: number; expectedValue?: number };
+              try {
+                const { record, already } = await apply.approve({
+                  proposalId: id,
+                  applyId: typeof payload.applyId === "string" && payload.applyId !== "" ? payload.applyId : apply.applyIdFor(id, String(Date.now())),
+                  expectedRevision: Number(payload.expectedRevision ?? -1),
+                  expectedValue: Number(payload.expectedValue ?? Number.NaN),
+                });
+                writeJson(res, 200, { ok: true, already, record });
+              } catch (error) {
+                if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }
+                throw error;
+              }
+              return;
+            }
+            if (req.method === "POST" && method.startsWith("apply/") && method.endsWith("/reject")) {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const id = method.slice("apply/".length, method.length - "/reject".length);
+              try {
+                const proposal = await apply.reject(id);
+                writeJson(res, 200, { ok: true, proposal });
+              } catch (error) {
+                if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }
+                throw error;
+              }
+              return;
+            }
+            if (req.method === "POST" && method.startsWith("apply/") && method.endsWith("/revert")) {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const id = method.slice("apply/".length, method.length - "/revert".length);
+              const payload = (await readJsonBody(req)) as { rollbackId?: string };
+              try {
+                const rollback = await apply.revert({ applyId: id, rollbackId: typeof payload.rollbackId === "string" && payload.rollbackId !== "" ? payload.rollbackId : `rb-${Date.now().toString(36)}` });
+                writeJson(res, 200, { ok: true, rollback });
+              } catch (error) {
+                if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }
+                throw error;
+              }
+              return;
+            }
+            if (req.method === "GET" && method.startsWith("verify/")) {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const applyId = method.slice("verify/".length);
+              try {
+                const result = await apply.verify(applyId);
+                writeJson(res, 200, { ok: true, ...result });
+              } catch (error) {
+                if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }
+                throw error;
+              }
+              return;
+            }
+            if (req.method === "GET" && method === "audit") {
+              const apply = svc.apply;
+              if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
+              const url = new URL(req.url ?? "/", "http://dsh.internal");
+              const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 200)));
+              writeJson(res, 200, { ok: true, events: apply.auditEvents(limit) });
               return;
             }
             if (req.method === "GET" && method === "list") {

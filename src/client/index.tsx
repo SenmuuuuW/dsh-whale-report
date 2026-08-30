@@ -413,6 +413,20 @@ const CSS = `
 }
 [data-whale-report-improvenums] b { color: var(--dt-ink); font-weight: 800; font-variant-numeric: tabular-nums; margin-right: 4px; }
 [data-whale-report-improverec] { margin-top: 4px; font: 400 11px/1.5 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink-soft); }
+[data-whale-report-apply] { margin-top: 8px; border: 1px solid var(--dt-line); border-radius: 10px; padding: 10px 12px; background: var(--dt-surface); }
+[data-whale-report-applyrow] { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: baseline; }
+[data-whale-report-applyrow] span { font: 750 8.5px ui-monospace, monospace; color: var(--dt-faint); letter-spacing: .1em; }
+[data-whale-report-applyrow] p { margin: 0; font: 400 11px/1.55 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-ink-soft); }
+[data-whale-report-applyrow] b { color: var(--dt-ink); font-variant-numeric: tabular-nums; }
+[data-whale-report-applybtn] { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+[data-whale-report-applybtn] button { font: 650 11px ui-sans-serif, system-ui, "PingFang SC", sans-serif; border-radius: 8px; padding: 4px 12px; cursor: pointer; border: 1px solid var(--dt-line); background: var(--dt-surface); color: var(--dt-ink); }
+[data-whale-report-applybtn] button[data-primary] { background: var(--dt-blue); border-color: var(--dt-blue); color: #fff; }
+[data-whale-report-applybtn] button[data-danger] { border-color: var(--dt-danger); color: var(--dt-danger); }
+[data-whale-report-applybtn] button:disabled { opacity: .5; cursor: default; }
+[data-whale-report-applychip] { display: inline-flex; align-items: center; gap: 5px; font: 700 9.5px ui-monospace, monospace; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--dt-line); color: var(--dt-ink-soft); }
+[data-whale-report-applychip][data-status="verified"] { color: var(--dt-cyan-deep); border-color: var(--dt-cyan-deep); }
+[data-whale-report-applychip][data-status="not_improved"], [data-whale-report-applychip][data-status="inconclusive"] { color: var(--dt-amber); border-color: var(--dt-amber); }
+[data-whale-report-applyerr] { margin-top: 6px; font: 400 10.5px/1.5 ui-sans-serif, system-ui, "PingFang SC", sans-serif; color: var(--dt-danger); }
 [data-whale-report-improvedetail] {
   margin-top: 7px; padding: 8px 10px; background: var(--dt-paper-deep);
   border: 1px solid var(--dt-line); border-radius: 8px;
@@ -2088,6 +2102,42 @@ interface ImprovementJson {
   verificationPlan: { targetMetric: string; baseline: number | null; target: string; window: string };
   status: string;
   createdAt: number;
+}
+
+/** v0.6 Apply（服务端确定性；只读展示 + 用户确认的 mutation）。 */
+interface ApplyProposalJson {
+  id: string;
+  improvementId: string;
+  kind: "settings";
+  target: { type: "settings"; ns: string; path: string[] };
+  expectedBefore: number;
+  proposedAfter: number;
+  reason: string;
+  evidence: { timeoutCount: number; timeoutSessions: string[]; shellInvocationCount: number };
+  rollbackPlan: { op: string; path: string[]; value: number };
+  verificationPlan: { target: { value: number }; minimumEvidence: { observations: number; sessions: number } };
+  revisionAtProposal: number;
+  status: string;
+}
+interface ApplyRecordJson {
+  applyId: string;
+  status: string;
+  before: number;
+  after: number;
+  revisionBefore: number;
+  revisionAfter?: number;
+}
+interface VerifyResultJson {
+  status: string;
+  progress: { observations: number; sessions: number };
+  verdictNote?: string;
+  record: {
+    status: string;
+    baseline: { value: number; sampleSize: number; sessions: number } | null;
+    observed: { value: number | null; sampleSize: number; sessions: number } | null;
+    targetValue: number;
+    minimumEvidence: { observations: number; sessions: number };
+  };
 }
 
 interface PrevSummary {
@@ -5397,7 +5447,207 @@ const IMPROVE_METRIC_LABEL: Record<string, string> = {
   nightPct: "夜间",
 };
 
-/** Improve 列表（v0.5：默认 Top 3；点击展开 Evidence / VERIFY）。 */
+/** v0.6 Apply 最小闭环（RFC §14）：Review change → 提案详情 → Apply → OBSERVING → 终态 + Revert。 */
+function ApplyFlow({ item }: { item: ImprovementJson }): ReactNode {
+  const [proposal, setProposal] = useState<ApplyProposalJson | null>(null);
+  const [record, setRecord] = useState<ApplyRecordJson | null>(null);
+  const [verify, setVerify] = useState<VerifyResultJson | null>(null);
+  const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "applied" | "error">("idle");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [nonce] = useState(() => Math.random().toString(36).slice(2, 10));
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearInterval(timerRef.current);
+    },
+    [],
+  );
+
+  const review = async () => {
+    setPhase("loading");
+    setMsg(null);
+    try {
+      const body = await api<{ proposal: ApplyProposalJson }>("apply/proposals", { improvementId: item.id });
+      setProposal(body.proposal);
+      setPhase("ready");
+    } catch (error) {
+      setPhase("error");
+      setMsg(error instanceof Error ? error.message : "无法生成提案");
+    }
+  };
+
+  const pollVerify = (applyId: string) => {
+    const poll = async () => {
+      try {
+        const v = await api<VerifyResultJson>(`verify/${applyId}`);
+        setVerify(v);
+        if (v.status === "verified" || v.status === "not_improved" || v.status === "inconclusive" || v.status === "reverted") {
+          if (timerRef.current !== null) window.clearInterval(timerRef.current);
+        }
+      } catch {
+        // 轮询失败保留上次状态
+      }
+    };
+    void poll();
+    timerRef.current = window.setInterval(() => void poll(), 10_000);
+  };
+
+  const apply = async () => {
+    if (proposal === null) return;
+    setPhase("loading");
+    setMsg(null);
+    try {
+      const body = await api<{ record: ApplyRecordJson }>(`apply/${proposal.id}/approve`, {
+        applyId: `${proposal.id}::${nonce}`,
+        expectedRevision: proposal.revisionAtProposal,
+        expectedValue: proposal.expectedBefore,
+      });
+      setRecord(body.record);
+      setPhase("applied");
+      pollVerify(body.record.applyId);
+    } catch (error) {
+      setPhase("error");
+      setMsg(error instanceof Error ? error.message : "Apply 失败");
+    }
+  };
+
+  const cancel = async () => {
+    if (proposal === null) return;
+    try {
+      await api(`apply/${proposal.id}/reject`, {});
+    } catch {
+      // 拒绝失败可忽略（无 mutation）
+    }
+    setProposal(null);
+    setRecord(null);
+    setVerify(null);
+    setPhase("idle");
+    setMsg(null);
+  };
+
+  const revert = async () => {
+    if (record === null) return;
+    setPhase("loading");
+    setMsg(null);
+    try {
+      await api(`apply/${record.applyId}/revert`, { rollbackId: `rb-${Date.now().toString(36)}` });
+      setVerify((v) => (v === null ? v : { ...v, status: "reverted" }));
+      setPhase("applied");
+    } catch (error) {
+      setPhase("error");
+      setMsg(error instanceof Error ? error.message : "回滚失败");
+    }
+  };
+
+  const fmtMs = (ms: number): string => (ms >= 60_000 ? `${Math.round(ms / 1000 / 60)}min` : `${Math.round(ms / 1000)}s`);
+
+  if (phase === "idle") {
+    return (
+      <div data-whale-report-applybtn>
+        <button onClick={() => void review()}>Review change</button>
+      </div>
+    );
+  }
+  if (phase === "loading") {
+    return (
+      <div data-whale-report-applybtn>
+        <button disabled>处理中…</button>
+      </div>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <div>
+        <div data-whale-report-applyerr>{msg ?? "未知错误"}</div>
+        <div data-whale-report-applybtn>
+          <button onClick={() => void review()}>重试</button>
+          <button onClick={cancel}>关闭</button>
+        </div>
+      </div>
+    );
+  }
+  if (phase === "ready" && proposal !== null) {
+    const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
+    return (
+      <div data-whale-report-apply>
+        <div data-whale-report-applyrow>
+          <span>PROBLEM</span>
+          <p>{proposal.reason}</p>
+        </div>
+        <div data-whale-report-applyrow>
+          <span>EVIDENCE</span>
+          <p>
+            {proposal.evidence.timeoutCount} 次确定性 timeout · {proposal.evidence.timeoutSessions.length} 个会话 ·{" "}
+            {proposal.evidence.shellInvocationCount} 次 shell 调用
+          </p>
+        </div>
+        <div data-whale-report-applyrow>
+          <span>CHANGE</span>
+          <p>
+            shell.timeoutMs <b>{fmtMs(proposal.expectedBefore)}</b> → <b>{fmtMs(proposal.proposedAfter)}</b>
+          </p>
+        </div>
+        <div data-whale-report-applyrow>
+          <span>EXPECTED</span>
+          <p>shell_timeout_rate ≤ {pct(proposal.verificationPlan.target.value)}（样本 ≥{proposal.verificationPlan.minimumEvidence.observations} 次调用 / ≥{proposal.verificationPlan.minimumEvidence.sessions} 会话）</p>
+        </div>
+        <div data-whale-report-applyrow>
+          <span>ROLLBACK</span>
+          <p>一键还原为 <b>{fmtMs(proposal.rollbackPlan.value)}</b>（并发安全）</p>
+        </div>
+        <div data-whale-report-applybtn>
+          <button data-primary onClick={() => void apply()}>Apply</button>
+          <button onClick={() => void cancel()}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+  // applied / 终态
+  const vStatus = verify?.status ?? "observing";
+  const chip =
+    vStatus === "reverted"
+      ? "REVERTED"
+      : vStatus === "verified"
+        ? "VERIFIED"
+        : vStatus === "not_improved"
+          ? "NOT IMPROVED"
+          : vStatus === "inconclusive"
+            ? "INCONCLUSIVE"
+            : "OBSERVING";
+  return (
+    <div data-whale-report-apply>
+      <div data-whale-report-applyrow>
+        <span>STATUS</span>
+        <p>
+          <span data-whale-report-applychip data-status={vStatus}>{chip}</span>
+          {verify !== null && verify.record.observed !== null && (
+            <> · shell_timeout_rate {(verify.record.observed.value ?? 0) * 100 > 0 ? `${((verify.record.observed.value ?? 0) * 100).toFixed(2)}%` : "—"} · 样本 {verify.progress.observations}/{verify.record.minimumEvidence?.observations ?? "?"}</>
+          )}
+        </p>
+      </div>
+      {verify?.verdictNote !== undefined && (
+        <div data-whale-report-applyrow>
+          <span>VERIFY</span>
+          <p>{verify.verdictNote}</p>
+        </div>
+      )}
+      {verify?.record.observed !== null && (
+        <div data-whale-report-applyrow>
+          <span>OBSERVED</span>
+          <p>基线 {(verify?.record.baseline?.value ?? 0) * 100 > 0 ? `${((verify?.record.baseline?.value ?? 0) * 100).toFixed(2)}%` : "—"} → 观察 {(verify?.record.observed?.value ?? 0) * 100 > 0 ? `${((verify?.record.observed?.value ?? 0) * 100).toFixed(2)}%` : "—"}（目标 ≤{((verify?.record.targetValue ?? 0) * 100).toFixed(2)}%）</p>
+        </div>
+      )}
+      {(vStatus === "not_improved" || vStatus === "inconclusive") && (
+        <div data-whale-report-applybtn>
+          <button data-danger onClick={() => void revert()}>Revert（恢复原值）</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Improve 列表（v0.5：默认 Top 3；点击展开 Evidence / VERIFY；v0.6：Review change → Apply）。 */
 function ImproveSection({ items }: { items: ImprovementJson[] }): ReactNode {
   const [openId, setOpenId] = useState<string | null>(null);
   const top = items.slice(0, 3);
@@ -5430,6 +5680,7 @@ function ImproveSection({ items }: { items: ImprovementJson[] }): ReactNode {
                 ))}
               </div>
               <div data-whale-report-improverec>建议 · {it.recommendation}</div>
+              <ApplyFlow item={it} />
               {open && (
                 <div data-whale-report-improvedetail>
                   <div data-whale-report-improverow>

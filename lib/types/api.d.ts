@@ -26,6 +26,8 @@ export interface WebServerLike {
 export interface ApiServices extends ReportServices {
     domain: Domain<typeof whaleDomain>;
     ingest: IngestEngine;
+    /** v0.6 Apply & Verify（settings seam 缺失时优雅降级 read-only）。 */
+    apply?: import("./apply/service.js").ApplyService;
 }
 /** 鲸鱼娘素材路由：白名单文件名，防路径穿越。 */
 export declare function registerAssetRoutes(ctx: Context, server: WebServerLike): void;

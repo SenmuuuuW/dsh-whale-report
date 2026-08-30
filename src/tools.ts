@@ -100,7 +100,7 @@ export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (i
 }
 
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 16;
+export const INDEX_VERSION = 17;
 
 /**
  * 索引新鲜度（P0.2）：不再用"缓存年龄 TTL"判定 —— 历史会话在文件未变化时

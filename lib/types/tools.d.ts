@@ -81,7 +81,7 @@ export interface ToolsHost {
 /** 有限并发映射：报告生成要读几十个会话的完整日志，串行太慢。 */
 export declare function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]>;
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export declare const INDEX_VERSION = 16;
+export declare const INDEX_VERSION = 17;
 /**
  * 索引新鲜度（P0.2）：不再用"缓存年龄 TTL"判定 —— 历史会话在文件未变化时
  * 必须复用索引，避免每 10 分钟全量重放。

@@ -74,6 +74,173 @@ export declare const PeriodStatsSchema: z.ZodObject<{
     skippedCount: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type PeriodStatsRecord = z.infer<typeof PeriodStatsSchema>;
+/** v0.6 Apply（RFC §7）：只允许 settings shell.timeoutMs 单字段提案。 */
+export declare const ApplyProposalSchema: z.ZodObject<{
+    id: z.ZodString;
+    improvementId: z.ZodString;
+    kind: z.ZodLiteral<"settings">;
+    target: z.ZodObject<{
+        type: z.ZodLiteral<"settings">;
+        ns: z.ZodLiteral<"shell">;
+        path: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>;
+    expectedBefore: z.ZodNumber;
+    proposedAfter: z.ZodNumber;
+    diff: z.ZodObject<{
+        op: z.ZodLiteral<"set">;
+        path: z.ZodArray<z.ZodString>;
+        before: z.ZodNumber;
+        after: z.ZodNumber;
+    }, z.core.$strip>;
+    reason: z.ZodString;
+    evidence: z.ZodObject<{
+        metrics: z.ZodRecord<z.ZodString, z.ZodNumber>;
+        affectedSessions: z.ZodArray<z.ZodString>;
+        occurrences: z.ZodNumber;
+        confidence: z.ZodNumber;
+        timeoutCount: z.ZodNumber;
+        shellInvocationCount: z.ZodNumber;
+        timeoutSessions: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>;
+    risk: z.ZodEnum<{
+        low: "low";
+        medium: "medium";
+        high: "high";
+    }>;
+    reversible: z.ZodLiteral<true>;
+    rollbackPlan: z.ZodObject<{
+        op: z.ZodLiteral<"set">;
+        path: z.ZodArray<z.ZodString>;
+        value: z.ZodNumber;
+    }, z.core.$strip>;
+    verificationPlan: z.ZodObject<{
+        metric: z.ZodLiteral<"shell_timeout_rate">;
+        scope: z.ZodObject<{
+            tools: z.ZodArray<z.ZodString>;
+        }, z.core.$strip>;
+        baseline: z.ZodObject<{
+            value: z.ZodNumber;
+            evidenceWindow: z.ZodObject<{
+                from: z.ZodNumber;
+                to: z.ZodNumber;
+            }, z.core.$strip>;
+            sampleSize: z.ZodNumber;
+            sessions: z.ZodNumber;
+        }, z.core.$strip>;
+        target: z.ZodObject<{
+            operator: z.ZodLiteral<"<=">;
+            value: z.ZodNumber;
+        }, z.core.$strip>;
+        minimumEvidence: z.ZodObject<{
+            observations: z.ZodNumber;
+            sessions: z.ZodNumber;
+        }, z.core.$strip>;
+        cooldownMs: z.ZodNumber;
+        maxObservationWindowMs: z.ZodNumber;
+        baselineLookbackMs: z.ZodNumber;
+    }, z.core.$strip>;
+    revisionAtProposal: z.ZodNumber;
+    createdAt: z.ZodNumber;
+    status: z.ZodEnum<{
+        proposed: "proposed";
+        approved: "approved";
+        applied: "applied";
+        rejected: "rejected";
+        failed: "failed";
+        conflicted: "conflicted";
+        superseded: "superseded";
+    }>;
+}, z.core.$strip>;
+export declare const ApplyRecordSchema: z.ZodObject<{
+    applyId: z.ZodString;
+    proposalId: z.ZodString;
+    improvementId: z.ZodString;
+    target: z.ZodObject<{
+        type: z.ZodLiteral<"settings">;
+        ns: z.ZodLiteral<"shell">;
+        path: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>;
+    before: z.ZodNumber;
+    after: z.ZodNumber;
+    revisionBefore: z.ZodNumber;
+    revisionAfter: z.ZodOptional<z.ZodNumber>;
+    appliedAt: z.ZodOptional<z.ZodNumber>;
+    status: z.ZodEnum<{
+        applied: "applied";
+        failed: "failed";
+        conflicted: "conflicted";
+        prepared: "prepared";
+        mutating: "mutating";
+    }>;
+    idempotencyKey: z.ZodString;
+    rollback: z.ZodObject<{
+        available: z.ZodBoolean;
+        status: z.ZodEnum<{
+            conflicted: "conflicted";
+            none: "none";
+            reverted: "reverted";
+        }>;
+    }, z.core.$strip>;
+    lastErrorCode: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export declare const VerifyRecordSchema: z.ZodObject<{
+    applyId: z.ZodString;
+    proposalId: z.ZodString;
+    metric: z.ZodLiteral<"shell_timeout_rate">;
+    status: z.ZodEnum<{
+        reverted: "reverted";
+        observing: "observing";
+        verified: "verified";
+        not_improved: "not_improved";
+        inconclusive: "inconclusive";
+    }>;
+    baseline: z.ZodNullable<z.ZodObject<{
+        value: z.ZodNumber;
+        sampleSize: z.ZodNumber;
+        sessions: z.ZodNumber;
+        window: z.ZodObject<{
+            from: z.ZodNumber;
+            to: z.ZodNumber;
+        }, z.core.$strip>;
+    }, z.core.$strip>>;
+    observed: z.ZodNullable<z.ZodObject<{
+        value: z.ZodNullable<z.ZodNumber>;
+        sampleSize: z.ZodNumber;
+        sessions: z.ZodNumber;
+        window: z.ZodObject<{
+            from: z.ZodNumber;
+            to: z.ZodNumber;
+        }, z.core.$strip>;
+    }, z.core.$strip>>;
+    targetValue: z.ZodNumber;
+    minimumEvidence: z.ZodObject<{
+        observations: z.ZodNumber;
+        sessions: z.ZodNumber;
+    }, z.core.$strip>;
+    cooldownMs: z.ZodNumber;
+    maxObservationWindowMs: z.ZodNumber;
+    appliedAt: z.ZodNumber;
+    createdAt: z.ZodNumber;
+    updatedAt: z.ZodNumber;
+    verdictAt: z.ZodOptional<z.ZodNumber>;
+    verdict: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export declare const AuditEventSchema: z.ZodObject<{
+    id: z.ZodString;
+    ts: z.ZodNumber;
+    applyId: z.ZodOptional<z.ZodString>;
+    improvementId: z.ZodOptional<z.ZodString>;
+    target: z.ZodOptional<z.ZodObject<{
+        ns: z.ZodString;
+        path: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>;
+    action: z.ZodString;
+    result: z.ZodEnum<{
+        error: "error";
+        ok: "ok";
+    }>;
+    code: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const whaleDomain: {
     name: string;
     version: number;
@@ -139,6 +306,141 @@ export declare const whaleDomain: {
             retryBursts: number;
             activeDays: number;
             skippedCount?: number | undefined;
+        }>;
+        apply_proposals: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            id: string;
+            improvementId: string;
+            kind: "settings";
+            target: {
+                type: "settings";
+                ns: "shell";
+                path: string[];
+            };
+            expectedBefore: number;
+            proposedAfter: number;
+            diff: {
+                op: "set";
+                path: string[];
+                before: number;
+                after: number;
+            };
+            reason: string;
+            evidence: {
+                metrics: Record<string, number>;
+                affectedSessions: string[];
+                occurrences: number;
+                confidence: number;
+                timeoutCount: number;
+                shellInvocationCount: number;
+                timeoutSessions: string[];
+            };
+            risk: "low" | "medium" | "high";
+            reversible: true;
+            rollbackPlan: {
+                op: "set";
+                path: string[];
+                value: number;
+            };
+            verificationPlan: {
+                metric: "shell_timeout_rate";
+                scope: {
+                    tools: string[];
+                };
+                baseline: {
+                    value: number;
+                    evidenceWindow: {
+                        from: number;
+                        to: number;
+                    };
+                    sampleSize: number;
+                    sessions: number;
+                };
+                target: {
+                    operator: "<=";
+                    value: number;
+                };
+                minimumEvidence: {
+                    observations: number;
+                    sessions: number;
+                };
+                cooldownMs: number;
+                maxObservationWindowMs: number;
+                baselineLookbackMs: number;
+            };
+            revisionAtProposal: number;
+            createdAt: number;
+            status: "proposed" | "approved" | "applied" | "rejected" | "failed" | "conflicted" | "superseded";
+        }>;
+        apply_records: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            applyId: string;
+            proposalId: string;
+            improvementId: string;
+            target: {
+                type: "settings";
+                ns: "shell";
+                path: string[];
+            };
+            before: number;
+            after: number;
+            revisionBefore: number;
+            status: "applied" | "failed" | "conflicted" | "prepared" | "mutating";
+            idempotencyKey: string;
+            rollback: {
+                available: boolean;
+                status: "conflicted" | "none" | "reverted";
+            };
+            revisionAfter?: number | undefined;
+            appliedAt?: number | undefined;
+            lastErrorCode?: string | undefined;
+        }>;
+        verify_records: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            applyId: string;
+            proposalId: string;
+            metric: "shell_timeout_rate";
+            status: "reverted" | "observing" | "verified" | "not_improved" | "inconclusive";
+            baseline: {
+                value: number;
+                sampleSize: number;
+                sessions: number;
+                window: {
+                    from: number;
+                    to: number;
+                };
+            } | null;
+            observed: {
+                value: number | null;
+                sampleSize: number;
+                sessions: number;
+                window: {
+                    from: number;
+                    to: number;
+                };
+            } | null;
+            targetValue: number;
+            minimumEvidence: {
+                observations: number;
+                sessions: number;
+            };
+            cooldownMs: number;
+            maxObservationWindowMs: number;
+            appliedAt: number;
+            createdAt: number;
+            updatedAt: number;
+            verdictAt?: number | undefined;
+            verdict?: string | undefined;
+        }>;
+        audit_log: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, {
+            id: string;
+            ts: number;
+            action: string;
+            result: "error" | "ok";
+            applyId?: string | undefined;
+            improvementId?: string | undefined;
+            target?: {
+                ns: string;
+                path: string[];
+            } | undefined;
+            code?: string | undefined;
         }>;
     };
 };

@@ -46,7 +46,7 @@ describe("IngestEngine firehose", () => {
     await boot;
     const entry = index.get("s-live")!;
     // 基线 2 事件 + buffered seq 3（seq 1/2 去重）
-    expect(entry.v).toBe(16);
+    expect(entry.v).toBe(17);
     expect(entry.lastSeq).toBe(3);
     // steady-state：seq 4 增量
     ingest.handleEvent("s-live", { type: "turn/start", seq: 4, time: 4000, data: {} });

@@ -121,6 +121,10 @@ export interface ReportStats {
   tokens: TokenTotals;
   /** 各工具被调用次数。 */
   toolCalls: Record<string, number>;
+  /** v0.6（INDEX_VERSION 17）：按工具的确定性 timeout 计数（§29-A 双路径检测器；只存 tool identity + count）。 */
+  toolTimeouts: Record<string, number>;
+  /** v0.6（INDEX_VERSION 17）：tool → 出现 timeout 的会话 id（Proposal ≥3 会话阈值用；只存 id）。 */
+  toolTimeoutSessions: Record<string, string[]>;
   toolCallsTotal: number;
   /** tool/result 里的失败次数。 */
   toolErrors: number;
@@ -383,6 +387,40 @@ function errorCodeOf(data: Record<string, unknown>): string {
   return "UNKNOWN";
 }
 
+/**
+ * v0.6 timeout 检测器（§29-A，确定性双路径，禁止模糊语义匹配）：
+ * - Path A: error.code === 'TOOL_TIMEOUT'（host timeout-policy wrapper 路径）
+ * - Path B: tool/result content 精确匹配 /\[timed out after \d+ms\]/
+ *           （executor 预算路径：bash-local 渲染的常量标记，Phase 0.5 实测 41 例）
+ * 不匹配 substring "timeout" 的任何其他形态。
+ * 注意真实事件形态：文本嵌套在 content[].{type:"tool-result"}.content[].text 里，
+ * 检测器做结构化递归（绝不模糊全文匹配）。
+ */
+export const TIMED_OUT_MARKER_RE = /\[timed out after \d+ms\]/;
+
+function textBlocksOf(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  const texts: string[] = [];
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const b = block as Record<string, unknown>;
+    if (typeof b.text === "string") texts.push(b.text);
+    const nested = b.content;
+    if (typeof nested === "string") texts.push(nested);
+    else if (Array.isArray(nested)) texts.push(...textBlocksOf(nested));
+  }
+  return texts;
+}
+
+export function isTimeoutResult(data: Record<string, unknown> | undefined): boolean {
+  if (typeof data !== "object" || data === null) return false;
+  if (errorCodeOf(data) === "TOOL_TIMEOUT") return true;
+  const msg = data.message;
+  if (typeof msg !== "object" || msg === null) return false;
+  return textBlocksOf((msg as Record<string, unknown>).content).some((t) => TIMED_OUT_MARKER_RE.test(t));
+}
+
 /** 协作信号聚合（报告级）。 */
 export interface CollabSignals {
   /** 用户消息总数。 */
@@ -517,6 +555,8 @@ export function emptyStats(period: Period): ReportStats {
     assistantMessages: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
     toolCalls: {},
+    toolTimeouts: {},
+    toolTimeoutSessions: {},
     toolCallsTotal: 0,
     toolErrors: 0,
     commands: 0,
@@ -942,6 +982,14 @@ export function aggregate(
             const duration = event.time - pair.time;
             if (duration >= 0) acc.durations.push(duration);
             toolHealthAcc.set(pair.name, acc);
+            // v0.6 timeout contribution（§29-A）：独立于 toolHealth.failed 语义的新统计。
+            // bash 预算超时文本结果 isError=false，保持不计入 failed（§29-B）；此处只记 timeout。
+            if (isTimeoutResult(data as Record<string, unknown> | undefined)) {
+              stats.toolTimeouts[pair.name] = (stats.toolTimeouts[pair.name] ?? 0) + 1;
+              let sess = stats.toolTimeoutSessions[pair.name];
+              if (sess === undefined) { sess = []; stats.toolTimeoutSessions[pair.name] = sess; }
+              if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+            }
           }
         }
         // 记录错误摘要供重试诊断（只保留前 120 字符）。
@@ -1095,6 +1143,10 @@ export interface HourBucket {
   reasoning: number;
   toolCallsTotal: number;
   toolCalls: Record<string, number>;
+  /** v0.6（INDEX_VERSION 17）：按工具的 timeout 计数（tool identity + count；无 command/content）。 */
+  toolTimeouts?: Record<string, number>;
+  /** v0.6（INDEX_VERSION 17）：tool → timeout 会话 id（去重列表，上限 32）。 */
+  toolTimeoutSessions?: Record<string, string[]>;
   toolErrors: number;
   commands: number;
   /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */
@@ -1162,6 +1214,8 @@ function newBucket(h: number): HourBucket {
     reasoning: 0,
     toolCallsTotal: 0,
     toolCalls: {},
+    toolTimeouts: {},
+    toolTimeoutSessions: {},
     toolErrors: 0,
     commands: 0,
     danger: [],
@@ -1396,6 +1450,15 @@ export function createOwnEventBucketizer(
             }
             const duration = event.time - pair.time;
             if (duration >= 0) acc.durations.push(duration);
+            // v0.6 timeout contribution（§29-A）：独立于 toolHealth.failed 语义的新统计。
+            if (isTimeoutResult(data as Record<string, unknown> | undefined)) {
+              const tt = (bucket.toolTimeouts ??= {});
+              tt[pair.name] = (tt[pair.name] ?? 0) + 1;
+              const tts = (bucket.toolTimeoutSessions ??= {});
+              let sess = tts[pair.name];
+              if (sess === undefined) { sess = []; tts[pair.name] = sess; }
+              if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+            }
           }
         }
         const content = (data?.message as Record<string, unknown> | undefined)?.content;
@@ -1717,6 +1780,17 @@ export function aggregateBuckets(
           for (const sid of failed) target.failedSessions.add(sid);
         }
         toolHealthMerged.set(name, target);
+      }
+      // v0.6 timeout contribution（§29-B）：按工具合并（与 toolCalls 同裁剪语义）。
+      for (const [tool, n] of Object.entries(bucket.toolTimeouts ?? {})) {
+        stats.toolTimeouts[tool] = (stats.toolTimeouts[tool] ?? 0) + n;
+      }
+      for (const [tool, sess] of Object.entries(bucket.toolTimeoutSessions ?? {})) {
+        let target = stats.toolTimeoutSessions[tool];
+        if (target === undefined) { target = []; stats.toolTimeoutSessions[tool] = target; }
+        for (const sid of sess) {
+          if (target.length < 32 && !target.includes(sid)) target.push(sid);
+        }
       }
       // Improve 证据：人工纠正（会话级去重；与 direct 路径同口径）。
       for (const c of bucket.corrections ?? []) {

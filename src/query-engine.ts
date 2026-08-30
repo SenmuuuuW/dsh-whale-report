@@ -8,6 +8,7 @@
 import { aggregateBuckets, emptyPartial, type RawSessionHeader, type ReportStats, type SessionBucketView } from "./stats.js";
 import type { SessionIndexRecord } from "./state.js";
 import type { PeriodSpec } from "./period.js";
+import { INDEX_VERSION } from "./tools.js";
 
 export interface QueryIndex {
   get(key: string): SessionIndexRecord | undefined;
@@ -33,7 +34,7 @@ export function queryPeriod(index: QueryIndex, spec: PeriodSpec, headers: RawSes
   let missing = 0;
   for (const h of headers) {
     const entry = index.get(h.id);
-    if (entry === undefined || entry.v !== 16 || !Array.isArray(entry.buckets)) {
+    if (entry === undefined || entry.v !== INDEX_VERSION || !Array.isArray(entry.buckets)) {
       missing += 1;
       continue;
     }
