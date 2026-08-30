@@ -2,6 +2,50 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.6.0] - 2026-08-30
+
+### Apply
+
+- First user-approved controlled mutation
+- shell.timeoutMs proposal for repeated bash timeouts
+- structured before/after diff
+- optimistic concurrency
+- idempotent execution
+- safe rollback
+- CONFIG_CHANGED protection
+
+### Verify
+
+- shell_timeout_rate deterministic metric
+- exact pre/post windows
+- cooldown and minimum evidence
+- VERIFIED / NOT_IMPROVED / INCONCLUSIVE
+- no automatic rollback
+
+### Safety
+
+- allowlisted settings adapter
+- server-side proposal is mutation truth
+- cross-origin browser mutation fence
+- append-only audit trail
+- crash reconciliation
+- rejected/stale proposals cannot be reused
+
+### Observability
+
+- timeout-only operational evidence
+- TOOL_TIMEOUT + exact bash timed-out marker
+- exact timeout edge accounting
+- INDEX_VERSION 17
+
+### Validation
+
+- 393 tests
+- real isolated DSH settings roundtrip
+- exact timeout oracle
+- security acceptance
+- restart reconciliation
+
 ## [0.5.4] - 2026-08-29
 
 ### Pricing

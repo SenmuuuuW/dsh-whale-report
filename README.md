@@ -83,7 +83,7 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
   </tr>
 </table>
 
-一次报告，走完整个闭环；IMPROVE 的输出带 VERIFY 基线 → 目标，为后续自动回验（Apply / self-healing）预留。
+一次报告，走完整个闭环；IMPROVE 的输出带 VERIFY 基线 → 目标。v0.6 起，用户批准后可 Apply 唯一受控修改（Repeated bash timeout → `shell.timeoutMs`），随后自动回验；self-healing 不在范围内。
 
 ## Product
 
@@ -115,7 +115,7 @@ DeepTrace 架构是一句话：**INGEST ONCE → QUERY MANY**。会话事件只�
 - 窗口边界逐事件精确过滤（无比例近似），Raw Oracle 对账 costDiff = 0.0000
 - 统计与周期口径统一 Asia/Shanghai（不依赖机器时区）
 
-当前 version：**v0.5.4**（官方兼容基线 DSH 0.1.1-rc.2）
+当前 version：**v0.6.0-rc.1**（官方兼容基线 DSH 0.1.1-rc.2）
 
 ## Performance
 
@@ -126,6 +126,54 @@ Benchmarked on the real production dataset used during v0.5.3 acceptance; result
 | Refresh / Overview | ~31s（重放 + 重新聚合 session） | ~7ms median（纯索引查询） |
 | Live session | ~6.5s（每 30s 整读） | <1ms steady state（增量维护） |
 | Refresh ×100 压测 | — | p95 8.3ms / max 11.3ms |
+
+## Apply & Verify
+
+DeepTrace 不再只告诉你哪里有问题。对于**少量、明确、可回滚的安全修改**，它可以在用户批准后执行改变，然后用之后的新会话数据验证是否真的改善。
+
+```
+IMPROVE → REVIEW CHANGE → APPLY → OBSERVE → VERIFY → OPTIONAL REVERT
+```
+
+- **默认只读**：DeepTrace 永远先只产出建议与证据
+- **每次 Apply 都需要用户明确批准**（Review change → Apply）
+- 当前 v0.6 只支持一个受控修改：**Repeated bash timeout → `shell.timeoutMs` 调整**
+- 不支持任意配置修改、不支持 arbitrary shell / code mutation、不自动 rollback、不 self-healing
+
+### 示例
+
+```
+PROBLEM    Repeated Shell Timeouts
+EVIDENCE   6 次确定性 timeout / 3 个会话（0 硬失败）
+CHANGE     shell.timeoutMs  60s → 120s
+EXPECTED   shell_timeout_rate 下降
+ROLLBACK   一键还原 60s（并发安全）
+```
+
+批准后进入 OBSERVING；满足最低证据后输出 **VERIFIED / NOT IMPROVED / INCONCLUSIVE**。NOT IMPROVED 只推荐 Revert，绝不自动回滚。
+
+### Safety / Controlled mutations
+
+所有 Apply 只来自 **predefined structured mutation schema**；当前 allowlist 为 `shell.timeoutMs`。每次 mutation：
+
+- **server-side stored proposal** 是 mutation truth（客户端无法提交 namespace / path / before / after / patch）
+- resolved current value + revision/value 乐观并发守卫（外部改动 → `CONFIG_CHANGED`，绝不覆盖）
+- 幂等 applyId（双击 / 重放只执行一次）
+- rollback 守卫（仅 `current == after` 才允许回滚）
+- append-only audit trail（只存路径与错误码，无 command / session 正文 / secret）
+
+Browser cross-origin mutation requests are fenced（cross-site / foreign Origin / null Origin / host rebinding 全部拒绝）；按 DSH trust semantics，trusted loopback 本地客户端仍可调用 API——真实的 mutation authorization 依赖上述 proposal + allowlist + 并发守卫 + 幂等，而非“只有 UI 按钮可以调用”。
+
+### Verify
+
+Verify 使用 **exact before/after windows**，以 Apply 时刻为切点：
+
+- metric：`shell_timeout_rate`（bash timeout / bash invocation）
+- baseline：Apply 前的精确窗口
+- cooldown：Apply 后 10 分钟（排除在途旧预算调用）
+- observation：Apply + cooldown 之后
+- minimum evidence：≥10 次 shell 调用、≥3 个会话
+- outcomes：**VERIFIED / NOT IMPROVED / INCONCLUSIVE**；NOT IMPROVED 仅 REVERT RECOMMENDED
 
 ## What it measures
 
@@ -169,7 +217,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 | Repeated User Correction（EXPERIMENTAL） | 同类纠正跨 ≥2 会话（只在第 2+ 条用户消息统计，首条消息是初始需求不算） | 建议 + 类别 + 计数 |
 | Peak Cost Opportunity | 高峰占 ≥50% 且 ≥¥3，且有夜间批量负载证据 | 建议 + 可省金额 |
 
-每条建议都带 **evidence**（metrics / affectedSessions / 置信度）与 **verificationPlan**（目标指标、基线 → 目标、窗口），排序 severity → score → occurrences → category；同一目标跨周期 id 稳定。全部本地确定性规则，**0 额外 LLM token**；Apply / self-healing 为后续版本预留（v0.5 只落 DETECTED / DISMISSED）。
+每条建议都带 **evidence**（metrics / affectedSessions / 置信度）与 **verificationPlan**（目标指标、基线 → 目标、窗口），排序 severity → score → occurrences → category；同一目标跨周期 id 稳定。全部本地确定性规则，**0 额外 LLM token**（v0.5 只落 DETECTED / DISMISSED；v0.6 起支持用户批准的 Apply 与自动 Verify，self-healing 仍不支持）。
 
 **协作复盘（COLLABORATION REVIEW）**：观察人机协作模式——需求漂移 / 迟到约束 / 上下文碎片化，最多 3 条，样本不足不展示；语气是"找摩擦、给可尝试的优化"，不评价人格、不把技术 retry 归因为沟通问题。
 
@@ -214,7 +262,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。**v0.5.4 的官方兼容基线是 DSH 0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.6.0-rc.1 的官方兼容基线是 DSH 0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -226,7 +274,7 @@ dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
 **② npm 包安装（仅依赖）** —— 把包装进你的项目：
 
 ```sh
-npm install dsh-whale-report@0.5.4
+npm install dsh-whale-report@0.6.0-rc.1
 ```
 
 > 注意：`npm install` 只是安装包本身，**不会自动注册为 DSH 插件**。Web UI、`whale_report` 工具与实时计费都需要通过方式 ① 注册；方式 ② 适合直接 import 报告引擎 / 用 CLI 生成报告的场景。
@@ -279,7 +327,7 @@ pnpm build      # tsc + tsdown（客户端单文件 bundle）
 
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
 - **费用为估算**：按官方峰谷价分段估算，以平台账单为准
-- **IMPROVE 为只读建议**：v0.5.0 只落 DETECTED / DISMISSED 与 VERIFY 计划；Apply / self-healing / 自动 Verify 闭环**未实现**（后续版本）；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
+- **IMPROVE 默认只读**：只落 DETECTED / DISMISSED 与 VERIFY 计划；v0.6 起 Apply 需用户逐次批准（仅 Repeated bash timeout → `shell.timeoutMs` 一个受控修改），自动 Verify 闭环已实现；self-healing / 自动 rollback **永不支持**；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
 - **PNG 主报告导出暂不含 IMPROVE 区**（HTML / PDF / markdown / 面板已含）
 
 ## License
