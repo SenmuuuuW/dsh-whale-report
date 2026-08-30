@@ -38,7 +38,11 @@ export async function evaluateVerify(
   const now = deps.now === undefined ? Date.now() : deps.now();
   const vr = store.verifyTable.get(input.applyId) as VerifyRecord | undefined;
   if (vr === undefined) throw new ApplyError(APPLY_ERROR_CODES.INVALID_PROPOSAL, "verify record not found");
-  if (vr.status === "reverted") return { record: vr, status: vr.status, progress: { observations: 0, sessions: 0, window: null } };
+  // Phase 1.6：终态不可变 —— VERIFIED / NOT_IMPROVED / INCONCLUSIVE / REVERTED 为 terminal，
+  // 重复 verify 不得重算窗口、不得改写历史 verdict（重新评估 = 新 cycle / 新记录）。
+  if (vr.status === "verified" || vr.status === "not_improved" || vr.status === "inconclusive" || vr.status === "reverted") {
+    return { record: vr, status: vr.status, progress: { observations: 0, sessions: 0, window: null } };
+  }
 
   // After 窗口: [appliedAt + cooldown, now)。
   const afterFrom = vr.appliedAt + vr.cooldownMs;

@@ -2102,6 +2102,8 @@ interface ImprovementJson {
   verificationPlan: { targetMetric: string; baseline: number | null; target: string; window: string };
   status: string;
   createdAt: number;
+  /** v0.6（Phase 1.5）：failure / timeout / failure+timeout（缺省 = failure）。 */
+  reasonKind?: string;
 }
 
 /** v0.6 Apply（服务端确定性；只读展示 + 用户确认的 mutation）。 */
@@ -5441,6 +5443,9 @@ const IMPROVE_METRIC_LABEL: Record<string, string> = {
   p95Ms: "P95",
   bursts: "重试",
   corrections: "纠正",
+  timeouts: "超时",
+  timeoutRate: "超时率",
+  hardFailures: "硬失败",
   peakCost: "高峰成本",
   peakRatio: "高峰占比",
   avoidableCost: "可省",
@@ -5499,9 +5504,7 @@ function ApplyFlow({ item }: { item: ImprovementJson }): ReactNode {
     setMsg(null);
     try {
       const body = await api<{ record: ApplyRecordJson }>(`apply/${proposal.id}/approve`, {
-        applyId: `${proposal.id}::${nonce}`,
-        expectedRevision: proposal.revisionAtProposal,
-        expectedValue: proposal.expectedBefore,
+        applyId: `${proposal.id}::${nonce}`, // 唯一客户端元数据（幂等键）；mutation truth 全在服务端提案
       });
       setRecord(body.record);
       setPhase("applied");

@@ -111,6 +111,8 @@ export interface ReportStats {
     toolTimeouts: Record<string, number>;
     /** v0.6（INDEX_VERSION 17）：tool → 出现 timeout 的会话 id（Proposal ≥3 会话阈值用；只存 id）。 */
     toolTimeoutSessions: Record<string, string[]>;
+    /** v0.6（INDEX_VERSION 17）：tool → 发起过调用的会话 id（Verify ≥3 会话证据用；只存 id）。 */
+    toolInvocationSessions: Record<string, string[]>;
     toolCallsTotal: number;
     /** tool/result 里的失败次数。 */
     toolErrors: number;
@@ -375,6 +377,8 @@ export interface HourBucket {
     toolTimeouts?: Record<string, number>;
     /** v0.6（INDEX_VERSION 17）：tool → timeout 会话 id（去重列表，上限 32）。 */
     toolTimeoutSessions?: Record<string, string[]>;
+    /** v0.6（INDEX_VERSION 17）：tool → 调用会话 id（去重列表，上限 32；Verify 会话证据）。 */
+    toolInvocationSessions?: Record<string, string[]>;
     toolErrors: number;
     commands: number;
     /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */
@@ -421,10 +425,10 @@ export interface HourBucket {
         sessionId: string;
     }[];
     /**
-     * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5），供 [from,to) 精确过滤。
+     * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5、k 7），供 [from,to) 精确过滤。
      * 不含任何原始 payload。纯计数事件（k=6，占比 99%）不存行 —— 进 ts delta 数组。
      * k: 0=turn/start 1=step/start 2=user/message 3=assistant/message(usage)
-     *    4=tool/call 5=tool/result 错误
+     *    4=tool/call 5=tool/result 错误 7=tool timeout（n=工具名；Phase 1.6 Exact Verify Gate）
      */
     rows?: CompactRow[];
     /**

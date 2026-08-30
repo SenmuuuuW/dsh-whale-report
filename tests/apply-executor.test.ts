@@ -62,14 +62,13 @@ function setup(seamValue = { timeoutMs: 60_000, maxTimeoutMs: 600_000 }) {
   return { seam, adapter, audit, store, deps, tick: (ms: number) => { t += ms; } };
 }
 
-const APPROVE = { expectedRevision: 0, expectedValue: 60_000 };
-const APPLY_ID = "apply-improve-tool-bash-bash-abc123::nonce1";
+const APPLY_ID = "p1::nonce1";
 
 describe("apply executor", () => {
   it("happy path: PREPARED→MUTATING→APPLIED, revision 前进, verify observing 创建, audit 完整", async () => {
     const h = setup();
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
-    const { record, already } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    const { record, already } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
     expect(already).toBe(false);
     expect(record.status).toBe("applied");
     expect(record.revisionBefore).toBe(0);
@@ -89,8 +88,8 @@ describe("apply executor", () => {
   it("双击/重放同一 applyId: 第二次返回既有结果, 不重复 mutation", async () => {
     const h = setup();
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
-    const first = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
-    const second = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    const first = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
+    const second = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
     expect(second.already).toBe(true);
     expect(second.record.applyId).toBe(first.record.applyId);
     expect(h.seam.revision).toBe(1); // 只写了一次
@@ -101,7 +100,7 @@ describe("apply executor", () => {
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
     // 模拟第一个请求已落 PREPARED（尚未执行 mutation）
     await h.store.recordTable.put(APPLY_ID, { applyId: APPLY_ID, proposalId: "p1", improvementId: "improve-tool-bash", target: { type: "settings", ns: "shell", path: ["timeoutMs"] }, before: 60_000, after: 120_000, revisionBefore: 0, status: "prepared", idempotencyKey: APPLY_ID, rollback: { available: false, status: "none" } });
-    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.IN_PROGRESS });
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.IN_PROGRESS });
   });
 
   it("stale revision: 外部把 revision 推到 2 → CONFIG_CHANGED, proposal conflicted, 不 mutation", async () => {
@@ -110,7 +109,7 @@ describe("apply executor", () => {
     // 外部更新: value 60k → 90k (revision 0→1), 再 90k→95k (1→2)
     await h.seam.update("shell", { timeoutMs: 90_000 }, 0);
     await h.seam.update("shell", { timeoutMs: 95_000 }, 1);
-    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
     expect(h.seam.describe()[0].value.timeoutMs).toBe(95_000); // 用户新配置未被覆盖
     expect((h.store.proposalTable.get("p1") as ApplyProposal).status).toBe("conflicted");
     const record = h.store.recordTable.get(APPLY_ID) as { status: string; lastErrorCode?: string };
@@ -123,7 +122,7 @@ describe("apply executor", () => {
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
     // 模拟窗口期: 外部先写 (revision 0→1), approve 时仍用旧 expectedRevision 0
     await h.seam.update("shell", { timeoutMs: 80_000 }, 0);
-    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, expectedRevision: 0, expectedValue: 60_000 })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
     expect(h.seam.describe()[0].value.timeoutMs).toBe(80_000);
   });
 
@@ -133,7 +132,7 @@ describe("apply executor", () => {
     // 同值写（用户手动把 timeoutMs 设成当前值）→ revision 不增
     await h.seam.update("shell", { timeoutMs: 60_000 }, 0);
     expect(h.seam.revision).toBe(0);
-    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
     expect(record.status).toBe("applied");
     expect(h.seam.revision).toBe(1);
   });
@@ -143,25 +142,28 @@ describe("apply executor", () => {
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
     await h.seam.update("shell", { timeoutMs: 70_000 }, 0); // revision 0→1
     // 调用方携带旧 expectedValue 60k 但 revision 已被 advance 到 1 → 自检层先拒绝
-    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, expectedRevision: 0, expectedValue: 60_000 })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
   });
 
   it("proposal 不存在 → INVALID_PROPOSAL", async () => {
     const h = setup();
-    await expect(approveAndApply(h.deps, { proposalId: "nope", applyId: "x::1", ...APPROVE })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
+    await expect(approveAndApply(h.deps, { proposalId: "nope", applyId: "x::1" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
   });
 });
 
 describe("rollback", () => {
-  it("happy path: current==after → 还原 before, revision 前进", async () => {
+  it("happy path: current==after → 还原 before, revision 前进; verify 记录同步为 reverted（§15）", async () => {
     const h = setup();
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
-    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
+    expect((h.store.verifyTable.get(APPLY_ID) as { status: string }).status).toBe("observing");
     const rb = await rollbackApply(h.deps, { applyId: APPLY_ID, rollbackId: "rb1" });
     expect(rb.status).toBe("done");
     expect(rb.restoreTo).toBe(60_000);
     expect(h.seam.describe()[0].value.timeoutMs).toBe(60_000);
     expect(record.rollback.status).toBe("reverted");
+    // 已回滚 → verify 立即进入 reverted, 永不显示 VERIFIED（§15）
+    expect((h.store.verifyTable.get(APPLY_ID) as { status: string }).status).toBe("reverted");
     // 二次回滚 → ALREADY_REVERTED
     await expect(rollbackApply(h.deps, { applyId: APPLY_ID, rollbackId: "rb2" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.ALREADY_REVERTED });
   });
@@ -169,7 +171,7 @@ describe("rollback", () => {
   it("用户改成了第三个值 → TARGET_CHANGED, 不覆盖", async () => {
     const h = setup();
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
-    await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
     await h.seam.update("shell", { timeoutMs: 300_000 }, 1); // 用户手动改成 300s
     await expect(rollbackApply(h.deps, { applyId: APPLY_ID, rollbackId: "rb1" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.TARGET_CHANGED });
     expect(h.seam.describe()[0].value.timeoutMs).toBe(300_000); // 用户值保留
@@ -183,17 +185,16 @@ describe("rollback", () => {
 });
 
 describe("crash reconciliation（§16 三态）", () => {
-  it("A: MUTATING + 实际 == after + revision == before+1 → 恢复 APPLIED", async () => {
+  it("A: MUTATING + 实际 == after → 恢复 APPLIED（值锚点；revision 跨重启不持久, Phase 1.5 实测）", async () => {
     const h = setup({ timeoutMs: 60_000, maxTimeoutMs: 600_000 });
-    // 模拟 crash 前 mutation 已落: 值已写为 after, revision 已 +1
+    // 模拟 crash 前 mutation 已落: 值已写为 after（重启后 revision 可能已重置, 值才是真相）
     await h.seam.update("shell", { timeoutMs: 120_000 }, 0);
-    expect(h.seam.revision).toBe(1);
+    h.seam.revision = 7; // 模拟跨重启后的进程内计数（与 before+1 无关）
     await h.store.recordTable.put("a::1", { applyId: "a::1", proposalId: "p1", improvementId: "i", target: { type: "settings", ns: "shell", path: ["timeoutMs"] }, before: 60_000, after: 120_000, revisionBefore: 0, revisionAfter: undefined, status: "mutating", idempotencyKey: "a::1", rollback: { available: false, status: "none" } });
     const { recovered } = await reconcilePendingApplies(h.deps);
     expect(recovered).toBe(1);
     const rec = h.store.recordTable.get("a::1") as { status: string; revisionAfter?: number; rollback: { available: boolean } };
     expect(rec.status).toBe("applied");
-    expect(rec.revisionAfter).toBe(1);
     expect(rec.rollback.available).toBe(true);
   });
 
@@ -224,7 +225,7 @@ describe("audit append-only", () => {
   it("audit 只存路径与错误码, 不存 before/after 值", async () => {
     const h = setup();
     await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
-    await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID, ...APPROVE });
+    await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
     const events = h.audit.list();
     expect(events.length).toBeGreaterThan(0);
     const json = JSON.stringify(events);
@@ -249,5 +250,73 @@ describe("settings adapter allowlist", () => {
     expect(adapter.readShellTimeout()).toBeNull();
     await expect(adapter.updateShellTimeout({ expectedRevision: 0, expectedValue: 1, nextValue: 2 })).rejects.toBeInstanceOf(ApplyError);
     await expect(adapter.updateShellTimeout({ expectedRevision: 0, expectedValue: 1, nextValue: 2 })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.SETTINGS_UNAVAILABLE });
+  });
+});
+
+describe("Phase 1.5 security（§5/§6）", () => {
+  it("mutation truth 只来自 stored proposal：请求无法改变 before/after/namespace/path", async () => {
+    const h = setup();
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    // 客户端即使想提交 after/namespace/path——approve 只接收 applyId，mutation 数据全部来自 proposal
+    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID });
+    expect(record.after).toBe(120_000); // = proposal.proposedAfter，绝不可能是客户端值
+    expect(record.before).toBe(60_000);
+    expect(record.target).toEqual({ type: "settings", ns: "shell", path: ["timeoutMs"] });
+    expect(h.seam.describe()[0].value.timeoutMs).toBe(120_000);
+  });
+
+  it("applyId 前缀不属于该 proposal → INVALID_PROPOSAL（跨提案重放/混淆防护）", async () => {
+    const h = setup();
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    await h.store.proposalTable.put("p2", makeProposal({ id: "p2" }));
+    await expect(approveAndApply(h.deps, { proposalId: "p2", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
+    expect(h.seam.describe()[0].value.timeoutMs).toBe(60_000); // 无 mutation
+  });
+
+  it("applyId 缺失/格式非法 → INVALID_PROPOSAL", async () => {
+    const h = setup();
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: "" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: "random-id-no-prefix" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
+    expect(h.seam.describe()[0].value.timeoutMs).toBe(60_000);
+  });
+
+  it("并发校验对照 proposal 存储值：客户端无法用新鲜值绕过", async () => {
+    const h = setup();
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    // 外部先改值（用户手动调整）→ proposal 的 expectedBefore/revisionAtProposal 变陈旧
+    await h.seam.update("shell", { timeoutMs: 90_000 }, 0);
+    // 客户端即便拿到当前值也无法绕过——校验只对照 stored proposal
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: APPLY_ID })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
+    expect(h.seam.describe()[0].value.timeoutMs).toBe(90_000);
+  });
+});
+
+describe("Phase 1.6（exact gate hardening）", () => {
+  it("rejected proposal 不能再次 Apply：approve → INVALID_PROPOSAL，必须重新生成", async () => {
+    const h = setup();
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1", status: "rejected" }));
+    await expect(approveAndApply(h.deps, { proposalId: "p1", applyId: "p1::again" })).rejects.toMatchObject({ code: APPLY_ERROR_CODES.INVALID_PROPOSAL });
+    expect(h.seam.describe()[0].value.timeoutMs).toBe(60_000); // 无 mutation
+    // 重新生成后（新提案）可正常 Apply
+    await h.store.proposalTable.put("p1", makeProposal({ id: "p1" }));
+    const { record } = await approveAndApply(h.deps, { proposalId: "p1", applyId: "p1::again2" });
+    expect(record.status).toBe("applied");
+  });
+
+  it("recovery audit 去重：reconcile 对已终态记录不重复追加 apply.recovered", async () => {
+    const h = setup({ timeoutMs: 120_000, maxTimeoutMs: 600_000 });
+    await h.seam.update("shell", { timeoutMs: 120_000 }, 0);
+    await h.store.recordTable.put("r::1", { applyId: "r::1", proposalId: "p1", improvementId: "i", target: { type: "settings", ns: "shell", path: ["timeoutMs"] }, before: 60_000, after: 120_000, revisionBefore: 0, status: "mutating", idempotencyKey: "r::1", rollback: { available: false, status: "none" } });
+    const first = await reconcilePendingApplies(h.deps);
+    expect(first.recovered).toBe(1);
+    const before = h.audit.list().filter((e) => e.action === "apply.recovered").length;
+    // 第二次 reconcile（模拟再次 restart）：记录已是 applied → 不再恢复、不追加事件
+    const second = await reconcilePendingApplies(h.deps);
+    expect(second.recovered).toBe(0);
+    const after = h.audit.list().filter((e) => e.action === "apply.recovered").length;
+    expect(after).toBe(before);
+    expect((h.store.recordTable.get("r::1") as { status: string }).status).toBe("applied");
   });
 });

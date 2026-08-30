@@ -11,7 +11,7 @@ export interface ShellTimeoutStats {
     sessions: number;
     rate: number;
 }
-/** 从 ReportStats 提取 shell/bash 家族的超时统计。 */
+/** 从 ReportStats 提取 shell/bash 家族的超时统计。sessions = 窗口内发起过调用的会话数（Verify ≥3 会话证据）。 */
 export declare function shellTimeoutStats(stats: ReportStats): ShellTimeoutStats;
 /** Verify 窗口查询注入(由 API 层用 queryPeriod 精确 [from,to) 实现)。 */
 export interface ShellWindowQuery {

@@ -348,11 +348,11 @@ applied ──→ observing(≥ cooldown) ──→ 窗口内达 minimumEvidence
 写序:audit(`apply.prepared`) → ApplyRecord(status=mutating) → `settings.update` → ApplyRecord(status=applied, revisionAfter) → audit(`apply.succeeded`)。
 
 启动时 reconciliation(逐条 `mutating` 记录):
-- 读当前 `(ns, path)` 值与 namespace revision:
-  - `value == after` 且 `revision == revisionBefore + 1` → 判定本次写入已落:补记 `applied` + audit(`apply.recovered`);
-  - `value == before` 且 `revision == revisionBefore` → 写入从未发生:置 `failed`(无副作用);
-  - 其他(值变了但不是 after / revision 跳变)→ 置 `conflicted`,audit(`apply.failed`),UI 显示需要人工复核。
-- 保证:**绝不让 UI 显示 FAILED 但配置其实已改**。`settings/updated` 事件(source 区分 `update`/`provider`)作为运行时佐证;revision 差值作为权威锚点。
+- 读当前 `(ns, path)` 值(**resolved value 是跨重启持久真相**;settings revision 是进程内写计数,跨 restart 不持久 —— Phase 1.5 实测,见 §29-G):
+  - `value == after` → 判定本次写入已落:补记 `applied` + audit(`apply.recovered`);
+  - `value == before` → 写入从未发生:置 `failed`(无副作用);
+  - 其他(第三个值)→ 置 `conflicted`,audit(`apply.failed`),UI 显示需要人工复核。
+- 保证:**绝不让 UI 显示 FAILED 但配置其实已改**。revision 只用于同一进程生命周期内的 optimistic concurrency(§14);跨重启判定只信值。
 
 ## 17. Threat model
 
@@ -362,7 +362,7 @@ applied ──→ observing(≥ cooldown) ──→ 窗口内达 minimumEvidence
 | 伪造 tool error 文本 | 只消费错误码(白名单匹配),错误正文不进提案 |
 | 用户内容伪装成指令 | 不存在文本→mutation 通道;mutation 只来自 predefined structured schema |
 | stale proposal | §14 双层 revision 校验 |
-| 外部改配置 | settings seam 原生 `SETTINGS_CONFLICT`;外部改动同时被 `settings/updated(source='provider')` 记录,可触发提案置 `superseded` |
+| 外部改配置 | settings seam 原生 `SETTINGS_CONFLICT`(同进程);外部改动同时被 `settings/updated(source='provider')` 记录,可触发提案置 `superseded` |
 | 重放 Apply 请求 | 单次 approval nonce + applyId 幂等行 |
 | 重复 Apply / 浏览器双击 | `prepared` 幂等行 → 409 IN_PROGRESS |
 | Apply 中 crash | §16 reconciliation |
@@ -589,3 +589,16 @@ Phase 0.5 环境事故:探针 profile 的 node_modules 符号链接被 `healProf
 - stale write:抛 `SettingsConflictError`,shape 与 RFC §14 逐字一致
 - 真实数据:TOOL_TIMEOUT code 3 例/1 会话(web_search);bash 标记超时 41 例/6 会话,预算分布 60s×33 / 600s×3 / 70-120s×5;事件 payload 无 `timedOut` 字段(仅 content 文本标记);外部预算值 7 种(用户真实改过 → 乐观并发必要)
 - redaction:llm-deepseek describe 无 key 材料(apiKeyEnv 仅为 env 变量名引用;真 key 在 credentials seam)
+
+### G. Phase 1.5/1.6 amendments（实测事实 + exact gate）
+
+1. **settings revision 不是 durable identity**:`SettingsConflictError`/revision 只在**同一进程生命周期**内有效;跨 restart revision 重置(进程内写计数)。乐观并发(§14)依赖它没问题;crash reconciliation(§16)只信 **persistent resolved value**。
+2. **Browser trust fence 准确表述**:browser mutation requests 中 `Sec-Fetch-Site: cross-site`、foreign Origin、`Origin: null`、host rebinding 全部拒绝(实测 403);无浏览器 origin metadata 的 loopback 本地客户端按 DSH 官方 trust semantics 放行。**不宣称"只有点击 UI 按钮才能调用 API"**;真实 mutation authorization = server-side proposal + allowlisted adapter + revision/value guard + idempotency。
+3. **Exact timeout gate（v0.6 最终 schema = 17）**:v17 未发布,v17 直接承载最终形态 —— 新增 timeout 贡献行 `{t, k:7, n:tool}`(只存时间戳 + 工具名 + 贡献,无 command/content/错误原文)。edge bucket 查询经逐事件 `[from,to)` 精确过滤贡献 `toolTimeouts`/`toolTimeoutSessions`;**绝无整桶丢弃/比例估算**。INDEX_VERSION 保持 17,不 bump 18。
+4. **Raw Timeout Oracle**:独立逐事件 oracle(detectToolTimeout + timestamp filter + callId 配对)== Query Engine,daily/24h/custom 整数完全一致。
+5. **Verify 终态不可变**:VERIFIED / NOT_IMPROVED / INCONCLUSIVE / REVERTED 为 terminal,重复 verify 不改写历史 verdict;重新评估 = 新 cycle。
+6. **rejected proposal 不可复活**:approve(rejected) → INVALID_PROPOSAL;须重新生成。
+7. **recovery audit 去重**:reconcile 只处理 prepared/mutating;恢复一次后状态终态化,重复 restart 不追加重复 `apply.recovered`。
+8. **cooldown 10min 依据**:`maxTimeoutMs` = 600s —— apply 前启动的在途调用最坏按旧预算挂满 10min;cooldown 排除这些 stragglers。新调用即刻生效。保留 10min;建议后续做成可配置 metric policy。
+9. **target 公式审计**:`min(baseline×0.5, 0.08)`——5%→2.5%、10%→5%、20%→8%、40%→8%。相对减半 + 绝对 cap,方向正确;低 baseline 提案绝对目标偏小但可接受。本轮不改。
+10. **latency guardrail 可行但未启用**:`toolHealth.p95DurationMs` 从 index durations 可算(实测 100% 分桶有数据);v0.6 verdict 保持 primary-only(`shell_timeout_rate`),guardrail 留后续;UI/VerificationPlan 不声称"整体变好"。

@@ -19,6 +19,16 @@ export type ImprovementCategory = "TOOL" | "WORKFLOW" | "INSTRUCTION" | "MODEL" 
 export type ImprovementSeverity = "HIGH" | "MEDIUM" | "LOW";
 export type ImprovementStatus = "DETECTED" | "DISMISSED";
 
+/**
+ * v0.6（Phase 1.5）：Improve 证据类别。
+ * - "failure"：硬失败（isError）驱动（既有语义）
+ * - "timeout"：确定性 timeout 证据（§29-A 双路径检测器）驱动
+ * - "failure+timeout"：两者都达阈值
+ * Tool Health 的 failure rate 语义保持现状；timeout 只是 Improve eligibility 的
+ * operational evidence，绝不重分类 dashboard 的失败率（§29-B）。
+ */
+export type ImproveReasonKind = "failure" | "timeout" | "failure+timeout";
+
 /** v0.5 只落 DETECTED / DISMISSED；其余为未来 Apply / self-healing 预留。 */
 export type ImprovementVerdict = "IMPROVED" | "NO_CHANGE" | "REGRESSED" | "INSUFFICIENT_DATA";
 
@@ -75,6 +85,8 @@ export interface ImprovementItem {
   verificationPlan: VerificationPlan;
   status: ImprovementStatus;
   createdAt: number;
+  /** v0.6（Phase 1.5）：证据类别（failure / timeout / failure+timeout；缺省 = failure）。 */
+  reasonKind?: ImproveReasonKind;
 }
 
 // ─────────────────────────── 人工纠正识别（Correction Signal） ───────────────────────────
@@ -238,6 +250,17 @@ export const IMPROVE_TOOL_MIN_SESSIONS = 3;
 export const IMPROVE_MAIN_CODE_SHARE = 0.4;
 export const IMPROVE_MAIN_CODE_MIN = 5;
 
+/** v0.6（Phase 1.5）：timeout evidence 的 Improve 门槛（与 §29-C 提案门槛一致；与 Tool Health 无关）。 */
+export const IMPROVE_TIMEOUT_MIN_EVENTS = 5;
+export const IMPROVE_TIMEOUT_MIN_SESSIONS = 3;
+
+/** 每工具的 timeout evidence（computeImprovements 从 stats 派生，喂给 toolImprovement）。 */
+export interface TimeoutEvidence {
+  count: number;
+  sessions: string[];
+  invocations: number;
+}
+
 /** 按工具名给出具体建议（固定模板；不空泛）。 */
 function toolRecommendation(tool: string): string {
   if (tool === "edit") {
@@ -252,44 +275,123 @@ function toolRecommendation(tool: string): string {
   return `为 ${tool} 增加失败前置校验与有限重试策略（同参数失败 ≥2 次即停止并换路径）。`;
 }
 
+/** timeout-only 建议文案（预算类；不涉及 Tool Health 语义）。 */
+function timeoutRecommendation(tool: string): string {
+  if (tool === "bash") {
+    return "提高 bash 执行超时预算（或拆分长任务），减少确定性超时导致的执行中断。";
+  }
+  return `提高 ${tool} 的执行超时预算，或拆分长任务以减少超时。`;
+}
+
 function toolImprovement(
   h: ToolHealth,
   period: string,
   now: number,
   failedSessions: Record<string, string[]>,
+  timeoutEvidence?: TimeoutEvidence,
 ): ImprovementItem | null {
-  if (h.calls < IMPROVE_TOOL_MIN_CALLS) return null;
-  if (h.failed < IMPROVE_TOOL_MIN_FAILED) return null;
-  if (h.failureRate < IMPROVE_TOOL_MIN_FAILURE_RATE) return null;
-  const sessions = failedSessions[h.name] ?? [];
-  const sessionCount = sessions.length;
-  if (sessionCount < IMPROVE_TOOL_MIN_SESSIONS) return null;
-  // 主错误码：重复根因证据（单一错误码占失败比例高）。
-  const codes = Object.entries(h.errorCodes).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
-  if (codes.length === 0) return null;
-  const [mainCode, mainCount] = codes[0];
-  if (mainCount < IMPROVE_MAIN_CODE_MIN || mainCount / h.failed < IMPROVE_MAIN_CODE_SHARE) return null;
-  const ratePct = Math.round(h.failureRate * 1000) / 10;
-  const severity: ImprovementSeverity = h.failed >= 30 && h.failureRate >= 0.15 ? "HIGH" : "MEDIUM";
-  const sharePct = Math.round((mainCount / h.failed) * 100);
-  const confidence = Math.min(0.95, 0.6 + 0.08 * Math.min(5, sessionCount - 2) + (sharePct >= 60 ? 0.05 : 0));
+  const timeouts = timeoutEvidence?.count ?? 0;
+  const timeoutSessionList = timeoutEvidence?.sessions ?? [];
+  const invocations = timeoutEvidence?.invocations ?? h.calls;
+  // 硬失败分支（既有语义，原封不动）。
+  const hardEligible =
+    h.calls >= IMPROVE_TOOL_MIN_CALLS &&
+    h.failed >= IMPROVE_TOOL_MIN_FAILED &&
+    h.failureRate >= IMPROVE_TOOL_MIN_FAILURE_RATE;
+  let hardMeta: { sessions: string[]; mainCode: string; mainCount: number; sharePct: number } | null = null;
+  if (hardEligible) {
+    const sessions = failedSessions[h.name] ?? [];
+    if (sessions.length >= IMPROVE_TOOL_MIN_SESSIONS) {
+      const codes = Object.entries(h.errorCodes).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+      const [mainCode, mainCount] = codes[0] ?? ["", 0];
+      if (codes.length > 0 && mainCount >= IMPROVE_MAIN_CODE_MIN && mainCount / h.failed >= IMPROVE_MAIN_CODE_SHARE) {
+        hardMeta = { sessions, mainCode, mainCount, sharePct: Math.round((mainCount / h.failed) * 100) };
+      }
+    }
+  }
+  // timeout 分支（v0.6 Phase 1.5）：确定性 timeout 证据作为 failure-like operational evidence。
+  const timeoutEligible = timeouts >= IMPROVE_TIMEOUT_MIN_EVENTS && timeoutSessionList.length >= IMPROVE_TIMEOUT_MIN_SESSIONS;
+  if (hardMeta === null && !timeoutEligible) return null;
+
+  const reasonKind: ImproveReasonKind =
+    hardMeta !== null && timeoutEligible ? "failure+timeout" : hardMeta !== null ? "failure" : "timeout";
   const id = `improve-tool-${h.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const ratePct = Math.round(h.failureRate * 1000) / 10;
+  const timeoutRatePct = Math.round((invocations > 0 ? timeouts / invocations : 0) * 1000) / 10;
+
+  if (reasonKind === "timeout") {
+    const severity: ImprovementSeverity = timeouts >= 30 && timeoutRatePct >= 15 ? "HIGH" : "MEDIUM";
+    const confidence = Math.min(0.9, 0.55 + 0.08 * Math.min(5, timeoutSessionList.length - 2));
+    return {
+      id,
+      period,
+      category: "TOOL",
+      severity,
+      title: `${h.name} 工具重复超时（${timeoutRatePct}%）`,
+      summary: `确定性 timeout 跨 ${timeoutSessionList.length} 个会话重复出现（${timeouts} 次），执行预算可能不足。`,
+      evidence: {
+        metrics: {
+          calls: invocations,
+          timeouts,
+          timeoutRate: timeoutRatePct,
+          hardFailures: h.failed,
+          sessions: timeoutSessionList.length,
+        },
+        affectedTools: [h.name],
+        affectedSessions: timeoutSessionList.slice(0, 12),
+        affectedModels: [],
+        affectedProviders: [],
+        occurrences: timeoutSessionList.length,
+        confidence,
+      },
+      recommendation: timeoutRecommendation(h.name),
+      verificationPlan: {
+        targetMetric: `${h.name} timeout rate`,
+        baseline: timeoutRatePct,
+        target: `< ${Math.round(timeoutRatePct * 0.5 * 10) / 10}%`,
+        window: "next 7 days",
+      },
+      status: "DETECTED",
+      createdAt: now,
+      reasonKind,
+    };
+  }
+
+  // 硬失败 / 混合分支：既有模板 + 附加 timeout 数字。
+  const sessions = hardMeta!.sessions;
+  const sessionCount = sessions.length;
+  const sharePct = hardMeta!.sharePct;
+  const severity: ImprovementSeverity = h.failed >= 30 && h.failureRate >= 0.15 ? "HIGH" : "MEDIUM";
+  const confidence = Math.min(0.95, 0.6 + 0.08 * Math.min(5, sessionCount - 2) + (sharePct >= 60 ? 0.05 : 0));
+  const title =
+    reasonKind === "failure+timeout"
+      ? `${h.name} 工具重复失败与超时（失败 ${ratePct}% / 超时 ${timeoutRatePct}%）`
+      : `${h.name} 工具重复失败（${ratePct}%）`;
+  const metrics: Record<string, number> = {
+    calls: h.calls,
+    failures: h.failed,
+    failureRate: ratePct,
+    sessions: sessionCount,
+    mainCodeCount: hardMeta!.mainCount,
+    p95Ms: Math.round(h.p95DurationMs),
+  };
+  if (timeoutEligible) {
+    metrics.timeouts = timeouts;
+    metrics.timeoutRate = timeoutRatePct;
+    metrics.hardFailures = h.failed;
+  }
   return {
     id,
     period,
     category: "TOOL",
     severity,
-    title: `${h.name} 工具重复失败（${ratePct}%）`,
-    summary: `失败跨 ${sessionCount} 个会话重复出现，${mainCode} 占失败 ${sharePct}%，且失败后常伴随立即重试。`,
+    title,
+    summary:
+      reasonKind === "failure+timeout"
+        ? `失败跨 ${sessionCount} 个会话重复出现（${hardMeta!.mainCode} 占 ${sharePct}%），另有 ${timeouts} 次确定性 timeout。`
+        : `失败跨 ${sessionCount} 个会话重复出现，${hardMeta!.mainCode} 占失败 ${sharePct}%，且失败后常伴随立即重试。`,
     evidence: {
-      metrics: {
-        calls: h.calls,
-        failures: h.failed,
-        failureRate: Math.round(h.failureRate * 1000) / 10,
-        sessions: sessionCount,
-        mainCodeCount: mainCount,
-        p95Ms: Math.round(h.p95DurationMs),
-      },
+      metrics,
       affectedTools: [h.name],
       affectedSessions: sessions.slice(0, 12),
       affectedModels: [],
@@ -300,12 +402,13 @@ function toolImprovement(
     recommendation: toolRecommendation(h.name),
     verificationPlan: {
       targetMetric: `${h.name} failure rate`,
-      baseline: Math.round(h.failureRate * 1000) / 10,
-      target: `< ${Math.round(h.failureRate * 1000) / 10 * 0.8}%`,
+      baseline: ratePct,
+      target: `< ${Math.round(ratePct * 0.8 * 10) / 10}%`,
       window: "next 7 days",
     },
     status: "DETECTED",
     createdAt: now,
+    reasonKind,
   };
 }
 
@@ -505,8 +608,37 @@ export function computeImprovements(input: ImproveInput): ImprovementItem[] {
   const items: ImprovementItem[] = [];
   const stats = input.stats;
   const failedSessions = input.failedSessions ?? stats.toolFailedSessions ?? {};
+  // v0.6（Phase 1.5）：每工具的 timeout evidence（§29-A 检测器产物；Improve eligibility 用）。
+  const timeoutByTool: Record<string, TimeoutEvidence> = {};
+  for (const tool of Object.keys(stats.toolTimeouts ?? {})) {
+    timeoutByTool[tool] = {
+      count: stats.toolTimeouts[tool] ?? 0,
+      sessions: stats.toolTimeoutSessions[tool] ?? [],
+      invocations: stats.toolCalls[tool] ?? 0,
+    };
+  }
   for (const h of stats.toolHealth) {
-    const item = toolImprovement(h, input.period, now, failedSessions);
+    const item = toolImprovement(h, input.period, now, failedSessions, timeoutByTool[h.name]);
+    if (item !== null) items.push(item);
+  }
+  // timeout-only 工具（无 toolHealth 阈值命中，但 timeout 证据达标）也要进入 Improve 链。
+  for (const [tool, ev] of Object.entries(timeoutByTool)) {
+    if (items.some((i) => i.id === `improve-tool-${tool.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`)) continue;
+    if (ev.count < IMPROVE_TIMEOUT_MIN_EVENTS || ev.sessions.length < IMPROVE_TIMEOUT_MIN_SESSIONS) continue;
+    const h: ToolHealth = {
+      name: tool,
+      calls: ev.invocations,
+      completed: ev.invocations,
+      failed: 0,
+      incomplete: 0,
+      successRate: 1,
+      failureRate: 0,
+      avgDurationMs: 0,
+      p50DurationMs: 0,
+      p95DurationMs: 0,
+      errorCodes: {},
+    };
+    const item = toolImprovement(h, input.period, now, {}, timeoutByTool[tool]);
     if (item !== null) items.push(item);
   }
   const workflow = workflowImprovement(stats.burstSamples, input.period, now);

@@ -60,6 +60,8 @@ interface ImprovementJson {
     };
     status: string;
     createdAt: number;
+    /** v0.6（Phase 1.5）：failure / timeout / failure+timeout（缺省 = failure）。 */
+    reasonKind?: string;
 }
 interface PrevSummary {
     key: string;

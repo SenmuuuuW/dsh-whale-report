@@ -61,16 +61,24 @@ function verifyRecordOf(proposal: ApplyProposal, appliedAt: number, now: number)
 
 /**
  * 执行一次 user-approved Apply。
+ * 安全契约（Phase 1.5 §5/§6）：mutation truth 全部来自 server-side stored proposal。
+ * 请求只携带 applyId（幂等键 + 单次 approval 元数据）；namespace/path/before/after
+ * 任何客户端字段都会被忽略（读取处只解构 applyId）。并发校验用 proposal 存储的
+ * expectedBefore/revisionAtProposal 对照重读的当前值。
  * @returns 已持久化的 ApplyRecord(成功或失败终态)。
  */
 export async function approveAndApply(
   deps: ApplyExecutorDeps,
-  input: { proposalId: string; applyId: string; expectedRevision: number; expectedValue: number },
+  input: { proposalId: string; applyId: string },
 ): Promise<{ record: ApplyRecord; already: boolean }> {
   const { store, adapter, audit } = deps;
   const now = nowOf(deps);
   const proposal = store.proposalTable.get(input.proposalId) as ApplyProposal | undefined;
   if (proposal === undefined) throw new ApplyError(APPLY_ERROR_CODES.INVALID_PROPOSAL, "proposal not found");
+  // applyId 必须属于该 proposal（跨提案重放/混淆防护）。
+  if (!input.applyId.startsWith(`${proposal.id}::`)) {
+    throw new ApplyError(APPLY_ERROR_CODES.INVALID_PROPOSAL, "applyId does not belong to this proposal");
+  }
   if (proposal.status !== "proposed") {
     // 幂等: 已成功的 Apply 返回既有结果; 已失败/冲突的提案拒绝重复执行。
     const existing = store.recordTable.get(input.applyId) as ApplyRecord | undefined;
@@ -107,7 +115,7 @@ export async function approveAndApply(
   await store.recordTable.put(input.applyId, record);
   await audit.append({ applyId: input.applyId, improvementId: proposal.improvementId, target: { ns: proposal.target.ns, path: proposal.target.path }, action: "apply.prepared", result: "ok" });
 
-  // 乐观并发: 重读当前值 + revision(双层防护第一层)。
+  // 乐观并发: 重读当前值 + revision（对照 proposal 存储值——客户端无法影响校验）。
   const current = adapter.readShellTimeout();
   if (current === null) {
     record.status = "failed";
@@ -116,7 +124,7 @@ export async function approveAndApply(
     await audit.append({ applyId: input.applyId, improvementId: proposal.improvementId, target: { ns: proposal.target.ns, path: proposal.target.path }, action: "apply.failed", result: "error", code: record.lastErrorCode });
     throw new ApplyError(APPLY_ERROR_CODES.SETTINGS_UNAVAILABLE, "shell settings unavailable");
   }
-  if (current.revision !== input.expectedRevision || current.value !== input.expectedValue) {
+  if (current.revision !== proposal.revisionAtProposal || current.value !== proposal.expectedBefore) {
     record.status = "failed";
     record.lastErrorCode = APPLY_ERROR_CODES.CONFIG_CHANGED;
     proposal.status = "conflicted";
@@ -175,10 +183,11 @@ export async function approveAndApply(
 
 /**
  * 启动 reconciliation(§16): 恢复 crash 遗留的 prepared/mutating 记录。
- * 以 revision 差值为权威锚点:
- *   value == after 且 revision == revisionBefore + 1  → 本次写入已落 → APPLIED
- *   value == before 且 revision == revisionBefore    → 写入从未发生 → FAILED
- *   其他                                            → CONFLICTED(人工复核,绝不猜)
+ * 锚点 = resolved VALUE(持久真相): settings revision 是进程内写计数,跨重启不持久,
+ * 绝不能用 revision 算术跨重启判定(Phase 1.5 实测)。
+ *   value == after  → 本次写入已落 → APPLIED
+ *   value == before → 写入从未发生 → FAILED
+ *   其他            → CONFLICTED(人工复核,绝不猜)
  */
 export async function reconcilePendingApplies(deps: ApplyExecutorDeps): Promise<{ recovered: number }> {
   const { store, adapter, audit } = deps;
@@ -191,12 +200,12 @@ export async function reconcilePendingApplies(deps: ApplyExecutorDeps): Promise<
     let next: ApplyRecord["status"];
     if (current === null) {
       next = "conflicted"; // 无法判断 → 人工复核
-    } else if (current.value === rec.after && current.revision === rec.revisionBefore + 1) {
+    } else if (current.value === rec.after) {
       next = "applied";
       rec.revisionAfter = current.revision;
       rec.appliedAt = rec.appliedAt ?? Date.now();
       rec.rollback.available = true;
-    } else if (current.value === rec.before && current.revision === rec.revisionBefore) {
+    } else if (current.value === rec.before) {
       next = "failed";
     } else {
       next = "conflicted";

@@ -43,8 +43,6 @@ export declare class ApplyService {
     approve(input: {
         proposalId: string;
         applyId: string;
-        expectedRevision: number;
-        expectedValue: number;
     }): Promise<{
         record: ApplyRecord;
         already: boolean;

@@ -15,6 +15,15 @@ import type { CostBreakdown } from "./pricing.js";
 export type ImprovementCategory = "TOOL" | "WORKFLOW" | "INSTRUCTION" | "MODEL" | "COST" | "RELIABILITY";
 export type ImprovementSeverity = "HIGH" | "MEDIUM" | "LOW";
 export type ImprovementStatus = "DETECTED" | "DISMISSED";
+/**
+ * v0.6（Phase 1.5）：Improve 证据类别。
+ * - "failure"：硬失败（isError）驱动（既有语义）
+ * - "timeout"：确定性 timeout 证据（§29-A 双路径检测器）驱动
+ * - "failure+timeout"：两者都达阈值
+ * Tool Health 的 failure rate 语义保持现状；timeout 只是 Improve eligibility 的
+ * operational evidence，绝不重分类 dashboard 的失败率（§29-B）。
+ */
+export type ImproveReasonKind = "failure" | "timeout" | "failure+timeout";
 /** v0.5 只落 DETECTED / DISMISSED；其余为未来 Apply / self-healing 预留。 */
 export type ImprovementVerdict = "IMPROVED" | "NO_CHANGE" | "REGRESSED" | "INSUFFICIENT_DATA";
 export interface ImprovementEvidence {
@@ -67,6 +76,8 @@ export interface ImprovementItem {
     verificationPlan: VerificationPlan;
     status: ImprovementStatus;
     createdAt: number;
+    /** v0.6（Phase 1.5）：证据类别（failure / timeout / failure+timeout；缺省 = failure）。 */
+    reasonKind?: ImproveReasonKind;
 }
 export type CorrectionCategory = "COMMIT_CONTROL" | "REPO_SCOPE" | "UI_SCOPE" | "NO_EXTRA_CHANGES" | "NO_REPEAT_QUESTION" | "OUTPUT_FORMAT";
 export declare const CORRECTION_CATEGORIES: CorrectionCategory[];
@@ -87,6 +98,15 @@ export declare const IMPROVE_TOOL_MIN_SESSIONS = 3;
 /** 主错误码占比门槛：单一错误码占失败 ≥40% 且 ≥5 次才算"重复根因"。 */
 export declare const IMPROVE_MAIN_CODE_SHARE = 0.4;
 export declare const IMPROVE_MAIN_CODE_MIN = 5;
+/** v0.6（Phase 1.5）：timeout evidence 的 Improve 门槛（与 §29-C 提案门槛一致；与 Tool Health 无关）。 */
+export declare const IMPROVE_TIMEOUT_MIN_EVENTS = 5;
+export declare const IMPROVE_TIMEOUT_MIN_SESSIONS = 3;
+/** 每工具的 timeout evidence（computeImprovements 从 stats 派生，喂给 toolImprovement）。 */
+export interface TimeoutEvidence {
+    count: number;
+    sessions: string[];
+    invocations: number;
+}
 /** Retry / Workflow Waste：同一命令在多会话中重复重试（确定性聚合；cmd 只做内部键）。 */
 export interface BurstLike {
     cmd: string;

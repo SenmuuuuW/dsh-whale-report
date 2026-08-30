@@ -95,10 +95,24 @@ describe("verify engine", () => {
     expect(r.status).toBe("inconclusive");
   });
 
-  it("reverted 状态不继续验证", async () => {
-    const h = setup(makeVr({ status: "reverted" }), async () => stats(0, 100, 4));
+  it("reverted 状态不继续验证（终态不可变）", async () => {
+    let queried = 0;
+    const h = setup(makeVr({ status: "reverted" }), async () => { queried += 1; return stats(0, 100, 4); });
     const r = await evaluateVerify(h.deps, { applyId: "a::1" });
     expect(r.status).toBe("reverted");
+    expect(queried).toBe(0); // 不再查询窗口
+  });
+
+  it("终态不可变：VERIFIED 后重复 verify 不改写历史 verdict（Phase 1.6）", async () => {
+    let queried = 0;
+    const h = setup(makeVr({ status: "verified", verdict: "shell_timeout_rate 0.00% ≤ 目标 3.00%", verdictAt: 123 }), async () => { queried += 1; return stats(0, 100, 4); });
+    const r1 = await evaluateVerify(h.deps, { applyId: "a::1" });
+    expect(r1.status).toBe("verified");
+    expect(queried).toBe(0);
+    const stored = h.store.verifyTable.get("a::1") as VerifyRecord;
+    expect(stored.verdict).toBe("shell_timeout_rate 0.00% ≤ 目标 3.00%");
+    expect(stored.verdictAt).toBe(123); // 历史 verdict 未被触碰
+    // 重新评估 = 新 cycle（新 applyId）
   });
 
   it("无 pre/post 污染: baseline 窗口固定于提案时 [createdAt-lookback, appliedAt)", async () => {

@@ -125,6 +125,8 @@ export interface ReportStats {
   toolTimeouts: Record<string, number>;
   /** v0.6（INDEX_VERSION 17）：tool → 出现 timeout 的会话 id（Proposal ≥3 会话阈值用；只存 id）。 */
   toolTimeoutSessions: Record<string, string[]>;
+  /** v0.6（INDEX_VERSION 17）：tool → 发起过调用的会话 id（Verify ≥3 会话证据用；只存 id）。 */
+  toolInvocationSessions: Record<string, string[]>;
   toolCallsTotal: number;
   /** tool/result 里的失败次数。 */
   toolErrors: number;
@@ -557,6 +559,7 @@ export function emptyStats(period: Period): ReportStats {
     toolCalls: {},
     toolTimeouts: {},
     toolTimeoutSessions: {},
+    toolInvocationSessions: {},
     toolCallsTotal: 0,
     toolErrors: 0,
     commands: 0,
@@ -897,6 +900,11 @@ export function aggregate(
         const name = typeof data?.name === "string" ? data.name : "(unknown)";
         stats.toolCalls[name] = (stats.toolCalls[name] ?? 0) + 1;
         {
+          let sess = stats.toolInvocationSessions[name];
+          if (sess === undefined) { sess = []; stats.toolInvocationSessions[name] = sess; }
+          if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+        }
+        {
           const hkey = `${shanghaiDateKey(event.time)}T${String(shanghaiHour(event.time)).padStart(2, "0")}`;
           const hd = hourDetail.get(hkey);
           if (hd !== undefined) hd.toolCalls += 1;
@@ -1147,6 +1155,8 @@ export interface HourBucket {
   toolTimeouts?: Record<string, number>;
   /** v0.6（INDEX_VERSION 17）：tool → timeout 会话 id（去重列表，上限 32）。 */
   toolTimeoutSessions?: Record<string, string[]>;
+  /** v0.6（INDEX_VERSION 17）：tool → 调用会话 id（去重列表，上限 32；Verify 会话证据）。 */
+  toolInvocationSessions?: Record<string, string[]>;
   toolErrors: number;
   commands: number;
   /** 危险命令样本（每会话保留上限，见 DANGER_SAMPLE_CAP），带分类标签与严重级。 */
@@ -1166,10 +1176,10 @@ export interface HourBucket {
   /** 人工纠正命中（Improve 用；只存类别 + sessionId，会话级去重在聚合端完成）。 */
   corrections: { category: CorrectionCategory; sessionId: string }[];
   /**
-   * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5），供 [from,to) 精确过滤。
+   * 精确边界行（v0.5.x repair）：本桶内**有贡献**的事件行（k 0-5、k 7），供 [from,to) 精确过滤。
    * 不含任何原始 payload。纯计数事件（k=6，占比 99%）不存行 —— 进 ts delta 数组。
    * k: 0=turn/start 1=step/start 2=user/message 3=assistant/message(usage)
-   *    4=tool/call 5=tool/result 错误
+   *    4=tool/call 5=tool/result 错误 7=tool timeout（n=工具名；Phase 1.6 Exact Verify Gate）
    */
   rows?: CompactRow[];
   /**
@@ -1216,6 +1226,7 @@ function newBucket(h: number): HourBucket {
     toolCalls: {},
     toolTimeouts: {},
     toolTimeoutSessions: {},
+    toolInvocationSessions: {},
     toolErrors: 0,
     commands: 0,
     danger: [],
@@ -1379,6 +1390,12 @@ export function createOwnEventBucketizer(
         const tname = typeof data?.name === "string" ? data.name : "(unknown)";
         bucket.toolCalls[tname] = (bucket.toolCalls[tname] ?? 0) + 1;
         bucket.rows!.push({ t: event.time, k: 4, n: tname });
+        {
+          const tis = (bucket.toolInvocationSessions ??= {});
+          let sess = tis[tname];
+          if (sess === undefined) { sess = []; tis[tname] = sess; }
+          if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+        }
         // 工具健康：记录 pending，result 到达时配对。
         {
           const callId = (data as Record<string, unknown>)?.callId;
@@ -1458,6 +1475,9 @@ export function createOwnEventBucketizer(
               let sess = tts[pair.name];
               if (sess === undefined) { sess = []; tts[pair.name] = sess; }
               if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+              // Phase 1.6 Exact Verify Gate：timeout 贡献行（只存 t + k=7 + n），
+              // 使 edge bucket 也能按逐事件 [from,to) 精确过滤。
+              bucket.rows!.push({ t: event.time, k: 7, n: pair.name });
             }
           }
         }
@@ -1664,9 +1684,24 @@ export function aggregateBuckets(
           stats.toolCallsTotal += 1;
           const hd = hourAgg.get(`${shanghaiDateKey(row.t)}T${String(shanghaiHour(row.t)).padStart(2, "0")}`);
           if (hd !== undefined) hd.toolCalls += 1;
-          if (row.n !== undefined) stats.toolCalls[row.n] = (stats.toolCalls[row.n] ?? 0) + 1;
+          if (row.n !== undefined) {
+            stats.toolCalls[row.n] = (stats.toolCalls[row.n] ?? 0) + 1;
+            // v0.6：边界桶经 rows 精确合并调用（与 toolCalls 同裁剪语义），调用会话证据同步。
+            let sess = stats.toolInvocationSessions[row.n];
+            if (sess === undefined) { sess = []; stats.toolInvocationSessions[row.n] = sess; }
+            if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+          }
         } else if (row.k === 5) {
           stats.toolErrors += 1;
+        } else if (row.k === 7) {
+          // Phase 1.6 Exact Verify Gate：edge bucket 内的 timeout 逐事件精确贡献
+          // （事件已过 [from,to) 过滤；n = 工具名）。
+          if (row.n !== undefined) {
+            stats.toolTimeouts[row.n] = (stats.toolTimeouts[row.n] ?? 0) + 1;
+            let sess = stats.toolTimeoutSessions[row.n];
+            if (sess === undefined) { sess = []; stats.toolTimeoutSessions[row.n] = sess; }
+            if (sess.length < 32 && !sess.includes(sessionId)) sess.push(sessionId);
+          }
         }
       }
       return touched;
@@ -1788,6 +1823,13 @@ export function aggregateBuckets(
       for (const [tool, sess] of Object.entries(bucket.toolTimeoutSessions ?? {})) {
         let target = stats.toolTimeoutSessions[tool];
         if (target === undefined) { target = []; stats.toolTimeoutSessions[tool] = target; }
+        for (const sid of sess) {
+          if (target.length < 32 && !target.includes(sid)) target.push(sid);
+        }
+      }
+      for (const [tool, sess] of Object.entries(bucket.toolInvocationSessions ?? {})) {
+        let target = stats.toolInvocationSessions[tool];
+        if (target === undefined) { target = []; stats.toolInvocationSessions[tool] = target; }
         for (const sid of sess) {
           if (target.length < 32 && !target.includes(sid)) target.push(sid);
         }

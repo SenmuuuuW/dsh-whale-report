@@ -41,7 +41,7 @@ describe("ApplyService 全链路集成", () => {
     expect(proposal!.proposedAfter).toBe(120_000);
 
     const applyId = h.svc.applyIdFor(proposal!.id, "nonce1");
-    const { record } = await h.svc.approve({ proposalId: proposal!.id, applyId, expectedRevision: proposal!.revisionAtProposal, expectedValue: proposal!.expectedBefore });
+    const { record } = await h.svc.approve({ proposalId: proposal!.id, applyId });
     expect(record.status).toBe("applied");
     expect(h.seam.describe()[0].value.timeoutMs).toBe(120_000);
 
@@ -87,13 +87,30 @@ describe("ApplyService 全链路集成", () => {
     // 外部把 timeoutMs 改成 90_000
     await h.seam.update("shell", { timeoutMs: 90_000 }, 0);
     await expect(
-      h.svc.approve({ proposalId: proposal.id, applyId: h.svc.applyIdFor(proposal.id, "n"), expectedRevision: proposal.revisionAtProposal, expectedValue: proposal.expectedBefore }),
+      h.svc.approve({ proposalId: proposal.id, applyId: h.svc.applyIdFor(proposal.id, "n") }),
     ).rejects.toMatchObject({ code: APPLY_ERROR_CODES.CONFIG_CHANGED });
     expect(h.seam.describe()[0].value.timeoutMs).toBe(90_000); // 不被覆盖
     // 重新生成: before = 90_000, after = 180_000
     const p2 = (await h.svc.createProposal({ improvementId: "improve-tool-bash" }))!;
     expect(p2.expectedBefore).toBe(90_000);
     expect(p2.proposedAfter).toBe(180_000);
+  });
+
+  it("applied 提案在配置变动后重新生成（superseded → 新提案基于新值）", async () => {
+    const h = serviceWithStats(20, 5);
+    const p1 = (await h.svc.createProposal({ improvementId: "improve-tool-bash" }))!;
+    const applyId = h.svc.applyIdFor(p1.id, "n1");
+    await h.svc.approve({ proposalId: p1.id, applyId });
+    expect((await h.svc.createProposal({ improvementId: "improve-tool-bash" }))!.id).toBe(p1.id); // 未变动前幂等返回
+    // 外部编辑后重新生成: 旧 applied 提案被 supersede, 新提案基于新值
+    await h.seam.update("shell", { timeoutMs: 90_000 }, 1);
+    const p2 = (await h.svc.createProposal({ improvementId: "improve-tool-bash" }))!;
+    expect(p2.expectedBefore).toBe(90_000); // 基于新值重新生成（旧提案 superseded 后由新提案占位）
+    // supersede 审计事件已记录
+    expect(h.svc.auditEvents().map((e) => e.action)).toContain("proposal.superseded");
+    const applyId2 = h.svc.applyIdFor(p2.id, "n2");
+    const { record } = await h.svc.approve({ proposalId: p2.id, applyId: applyId2 });
+    expect(record.status).toBe("applied");
   });
 
   it("settings seam 缺失 → createProposal 返回 null（优雅降级, 不 crash）", async () => {

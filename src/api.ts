@@ -142,10 +142,19 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/** mutation 类请求体上限（防超大 body / 内存放大）。 */
+const MAX_JSON_BODY_BYTES = 512 * 1024;
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > MAX_JSON_BODY_BYTES) {
+      throw new Error("请求体过大（>512KB）");
+    }
+    chunks.push(buf);
   }
   if (chunks.length === 0) return {};
   try {
@@ -471,14 +480,16 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               const apply = svc.apply;
               if (apply === undefined) { writeJson(res, 503, { ok: false, error: { code: "SETTINGS_UNAVAILABLE", message: "Apply 未启用" } }); return; }
               const id = method.slice("apply/".length, method.length - "/approve".length);
-              const payload = (await readJsonBody(req)) as { applyId?: string; expectedRevision?: number; expectedValue?: number };
+              const payload = (await readJsonBody(req)) as Record<string, unknown>;
+              // Phase 1.5 §5：mutation truth 只来自 server-side stored proposal；
+              // 客户端只允许提供 applyId（幂等键）。namespace/path/before/after 等字段一律忽略。
+              const applyId = typeof payload.applyId === "string" ? payload.applyId : "";
+              if (applyId === "" || applyId.length > 256) {
+                writeJson(res, 422, { ok: false, error: { code: "INVALID_PROPOSAL", message: "applyId 缺失或格式非法" } });
+                return;
+              }
               try {
-                const { record, already } = await apply.approve({
-                  proposalId: id,
-                  applyId: typeof payload.applyId === "string" && payload.applyId !== "" ? payload.applyId : apply.applyIdFor(id, String(Date.now())),
-                  expectedRevision: Number(payload.expectedRevision ?? -1),
-                  expectedValue: Number(payload.expectedValue ?? Number.NaN),
-                });
+                const { record, already } = await apply.approve({ proposalId: id, applyId });
                 writeJson(res, 200, { ok: true, already, record });
               } catch (error) {
                 if (error instanceof ApplyError) { writeJson(res, applyErrorStatus(error.code), { ok: false, error: { code: error.code, message: error.message } }); return; }

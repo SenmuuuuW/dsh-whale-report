@@ -74,8 +74,15 @@ export class ApplyService {
     if (proposal === null) return null;
     const existing = this.store.proposalTable.get(proposal.id) as ApplyProposal | undefined;
     if (existing !== undefined && existing.status !== "superseded") {
-      // conflicted / rejected 的旧提案 → 置 superseded 并重新生成（§29-E: 配置已变, 旧提案作废）。
-      if (existing.status === "conflicted" || existing.status === "rejected") {
+      // conflicted / rejected / applied 的旧提案 → 置 superseded 并重新生成
+      //（§29-E: 配置已变 / 旧 Apply 已结束, 新 cycle 需要新提案; apply_records 保留历史）。
+      let stale = existing.status === "conflicted" || existing.status === "rejected" || existing.status === "applied";
+      // proposed 但配置已变（值或 revision 与提案不符）→ 同样作废重生成（避免陈旧提案阻塞新 cycle）。
+      if (!stale && existing.status === "proposed") {
+        const current = this.adapter.readShellTimeout();
+        stale = current !== null && (current.value !== existing.expectedBefore || current.revision !== existing.revisionAtProposal);
+      }
+      if (stale) {
         existing.status = "superseded";
         await this.store.proposalTable.put(existing.id, existing);
         await this.audit.append({ applyId: undefined, improvementId: proposal.improvementId, target: { ns: proposal.target.ns, path: proposal.target.path }, action: "proposal.superseded", result: "ok" });
@@ -100,10 +107,10 @@ export class ApplyService {
     return this.store.verifyTable.get(applyId) as VerifyRecord | undefined;
   }
 
-  async approve(input: { proposalId: string; applyId: string; expectedRevision: number; expectedValue: number }): Promise<{ record: ApplyRecord; already: boolean }> {
+  async approve(input: { proposalId: string; applyId: string }): Promise<{ record: ApplyRecord; already: boolean }> {
     return approveAndApply(
       { store: this.store, adapter: this.adapter, audit: this.audit, now: this.options.now },
-      { proposalId: input.proposalId, applyId: input.applyId, expectedRevision: input.expectedRevision, expectedValue: input.expectedValue },
+      { proposalId: input.proposalId, applyId: input.applyId },
     );
   }
 
