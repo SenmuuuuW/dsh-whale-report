@@ -45,6 +45,8 @@
 - exact timeout oracle
 - security acceptance
 - restart reconciliation
+- tarball-only acceptance
+- npm package includes nested Apply/Verify runtime modules
 
 ## [0.5.4] - 2026-08-29
 

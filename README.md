@@ -115,7 +115,7 @@ DeepTrace 架构是一句话：**INGEST ONCE → QUERY MANY**。会话事件只�
 - 窗口边界逐事件精确过滤（无比例近似），Raw Oracle 对账 costDiff = 0.0000
 - 统计与周期口径统一 Asia/Shanghai（不依赖机器时区）
 
-当前 version：**v0.6.0-rc.1**（官方兼容基线 DSH 0.1.1-rc.2）
+当前 version：**v0.6.0**（官方兼容基线 DSH 0.1.1-rc.2）
 
 ## Performance
 
@@ -262,7 +262,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 ## Installation
 
-需要 DSH（DeepSeek Harness，web 端）环境。**v0.6.0-rc.1 的官方兼容基线是 DSH 0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
+需要 DSH（DeepSeek Harness，web 端）环境。**v0.6.0 的官方兼容基线是 DSH 0.1.1-rc.2**（peer 范围 `>=0.1.1-rc.2 <0.2.0`；升级 dsh 后重启 web 实例即可，会话数据无需迁移）。两种安装方式，注意区分：
 
 **① DSH 插件安装（推荐，完整功能）** —— 注册进 dsh web：
 
@@ -274,7 +274,7 @@ dsh plugin --profile web add "github:SenmuuuuW/dsh-whale-report"
 **② npm 包安装（仅依赖）** —— 把包装进你的项目：
 
 ```sh
-npm install dsh-whale-report@0.6.0-rc.1
+npm install dsh-whale-report@0.6.0
 ```
 
 > 注意：`npm install` 只是安装包本身，**不会自动注册为 DSH 插件**。Web UI、`whale_report` 工具与实时计费都需要通过方式 ① 注册；方式 ② 适合直接 import 报告引擎 / 用 CLI 生成报告的场景。
