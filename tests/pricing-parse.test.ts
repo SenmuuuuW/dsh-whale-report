@@ -31,6 +31,24 @@ describe("官方峰谷定价页解析", () => {
     expect(r.peak.pro.inputPerMillion).toBe(9.0);
   });
 
+  it("真实页面形态：标签边界带空格的文本节点也能解析（2026-08-31 实测回归）", () => {
+    // 官方页面实际渲染为 “百万tokens输入 （缓存命中） 空闲时段 0.05元 …”（标签边界产生空格）
+    const REAL_PAGE_SHAPE = `<html><body>
+<table>
+<tr><td>价格 (1)(2)</td><td>百万tokens输入 （缓存命中） </td><td> 空闲时段 </td><td> 0.05元 </td><td> 0.15元 </td></tr>
+<tr><td></td><td></td><td> 高峰时段 </td><td> 0.10元 </td><td> 0.30元 </td></tr>
+<tr><td></td><td>百万tokens输入 （缓存未命中） </td><td> 空闲时段 </td><td> 1.5元 </td><td> 4.5元 </td></tr>
+<tr><td></td><td></td><td> 高峰时段 </td><td> 3.0元 </td><td> 9.0元 </td></tr>
+<tr><td></td><td>百万tokens输出 </td><td> 空闲时段 </td><td> 4.5元 </td><td> 13.5元 </td></tr>
+<tr><td></td><td></td><td> 高峰时段 </td><td> 9.0元 </td><td> 27.0元 </td></tr>
+<tr><td>并发限制 (3)</td><td>2500</td><td>500</td></tr>
+</table>
+</body></html>`;
+    const r = parsePricingPage(REAL_PAGE_SHAPE);
+    expect(r.peak).toEqual(PEAK_PRICES);
+    expect(r.offpeak).toEqual(OFFPEAK_PRICES);
+  });
+
   it("页面无价格表时抛错（不静默回退）", () => {
     expect(() => parsePricingPage("<html><body>没有表格</body></html>")).toThrow("pricing table not found");
   });

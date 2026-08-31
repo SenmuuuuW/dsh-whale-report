@@ -7,9 +7,10 @@
  * 计费口径与官方一致：只按三个桶计费 ——
  *   输入（缓存命中）× 命中价 + 输入（缓存未命中）× 未命中价 + 输出 × 输出价。
  *
- * 官方价格（2026-08-17 前，CNY / 1M token）：
- *   v4-flash: 命中 0.02 · 未命中 1 · 输出 2
- *   v4-pro:   命中 0.025 · 未命中 3 · 输出 6
+ * 价格沿革（CNY / 1M token）：
+ *   - 2026-08-17 前统一价（BUILTIN_PRICES，历史回溯用）：
+ *     v4-flash: 命中 0.02 · 未命中 1 · 输出 2；v4-pro: 命中 0.025 · 未命中 3 · 输出 6
+ *   - 2026-08-17 起峰谷价（PEAK/OFFPEAK；空闲 = 高峰一半）
  *
  * 峰谷规则（v0.5.4 起）：
  * - 2026-08-23T00:00:00+08:00 之前：北京 9–12 / 14–18 高峰，其余低谷（不分周末）
@@ -66,6 +67,24 @@ export function isPeakHourCST(ms: number): boolean {
 export type PricingTier = "peak" | "offpeak";
 
 /**
+ * DeepSeek 官方峰谷定价生效时刻（北京时间 2026-08-17 00:00:00，含）。
+ * 生效前官方为统一价（BUILTIN_PRICES，无峰谷）；生效后按峰谷价分段计费。
+ * 历史数据按事件所属真实时间回溯计价（priceSetForTime 是唯一 truth source）。
+ */
+export const PEAK_OFFPEAK_EFFECTIVE_AT = Date.parse("2026-08-17T00:00:00+08:00");
+
+/**
+ * 唯一定价时刻表（v0.6.1）—— 所有计费路径的唯一 price-set truth source：
+ * - ms < 峰谷生效时刻 → BUILTIN_PRICES（8-17 前统一价，无峰谷）
+ * - ms ≥ 峰谷生效时刻 → 按 pricingTierForTime 取 PEAK / OFFPEAK
+ * 历史回溯与当前计价共用本函数，绝不把新价格前推到旧事件。
+ */
+export function priceSetForTime(ms: number): Record<"flash" | "pro", Prices> {
+  if (ms < PEAK_OFFPEAK_EFFECTIVE_AT) return BUILTIN_PRICES;
+  return pricingTierForTime(ms) === "peak" ? PEAK_PRICES : OFFPEAK_PRICES;
+}
+
+/**
  * DeepSeek 官方周末全天低谷新规生效时刻（北京时间 2026-08-23 00:00:00，含）。
  * 生效前历史必须按旧规则回溯，绝不把新周末规则前推。
  */
@@ -114,9 +133,9 @@ export function computeCostTimed(
   let peakTokens = 0;
   let allTokens = 0;
   for (const { time, modelTokens } of perTimeModelTokens) {
-    // 时段由 pricingTierForTime（Asia/Shanghai + 周末规则 + 生效边界）唯一决定。
+    // 价格集由 priceSetForTime 唯一决定（8-17 前旧统一价回溯；之后按峰谷时段）。
     const tier = pricingTierForTime(time);
-    const priceSet = tier === "peak" ? PEAK_PRICES : OFFPEAK_PRICES;
+    const priceSet = priceSetForTime(time);
     for (const [model, usage] of Object.entries(modelTokens)) {
       const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";
       const mTier = modelTier(model);
@@ -126,7 +145,8 @@ export function computeCostTimed(
       total += cost;
       const tokens = usageTotalTokens(usage);
       allTokens += tokens;
-      if (tier === "peak") {
+      // peakShare/peakRatio 只统计峰谷价期（8-17 起）的高峰行：旧统一价期无峰谷语义。
+      if (tier === "peak" && time >= PEAK_OFFPEAK_EFFECTIVE_AT) {
         peakCost += cost;
         peakTokens += tokens;
       }
@@ -137,7 +157,8 @@ export function computeCostTimed(
 
 /**
  * opencode-go 订阅的计价（CNY / 1M token）。
- * 默认先用 DeepSeek 官方价作为估算；可通过环境变量覆盖为订阅实际单价：
+ * 默认沿用 DeepSeek 官方空闲时段价作为估算（v0.6.1：自 8-17 峰谷价起同步，
+ * 不再停留在 8-17 前旧价）；可通过环境变量覆盖为订阅实际单价：
  *   OPENCODE_GO_CACHE_READ_PRICE_PER_M
  *   OPENCODE_GO_INPUT_PRICE_PER_M
  *   OPENCODE_GO_OUTPUT_PRICE_PER_M
@@ -152,14 +173,14 @@ export function priceEnv(name: string, fallback: number): number {
 
 export const OPENCODE_GO_PRICES: Record<"flash" | "pro", Prices> = {
   flash: {
-    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.02),
-    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 1),
-    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 2),
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.05),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 1.5),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 4.5),
   },
   pro: {
-    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.025),
-    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 3),
-    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 6),
+    cacheReadPerMillion: priceEnv("OPENCODE_GO_CACHE_READ_PRICE_PER_M", 0.15),
+    inputPerMillion: priceEnv("OPENCODE_GO_INPUT_PRICE_PER_M", 4.5),
+    outputPerMillion: priceEnv("OPENCODE_GO_OUTPUT_PRICE_PER_M", 13.5),
   },
 };
 
@@ -211,7 +232,8 @@ export interface OfficialPeakPrices {
  */
 export function parsePricingPage(html: string): OfficialPeakPrices {
   const text = stripHtml(html);
-  const hit = /百万tokens输入（缓存命中）([\s\S]{0,300}?)百万tokens输入（缓存未命中）([\s\S]{0,300}?)百万tokens输出([\s\S]{0,300}?)(?:并发|Concurrency|<\/table)/i.exec(text);
+  // 宽容空白：真实页面在标签边界会产生 “输入 （缓存命中）” 这类空格（2026-08-31 实测）。
+  const hit = /百万tokens输入\s*（\s*缓存命中\s*）([\s\S]{0,300}?)百万tokens输入\s*（\s*缓存未命中\s*）([\s\S]{0,300}?)百万tokens输出([\s\S]{0,300}?)(?:并发|Concurrency|<\/table)/i.exec(text);
   if (hit === null) throw new Error("pricing table not found");
   const four = (raw: string) => {
     const nums = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*元/g)].map((m) => Number(m[1]));
@@ -259,7 +281,8 @@ export async function getPrices(): Promise<{ prices: Record<"flash" | "pro", Pri
       const { peak, offpeak } = await fetchOfficialPrices();
       priceCache = { peak, offpeak, source: "official-page", fetchedAt: now };
     } catch {
-      priceCache = { peak: BUILTIN_PRICES, offpeak: BUILTIN_PRICES, source: "builtin", fetchedAt: now };
+      // 抓取失败回退内置的当前官方峰谷价（v0.6.1：绝不再回退到 8-17 前旧价）。
+      priceCache = { peak: PEAK_PRICES, offpeak: OFFPEAK_PRICES, source: "builtin", fetchedAt: now };
     }
   }
   return {

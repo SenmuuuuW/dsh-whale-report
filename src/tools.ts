@@ -9,7 +9,7 @@
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
 import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
-import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, pricingTierForTime, type CostBreakdown } from "./pricing.js";
+import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, priceSetForTime, pricingTierForTime, type CostBreakdown } from "./pricing.js";
 import { shanghaiHourStartOf } from "./shanghai.js";
 import { computeInsights, customPeriodKey, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
 import { computeImprovements, type ImprovementItem } from "./improvements.js";
@@ -487,7 +487,8 @@ export async function buildReportFromStats(
   for (const day of stats.dayHourDetail) {
     for (let hour = 0; hour < 24; hour++) {
       const h = day.hours[hour];
-      const priceSet = pricingTierForTime(shanghaiHourStartOf(day.date, hour)) === "peak" ? PEAK_PRICES : OFFPEAK_PRICES;
+      // v0.6.1：历史回溯 —— 8-17 前按旧统一价，之后按峰谷价（与 computeCostTimed 同源）。
+      const priceSet = priceSetForTime(shanghaiHourStartOf(day.date, hour));
       let hourCost = 0;
       for (const [model, usage] of Object.entries(h.modelTokens)) {
         const provider = model.includes("/") ? model.slice(0, model.indexOf("/")) : "deepseek";

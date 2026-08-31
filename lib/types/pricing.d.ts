@@ -7,9 +7,10 @@
  * 计费口径与官方一致：只按三个桶计费 ——
  *   输入（缓存命中）× 命中价 + 输入（缓存未命中）× 未命中价 + 输出 × 输出价。
  *
- * 官方价格（2026-08-17 前，CNY / 1M token）：
- *   v4-flash: 命中 0.02 · 未命中 1 · 输出 2
- *   v4-pro:   命中 0.025 · 未命中 3 · 输出 6
+ * 价格沿革（CNY / 1M token）：
+ *   - 2026-08-17 前统一价（BUILTIN_PRICES，历史回溯用）：
+ *     v4-flash: 命中 0.02 · 未命中 1 · 输出 2；v4-pro: 命中 0.025 · 未命中 3 · 输出 6
+ *   - 2026-08-17 起峰谷价（PEAK/OFFPEAK；空闲 = 高峰一半）
  *
  * 峰谷规则（v0.5.4 起）：
  * - 2026-08-23T00:00:00+08:00 之前：北京 9–12 / 14–18 高峰，其余低谷（不分周末）
@@ -43,6 +44,19 @@ export declare function isPeakCstHour(hour: number): boolean;
 export declare function isPeakHourCST(ms: number): boolean;
 /** 定价时段（peak / offpeak）。 */
 export type PricingTier = "peak" | "offpeak";
+/**
+ * DeepSeek 官方峰谷定价生效时刻（北京时间 2026-08-17 00:00:00，含）。
+ * 生效前官方为统一价（BUILTIN_PRICES，无峰谷）；生效后按峰谷价分段计费。
+ * 历史数据按事件所属真实时间回溯计价（priceSetForTime 是唯一 truth source）。
+ */
+export declare const PEAK_OFFPEAK_EFFECTIVE_AT: number;
+/**
+ * 唯一定价时刻表（v0.6.1）—— 所有计费路径的唯一 price-set truth source：
+ * - ms < 峰谷生效时刻 → BUILTIN_PRICES（8-17 前统一价，无峰谷）
+ * - ms ≥ 峰谷生效时刻 → 按 pricingTierForTime 取 PEAK / OFFPEAK
+ * 历史回溯与当前计价共用本函数，绝不把新价格前推到旧事件。
+ */
+export declare function priceSetForTime(ms: number): Record<"flash" | "pro", Prices>;
 /**
  * DeepSeek 官方周末全天低谷新规生效时刻（北京时间 2026-08-23 00:00:00，含）。
  * 生效前历史必须按旧规则回溯，绝不把新周末规则前推。
@@ -78,7 +92,8 @@ export declare function computeCostTimed(perTimeModelTokens: {
 }[]): TimedCostResult;
 /**
  * opencode-go 订阅的计价（CNY / 1M token）。
- * 默认先用 DeepSeek 官方价作为估算；可通过环境变量覆盖为订阅实际单价：
+ * 默认沿用 DeepSeek 官方空闲时段价作为估算（v0.6.1：自 8-17 峰谷价起同步，
+ * 不再停留在 8-17 前旧价）；可通过环境变量覆盖为订阅实际单价：
  *   OPENCODE_GO_CACHE_READ_PRICE_PER_M
  *   OPENCODE_GO_INPUT_PRICE_PER_M
  *   OPENCODE_GO_OUTPUT_PRICE_PER_M
