@@ -84,3 +84,68 @@ describe("IngestEngine firehose", () => {
     expect(index.has("s-unknown")).toBe(false);
   });
 });
+
+describe("IngestEngine headers 补录（v0.6.1）", () => {
+  it("reconcile：bootstrap 之后新建的会话追加进 headers 并建立索引", async () => {
+    // 初始 listSessions 只有 s-live；bootstrap 后出现 s-new（模拟实例运行中新建的会话）
+    const sessionsList: { header: { id: string; createdAt: number; cwd?: string; delegationDepth?: number }; live: boolean }[] = [
+      { header: { id: "s-live", createdAt: 1_786_000_000_000 }, live: false },
+    ];
+    const index = new Map<string, SessionIndexRecord>();
+    const svc = {
+      sessionQuery: {
+        async listSessions() {
+          return [...sessionsList];
+        },
+        async readSession(id: string) {
+          return { session: { id, seedLength: 0 }, events: [{ type: "assistant/message", seq: 0, time: 1_789_000_000_000, data: { usage: { inputTokens: 500_000, outputTokens: 100_000, cacheReadTokens: 1_000_000, reasoningTokens: 0 } } }] };
+        },
+      },
+      index: {
+        get: (k: string) => index.get(k),
+        put: async (k: string, v: SessionIndexRecord) => {
+          index.set(k, v);
+        },
+      },
+    };
+    const ingest = new IngestEngine(svc);
+    await ingest.bootstrap();
+    // 运行中新建会话出现
+    sessionsList.push({ header: { id: "s-new", createdAt: 1_789_500_000_000, delegationDepth: 1 }, live: false });
+    await ingest.reconcile();
+    // headers 补录：query 层（statusOf → buildStatus 的 headers 遍历）现在能看到 s-new
+    const status = ingest.statusOf();
+    expect(status.headers.map((h) => h.id)).toContain("s-new");
+    expect(status.headers.map((h) => h.id)).toContain("s-live");
+    // 索引建立（fingerprint 路径）
+    expect(index.has("s-new")).toBe(true);
+    expect(index.get("s-new")!.v).toBe(17);
+    // 幂等：再次 reconcile 不重复追加
+    await ingest.reconcile();
+    expect(ingest.statusOf().headers.filter((h) => h.id === "s-new")).toHaveLength(1);
+  });
+
+  it("reconcile 不重复处理已登记 live 会话", async () => {
+    const sessionsList: { header: { id: string; createdAt: number }; live: boolean }[] = [
+      { header: { id: "s-live", createdAt: 1_786_000_000_000 }, live: true },
+    ];
+    let reads = 0;
+    const svc = {
+      sessionQuery: {
+        async listSessions() {
+          return [...sessionsList];
+        },
+        async readSession() {
+          reads += 1;
+          return { session: { id: "x", seedLength: 0 }, events: [] };
+        },
+      },
+      index: { get: () => undefined, put: async () => {} },
+    };
+    const ingest = new IngestEngine(svc);
+    await ingest.bootstrap();
+    const before = reads; // bootstrap 已为 live 基线 readSession 一次
+    await ingest.reconcile();
+    expect(reads).toBe(before); // live 由 firehose 负责，reconcile 不再 readSession
+  });
+});

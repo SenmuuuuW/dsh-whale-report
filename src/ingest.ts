@@ -343,6 +343,20 @@ export class IngestEngine {
   /** 低频 fingerprint reconciliation（防御 firehose 完整性之外的兜底）：只查历史会话，绝不 readSession live。 */
   async reconcile(): Promise<void> {
     if (!this.bootstrapped) return;
+    // v0.6.1：headers 补录 —— headers 是 bootstrap 时的静态快照；实例启动后新建的
+    // 会话（含新开的主会话与子代理会话）必须追加，否则永远不进 query，
+    // 报告漏算这些会话的全部 token/费用（真实数据：当天新会话占费用大头）。
+    const known = new Set(this.headers.map((h) => h.id));
+    const fresh = await this.svc.sessionQuery.listSessions();
+    for (const record of fresh) {
+      if (known.has(record.header.id)) continue;
+      this.headers.push({
+        id: record.header.id,
+        createdAt: record.header.createdAt,
+        cwd: record.header.cwd,
+        delegationDepth: record.header.delegationDepth,
+      });
+    }
     const pathMap = buildSessionPathMap(resolveDshHome());
     for (const h of this.headers) {
       if (this.live.has(h.id)) continue; // live 由 firehose 负责
