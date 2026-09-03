@@ -65,6 +65,21 @@ interface LiveState {
 /** live checkpoint 最小间隔：DSH session log 本身就是 source of truth，index 是派生数据。 */
 const LIVE_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
+
+/**
+ * 计算 bucketizer 的 ownStart（seed 边界）。
+ * DSH 的 seedLength 同时覆盖两种语义：
+ * - fork / subagent（有 parentSession）：seed 事件是父会话的拷贝 —— 父会话会统计，
+ *   跳过以避免重复计费；
+ * - resume（无 parentSession）：seed 事件是本会话恢复前的真实历史消费 —— 没有别的
+ *   会话会统计它，跳过会导致该会话恢复前的 token/费用全部漏掉（v0.6.1 实测：
+ *   live resume 会话只索引到恢复后的增量，8-18 起的 881M cacheRead 只剩 7M）。
+ * 因此只有带 parentSession 的会话才按 seedLength 截断。
+ */
+function ownStartOf(snapshot: { session: { seedLength?: number; parentSession?: string } }): number {
+  return snapshot.session.parentSession === undefined ? 0 : (snapshot.session.seedLength ?? 0);
+}
+
 export class IngestEngine {
   readonly svc: { sessionQuery: SessionQueryLike; index: { get: (k: string) => SessionIndexRecord | undefined; put: (k: string, v: SessionIndexRecord) => Promise<void> } };
 
@@ -128,7 +143,7 @@ export class IngestEngine {
       if (record.live) {
         try {
           const snapshot = await this.svc.sessionQuery.readSession(id);
-          const bz = createOwnEventBucketizer(id, snapshot.session.seedLength ?? 0);
+          const bz = createOwnEventBucketizer(id, ownStartOf(snapshot));
           let maxSeq = -1;
           for (const e of snapshot.events) {
             bz.apply(e as IngestEvent);
@@ -168,7 +183,7 @@ export class IngestEngine {
       }
       try {
         const snapshot = await this.svc.sessionQuery.readSession(id);
-        const bz = createOwnEventBucketizer(id, snapshot.session.seedLength ?? 0);
+        const bz = createOwnEventBucketizer(id, ownStartOf(snapshot));
         for (const e of snapshot.events) bz.apply(e as IngestEvent);
         const result = bz.snapshot();
         await this.svc.index.put(id, this.entryOf(id, result, stat, false));

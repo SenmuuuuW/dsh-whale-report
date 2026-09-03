@@ -4,3 +4,6 @@ node_modules/
 
 # build artifacts
 *.tgz
+
+# tsdown 冗余拆分产物（单文件 client.js 已含全部；见 tsdown.config.ts 注释）
+lib/client/

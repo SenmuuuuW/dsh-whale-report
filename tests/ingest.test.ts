@@ -149,3 +149,56 @@ describe("IngestEngine headers 补录（v0.6.1）", () => {
     expect(reads).toBe(before); // live 由 firehose 负责，reconcile 不再 readSession
   });
 });
+
+describe("resume/fork seed 语义（v0.6.1）", () => {
+  function seedSvc(parentSession?: string) {
+    // 会话日志：seq 0-1 是 seed（恢复前历史），seq 2 之后是恢复后增量
+    const events = [
+      { type: "assistant/message", seq: 0, time: 1_000_000, data: { usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, reasoningTokens: 0 } } },
+      { type: "assistant/message", seq: 1, time: 2_000_000, data: { usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 2_000_000, reasoningTokens: 0 } } },
+      { type: "assistant/message", seq: 2, time: 3_000_000, data: { usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 3_000_000, reasoningTokens: 0 } } },
+    ];
+    const index = new Map<string, SessionIndexRecord>();
+    return {
+      svc: {
+        sessionQuery: {
+          async listSessions() {
+            return [{ header: { id: "s-seed", createdAt: 1_000 }, live: true, ...(parentSession ? { parentSession } : {}) }];
+          },
+          async readSession() {
+            return {
+              session: { id: "s-seed", seedLength: 2, ...(parentSession ? { parentSession } : {}) },
+              events: events as never,
+            };
+          },
+        },
+        index: {
+          get: (k: string) => index.get(k),
+          put: async (k: string, v: SessionIndexRecord) => {
+            index.set(k, v);
+          },
+        },
+      },
+      index,
+    };
+  }
+  const cacheOf = (idx: Map<string, SessionIndexRecord>) => {
+    const e = idx.get("s-seed")!;
+    const buckets = e.buckets as { cacheRead?: number }[];
+    return buckets.reduce((a, b) => a + (b.cacheRead ?? 0), 0);
+  };
+
+  it("resume 会话（无 parentSession）：seed 历史也是本会话消费，全量计入", async () => {
+    const { svc, index } = seedSvc();
+    const ingest = new IngestEngine(svc);
+    await ingest.bootstrap();
+    expect(cacheOf(index)).toBe(5_000_000); // seq 0-2 全部计入
+  });
+
+  it("fork/subagent 会话（有 parentSession）：跳过 seed 事件，只统计自己的增量", async () => {
+    const { svc, index } = seedSvc("parent-1");
+    const ingest = new IngestEngine(svc);
+    await ingest.bootstrap();
+    expect(cacheOf(index)).toBe(3_000_000); // 只计 seq 2
+  });
+});
