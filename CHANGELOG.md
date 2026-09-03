@@ -2,6 +2,20 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 语义，版本号遵循 SemVer。
 
+## [0.6.1] - 2026-09-03
+
+### Fixed
+
+- Correct historical DeepSeek pricing before the Aug 17, 2026 pricing transition.
+- Apply peak/off-peak pricing only from its actual effective date.
+- Preserve the Aug 23 weekend off-peak transition historically.
+- Fix official pricing-page parsing with whitespace around labels.
+- Discover sessions created after DeepTrace startup during periodic reconciliation.
+- Preserve full history for resumed sessions instead of treating resume seed events as fork inheritance.
+- Keep true fork seed handling unchanged.
+- Correct affected historical token and cost reports after upgrade.
+- Migration: INDEX_VERSION 17 → 18（旧索引语义失效，自动全量重建）; REPORT_SEM 6 → 7（旧 period_stats 不再作为趋势/基线展示）。
+
 ## [0.6.0] - 2026-08-30
 
 ### Apply

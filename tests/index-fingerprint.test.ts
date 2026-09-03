@@ -11,6 +11,7 @@
  *  - 索引必须全量（不带 stopAfter），跨周期生成不漏新追加事件。
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { INDEX_VERSION } from "../src/tools.js";
 import { zstdCompressSync as compress } from "node:zlib";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -104,7 +105,7 @@ afterEach(() => {
 
 describe("isIndexFresh（指纹判定，纯函数）", () => {
   const stat = { mtimeMs: 1000, size: 100 };
-  const entry: SessionIndexRecord = { sessionId: "s", v: 17, builtAt: 5000, lastSeq: 1, lastMs: 900, buckets: [], titles: [], src: { mtimeMs: 1000, size: 100 } };
+  const entry: SessionIndexRecord = { sessionId: "s", v: INDEX_VERSION, builtAt: 5000, lastSeq: 1, lastMs: 900, buckets: [], titles: [], src: { mtimeMs: 1000, size: 100 } };
 
   it("指纹完全一致 → 新鲜", () => {
     expect(isIndexFresh(entry, stat)).toBe(true);
@@ -122,12 +123,18 @@ describe("isIndexFresh（指纹判定，纯函数）", () => {
     expect(isIndexFresh({ ...entry, v: 15 }, stat)).toBe(false);
   });
 
+  it("v0.6.0 产物（v17）在 v0.6.1（v18）下必须失效 —— resume 截断索引靠版本失效触发全量重建", () => {
+    expect(INDEX_VERSION).toBe(18);
+    // src 指纹完全匹配也无效：语义版本变化（resume 历史保留 / headers 补录）必须重解释旧索引
+    expect(isIndexFresh({ ...entry, v: 17 }, stat)).toBe(false);
+  });
+
   it("无条目 → 失效", () => {
     expect(isIndexFresh(undefined, stat)).toBe(false);
   });
 
   it("旧条目（无指纹）：文件最后写入 ≤ 最后索引事件/建索引时刻 → 复用", () => {
-    const legacy = { sessionId: "s", v: 17, builtAt: 5000, lastSeq: 1, lastMs: 9000, buckets: [], titles: [] };
+    const legacy = { sessionId: "s", v: INDEX_VERSION, builtAt: 5000, lastSeq: 1, lastMs: 9000, buckets: [], titles: [] };
     expect(isIndexFresh(legacy, { mtimeMs: 8000, size: 100 })).toBe(true);
     expect(isIndexFresh(legacy, { mtimeMs: 9000, size: 100 })).toBe(true);
     // 最后写入晚于最后索引事件 → 可能漏新事件 → 失效重建
@@ -150,7 +157,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -175,7 +182,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -205,7 +212,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     const built = bucketizeOwnEvents("s-a", lines.map((l, i) => ({ type: "turn/start", seq: i, time: T0 + 60_000 + i * 1000, data: {} })), 0);
     await svc.index.put("s-a", {
       sessionId: "s-a",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: built.lastSeq,
       lastMs: built.lastMs,
@@ -229,7 +236,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     // 注入一个"看起来新鲜"的条目（src 与实际文件无关）
     await svc.index.put("s-ghost", {
       sessionId: "s-ghost",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: 1,
       lastMs: T0 + 60_000,
@@ -252,7 +259,7 @@ describe("collectEvents 指纹复用（P0.2）", () => {
     // 即使有条目（理论上不会发生），live 也必须重读
     await svc.index.put("s-live", {
       sessionId: "s-live",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: 5,
       lastMs: T0 + 60_000 + 5000,
@@ -425,7 +432,7 @@ describe("toolHealth.failedSessions 持久化形态（custom/月/年 400 根因�
     }
     await svc.index.put("s-th", {
       sessionId: "s-th",
-      v: 17,
+      v: INDEX_VERSION,
       builtAt: Date.now(),
       lastSeq: 1,
       lastMs: T0 + 60_000,
@@ -438,5 +445,82 @@ describe("toolHealth.failedSessions 持久化形态（custom/月/年 400 根因�
     const stats = await collectEvents(svc, { from: T0 - 10 * 86400000, to: Date.now() }, perf);
     expect(perf.indexHits).toBe(1);
     expect(stats.sessions).toBe(1);
+  });
+});
+
+describe("v0.6.0 → v0.6.1 migration（INDEX_VERSION 17→18）", () => {
+  it("v17 截断索引（模拟 v0.6.0 resume 只索引到 7M）在 v0.6.1 启动时自动全量重建", async () => {
+    const home = tempHome();
+    // 文件含全量事件（含 usage 的 assistant/message：cacheRead 922M 级历史）
+    const base = T0 + 60_000;
+    const lines = [HEADER("s-r")];
+    for (let i = 0; i < 100; i++) {
+      lines.push(JSON.stringify({ type: "assistant/message", seq: i, time: base + i * 1000, data: { usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 9_220_000, reasoningTokens: 0 } } }));
+    }
+    const path = writeSessionLog(home, "s-r", lines);
+    // 自定义 svc：readSession 解析真实 JSONL 事件（makeSvc 的简化 mock 会丢 usage）
+    const { svc, index } = makeSvc({ files: { "s-r": { path, lines } } });
+    const realQuery = {
+      async listSessions() {
+        return [{ header: { id: "s-r", createdAt: T0 }, live: false }];
+      },
+      async readSession(id: string) {
+        const evs = lines.filter((l) => !l.startsWith('{"type":"session"')).map((l) => JSON.parse(l));
+        return { session: { id }, events: evs };
+      },
+    };
+    svc.sessionQuery = realQuery;
+    // v0.6.0 状态：v17 索引只含"恢复后"的少量事件（7M 级）—— 即使 src 指纹与文件匹配
+    const stat = statSessionFile(path)!;
+    await svc.index.put("s-r", {
+      sessionId: "s-r",
+      v: 17, // v0.6.0
+      builtAt: Date.now(),
+      lastSeq: 2,
+      lastMs: base + 2000,
+      buckets: [],
+      titles: [],
+      src: stat,
+    });
+    const perf = newGenerationPerf();
+    const stats = await collectEvents(svc, PERIOD, perf);
+    // v17 → 版本失效 → 全量重建：cacheRead 922M 全部计入（不被旧 7M 截断保留）
+    expect(perf.invalidations).toBe(1);
+    expect(stats.tokens.cacheRead).toBe(922_000_000);
+    const rebuilt = index.get("s-r")!;
+    expect(rebuilt.v).toBe(18);
+    expect(rebuilt.lastSeq).toBe(99);
+  });
+
+  it("升级后再次运行不重复重建（v18 索引 fresh → indexHits）", async () => {
+    const home = tempHome();
+    const base = T0 + 60_000;
+    const lines = [HEADER("s-r2")];
+    for (let i = 0; i < 10; i++) {
+      lines.push(JSON.stringify({ type: "assistant/message", seq: i, time: base + i * 1000, data: { usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 1000, reasoningTokens: 0 } } }));
+    }
+    const path = writeSessionLog(home, "s-r2", lines);
+    const { svc, readCalls } = makeSvc({ files: { "s-r2": { path, lines } } });
+    const built = bucketizeOwnEvents("s-r2", lines.slice(1).map((l, i) => JSON.parse(l)), 0);
+    await svc.index.put("s-r2", {
+      sessionId: "s-r2",
+      v: INDEX_VERSION,
+      builtAt: Date.now(),
+      lastSeq: built.lastSeq,
+      lastMs: built.lastMs,
+      buckets: built.buckets,
+      titles: built.titles,
+      src: statSessionFile(path)!,
+    });
+    const perf = newGenerationPerf();
+    const stats = await collectEvents(svc, PERIOD, perf);
+    expect(perf.indexHits).toBe(1);
+    expect(perf.invalidations).toBe(0);
+    expect(readCalls).not.toContain("s-r2");
+    expect(stats.tokens.cacheRead).toBe(10_000);
+    // 再跑一次仍不重建（幂等）
+    const perf2 = newGenerationPerf();
+    await collectEvents(svc, PERIOD, perf2);
+    expect(perf2.invalidations).toBe(0);
   });
 });

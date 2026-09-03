@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { IngestEngine } from "../src/ingest.js";
+import { INDEX_VERSION } from "../src/tools.js";
 import type { SessionIndexRecord } from "../src/state.js";
 
 function makeSvc(events?: Record<string, { type: string; seq?: number; time: number; data?: unknown }[]>) {
@@ -46,7 +47,7 @@ describe("IngestEngine firehose", () => {
     await boot;
     const entry = index.get("s-live")!;
     // 基线 2 事件 + buffered seq 3（seq 1/2 去重）
-    expect(entry.v).toBe(17);
+    expect(entry.v).toBe(INDEX_VERSION);
     expect(entry.lastSeq).toBe(3);
     // steady-state：seq 4 增量
     ingest.handleEvent("s-live", { type: "turn/start", seq: 4, time: 4000, data: {} });
@@ -119,7 +120,7 @@ describe("IngestEngine headers 补录（v0.6.1）", () => {
     expect(status.headers.map((h) => h.id)).toContain("s-live");
     // 索引建立（fingerprint 路径）
     expect(index.has("s-new")).toBe(true);
-    expect(index.get("s-new")!.v).toBe(17);
+    expect(index.get("s-new")!.v).toBe(INDEX_VERSION);
     // 幂等：再次 reconcile 不重复追加
     await ingest.reconcile();
     expect(ingest.statusOf().headers.filter((h) => h.id === "s-new")).toHaveLength(1);

@@ -8,7 +8,7 @@
  */
 import { defineTool, type ToolDefinition, type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import type {} from "@deepseek-ai/dsh-session";
-import type { SessionIndexRecord, PeriodStatsRecord } from "./state.js";
+import { REPORT_SEM, type SessionIndexRecord, type PeriodStatsRecord } from "./state.js";
 import { computeCost, computeCostTimed, getPrices, modelCost, modelTier, OPENCODE_GO_PRICES, PEAK_PRICES, OFFPEAK_PRICES, priceSetForTime, pricingTierForTime, type CostBreakdown } from "./pricing.js";
 import { shanghaiHourStartOf } from "./shanghai.js";
 import { computeInsights, customPeriodKey, periodKey, previousPeriodKey, cacheHitRate, nightRatio, type Insight } from "./insights.js";
@@ -100,7 +100,7 @@ export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (i
 }
 
 /** 索引结构版本：结构变更（如新增 modelUsage）时递增，旧记录自然失效重建。 */
-export const INDEX_VERSION = 17;
+export const INDEX_VERSION = 18;
 
 /**
  * 索引新鲜度（P0.2）：不再用"缓存年龄 TTL"判定 —— 历史会话在文件未变化时
@@ -505,7 +505,13 @@ export async function buildReportFromStats(
   // 无自然"上一周期"，prev 基线为 null（与 24h 同语义）。
   const key = preset === "custom" ? customPeriodKey(from, to) : periodKey(preset, to);
   const prevKey = preset === "custom" || preset === "24h" ? null : previousPeriodKey(preset, to);
-  const prev = prevKey !== null ? (svc.periodStats?.get(prevKey) ?? null) : null;
+  // v0.6.1：prev 基线只采纳当前 REPORT_SEM 的记录 —— 旧语义（错误计费/不完整索引）的
+  // period_stats 不得作为涨跌对比基线，直到该周期以新口径重新生成。
+  let prev: PeriodStatsRecord | null = null;
+  if (prevKey !== null) {
+    const cand = svc.periodStats?.get(prevKey) ?? null;
+    if (cand !== null && cand.sem === REPORT_SEM) prev = cand;
+  }
   const tImprove = Date.now();
   const insights = computeInsights({ stats, prev: prev ?? undefined, cost });
   // Improve（v0.5）：基于聚合证据的确定性建议；不重扫原始事件，无额外 IO。
@@ -538,6 +544,7 @@ export function toPeriodRecord(
 ): PeriodStatsRecord {
   const s = gen.stats;
   return {
+    sem: REPORT_SEM,
     key,
     preset,
     from: range.from,

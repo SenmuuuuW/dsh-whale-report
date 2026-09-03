@@ -7,8 +7,12 @@ import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
 
 export type ReportId = string;
 
-/** 报告语义版本：语义变更（如 daily 改自然日、新增预设、新增 Improve 输出）时 +1，旧记录作废重建。 */
-export const REPORT_SEM = 6;
+/**
+ * 报告语义版本：语义变更（如 daily 改自然日、新增预设、新增 Improve 输出）时 +1，旧记录作废重建。
+ * v0.6.1: 7 —— 历史计费回溯（8-17 峰谷生效日）与 ingest 完整性修复（headers 补录 / resume
+ * 历史保留）后，旧 period_stats / reports 的 cost/token 不得继续展示为当前口径。
+ */
+export const REPORT_SEM = 7;
 export type SessionIndexKey = string;
 export type PeriodKey = string;
 
@@ -63,6 +67,8 @@ export type SessionIndexRecord = z.infer<typeof SessionIndexSchema>;
 
 /** 周期基线（compact 统计，供"对比上周"与洞察引擎用）。 */
 export const PeriodStatsSchema = z.object({
+  /** 语义版本（v0.6.1 起写入）：trends/prev 只采纳当前 REPORT_SEM 的记录。 */
+  sem: z.number().int().optional(),
   key: z.string().min(1),
   preset: z.string(),
   from: z.number(),

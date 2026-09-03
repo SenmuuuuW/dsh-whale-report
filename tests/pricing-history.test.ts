@@ -78,3 +78,35 @@ describe("峰谷定价历史回溯（2026-08-17 00:00 CST 生效）", () => {
     expect(r.peakRatio).toBe(0);
   });
 });
+
+
+describe("三段 pricing timeline oracle（v0.6.1 最终矩阵）", () => {
+  // 每个边界点显式 +08:00 解析（机器时区 UTC/Asia/Shanghai/America 下结果一致）
+  const at = (iso: string): number => Date.parse(iso);
+  const matrix: [string, Record<"flash" | "pro", unknown>][] = [
+    ["2026-08-16T23:59:59.999+08:00", BUILTIN_PRICES], // 峰谷生效前最后一刻 → 旧统一价
+    ["2026-08-17T00:00:00.000+08:00", OFFPEAK_PRICES], // 峰谷生效边界 → 谷价（午夜）
+    ["2026-08-17T10:00:00+08:00", PEAK_PRICES],        // 周一高峰窗口
+    ["2026-08-17T13:00:00+08:00", OFFPEAK_PRICES],     // 周一午间低谷
+    ["2026-08-22T10:00:00+08:00", PEAK_PRICES],        // 周六（周末新规生效前）仍按旧规则高峰
+    ["2026-08-23T00:00:00+08:00", OFFPEAK_PRICES],     // 周末全天低谷生效（周日 00:00）
+    ["2026-08-24T10:00:00+08:00", PEAK_PRICES],        // 周一高峰
+    ["2026-08-29T15:00:00+08:00", OFFPEAK_PRICES],     // 生效后周六全天低谷
+  ];
+  it("T<8/17 旧统一价 → 8/17–8/23 峰谷（旧周末规则）→ ≥8/23 峰谷（周末全谷）", () => {
+    for (const [iso, expected] of matrix) {
+      expect(priceSetForTime(at(iso))).toBe(expected);
+    }
+  });
+
+  it("费用计算跨三段边界正确（1M flash 输入：1 元 / 3 元 / 1.5 元）", () => {
+    const mk = (time: number) => [
+      { time, modelTokens: { "deepseek-official/deepseek-v4-flash": { input: 1_000_000, cacheRead: 0, output: 0 } as never } },
+    ];
+    expect(computeCostTimed(mk(at("2026-08-16T10:00:00+08:00"))).total).toBeCloseTo(1.0);   // 旧价
+    expect(computeCostTimed(mk(at("2026-08-17T10:00:00+08:00"))).total).toBeCloseTo(3.0);   // 峰谷高峰
+    expect(computeCostTimed(mk(at("2026-08-17T13:00:00+08:00"))).total).toBeCloseTo(1.5);   // 峰谷低谷
+    expect(computeCostTimed(mk(at("2026-08-23T10:00:00+08:00"))).total).toBeCloseTo(1.5);   // 周末全谷
+    expect(computeCostTimed(mk(at("2026-08-24T10:00:00+08:00"))).total).toBeCloseTo(3.0);   // 周一高峰
+  });
+});

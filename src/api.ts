@@ -310,6 +310,7 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
               const table = svc.domain.table("period_stats");
               const rows = [...table.entries()]
                 .map(([, record]) => ({
+                  sem: record.sem,
                   key: record.key,
                   preset: record.preset,
                   from: record.from,
@@ -336,7 +337,9 @@ export function registerApiRoutes(ctx: Context, server: WebServerLike, svc: ApiS
                   isCurrent: currentKey !== null && record.key === currentKey,
                 }))
                 // 读取侧兼容：标准周期趋势排除旧版 custom 污染记录（preset=custom 且 key 为 wk-…）。
-                .filter((r) => isTrendRowIncluded(r.key, r.preset, prefix))
+                // v0.6.1：只展示当前 REPORT_SEM 的记录 —— 旧语义周期记录（错误计费/不完整索引）
+                // 不展示；对应周期以新口径重新生成后自然回归趋势。
+                .filter((r) => r.sem === REPORT_SEM && isTrendRowIncluded(r.key, r.preset, prefix))
                 .sort((a, b) => (a.key < b.key ? -1 : 1))
                 .slice(-limit);
               writeJson(res, 200, { ok: true, trends: rows });

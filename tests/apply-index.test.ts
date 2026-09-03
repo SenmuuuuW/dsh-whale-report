@@ -1,6 +1,6 @@
 /**
  * INDEX（RFC §29-B）:
- * - INDEX_VERSION = 17
+ * - INDEX_VERSION = 18
  * - tool identity 保留（toolTimeouts 按工具）
  * - 旧 v16 索引自动失效重建
  * - 无敏感内容（timeout contribution 只存 tool identity + count）
@@ -13,8 +13,8 @@ import { bashTimedOutResult, codeTimedOutResult, ev } from "./apply-harness.js";
 const T = Date.parse("2026-08-25T10:00:00+08:00");
 
 describe("INDEX_VERSION 17 migration", () => {
-  it("INDEX_VERSION = 17", () => {
-    expect(INDEX_VERSION).toBe(17);
+  it("INDEX_VERSION = 18", () => {
+    expect(INDEX_VERSION).toBe(18);
   });
 
   it("旧 v16 条目自动失效（ingest 侧版本门）", async () => {
