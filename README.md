@@ -6,7 +6,7 @@
 
 <p align="center"><b>Your Agent, in numbers.</b></p>
 
-<p align="center">Agent 可观测（observability）→ 诊断（diagnosis）→ 改进（improvement）：<br/>把 DSH 的 session、token、cost、tool call、风险与异常，转成可以真正读懂的诊断结论与可验证的改进建议。</p>
+<p align="center">Agent 可观测 → 诊断 → 改进 → 受控修改 → 回验：<br/>把 DSH 的 session、token、cost、tool call 与异常，转成可追踪的事实、确定性诊断、可执行建议，以及真正能被验证的改进。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-whale-report"><img src="https://img.shields.io/npm/v/dsh-whale-report?label=npm&color=4d6bfe" alt="npm version"></a>
@@ -21,19 +21,19 @@
     <td align="center" style="background:#0b1733;border-radius:12px;padding:10px 30px">
       <span style="color:#4d6bfe;font-weight:700;font-family:ui-monospace,Menlo,monospace">6 PERIODS</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">10 FINDINGS</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">DETERMINISTIC</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">4 IMPROVE RULES</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">VERIFY-READY</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">APPLY + VERIFY</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">PEAK / OFF-PEAK</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">HISTORICAL PRICING</span>
+      <span style="color:#33445f"> · </span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">INCREMENTAL INDEX</span>
       <span style="color:#33445f"> · </span>
       <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">FAULT ISOLATION</span>
       <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">READ-ONLY</span>
-      <span style="color:#33445f"> · </span>
-      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">DETERMINISTIC</span>
+      <span style="color:#cbd5e1;font-family:ui-monospace,Menlo,monospace">READ-ONLY BY DEFAULT</span>
     </td>
   </tr>
 </table>
@@ -61,29 +61,68 @@ DeepTrace 不是 log viewer，也不是普通 dashboard——它把会话事件�
 
 <table align="center">
   <tr>
-    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
-      <b style="color:#4d6bfe">SEE</b><br/>
-      <span style="color:#33445f;font-size:13px">总览成本、调用、模型与异常</span>
-    </td>
-    <td align="center" width="4%" style="color:#94a2b3">→</td>
-    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
-      <b style="color:#4d6bfe">NOTICE</b><br/>
-      <span style="color:#33445f;font-size:13px">Findings + Whale Note 指出值得看的问题</span>
-    </td>
-    <td align="center" width="4%" style="color:#94a2b3">→</td>
-    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
+    <td align="center" width="15%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 8px">
       <b style="color:#4d6bfe">TRACE</b><br/>
-      <span style="color:#33445f;font-size:13px">Session Drilldown 追到具体会话复盘</span>
+      <span style="color:#33445f;font-size:12px">Sessions / tokens / cost / tools become queryable evidence.</span>
     </td>
-    <td align="center" width="4%" style="color:#94a2b3">→</td>
-    <td align="center" width="22%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 10px">
+    <td align="center" width="3%" style="color:#94a2b3">→</td>
+    <td align="center" width="15%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 8px">
+      <b style="color:#4d6bfe">DIAGNOSE</b><br/>
+      <span style="color:#33445f;font-size:12px">Deterministic findings locate failures, waste and cost anomalies.</span>
+    </td>
+    <td align="center" width="3%" style="color:#94a2b3">→</td>
+    <td align="center" width="15%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 8px">
       <b style="color:#4d6bfe">IMPROVE</b><br/>
-      <span style="color:#33445f;font-size:13px">只读建议 + 证据 + VERIFY 计划（v0.5）</span>
+      <span style="color:#33445f;font-size:12px">Recommendations include evidence and a verification plan.</span>
+    </td>
+    <td align="center" width="3%" style="color:#94a2b3">→</td>
+    <td align="center" width="15%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 8px">
+      <b style="color:#4d6bfe">APPLY</b><br/>
+      <span style="color:#33445f;font-size:12px">Only predefined safe changes can be applied after explicit approval.</span>
+    </td>
+    <td align="center" width="3%" style="color:#94a2b3">→</td>
+    <td align="center" width="15%" style="background:#f5f8f9;border:1px solid #d9e3e8;border-radius:12px;padding:16px 8px">
+      <b style="color:#4d6bfe">VERIFY</b><br/>
+      <span style="color:#33445f;font-size:12px">Post-change evidence determines VERIFIED / NOT IMPROVED / INCONCLUSIVE.</span>
     </td>
   </tr>
 </table>
 
-一次报告，走完整个闭环；IMPROVE 的输出带 VERIFY 基线 → 目标。v0.6 起，用户批准后可 Apply 唯一受控修改（Repeated bash timeout → `shell.timeoutMs`），随后自动回验；self-healing 不在范围内。
+一次报告，走完整个闭环。Apply 只接受**用户批准的、allowlisted 的、受控的**修改；Apply 不是 autonomous optimization，self-healing 不在范围内。
+
+## v0.6.1 — Accounting Correctness
+
+**Correct history. Complete sessions.**
+
+这一版修的是"数字是否可信"。[v0.6.1 release](https://github.com/SenmuuuuW/dsh-whale-report/releases/tag/v0.6.1)
+
+### Historical pricing
+
+DeepSeek pricing 按真实生效日期回溯（Asia/Shanghai）：
+
+- before **2026-08-17**：legacy flat pricing
+- **2026-08-17** onward：peak / off-peak pricing
+- **2026-08-23** onward：weekends fully off-peak
+
+### Complete session ingestion
+
+- plugin 启动后新建的 sessions 会被 periodic reconcile 自动发现，**不需要 restart**
+- repeated reconciliation 不重复计数
+
+### Resume history
+
+- normal resume 保留完整历史；only true fork inherited seed is excluded
+- 升级 v0.6.1 后，旧 v17 index 自动失效并重建（见 Semantic migration）
+
+### Semantic migration
+
+v0.6.1 bumps the persisted accounting semantics: **INDEX_VERSION 18 · REPORT_SEM 7**. Old incompatible index / report state is not silently reused.
+
+## Accounting model
+
+DeepTrace cost = **complete event history** × **historically correct pricing**。
+
+v0.6.1 同时修正了价格口径、session discovery 与 resume history——因此 **affected historical reports may change materially after upgrade**（历史报告的数字会按正确口径重算）。
 
 ## Product
 
@@ -101,9 +140,10 @@ DeepTrace 架构是一句话：**INGEST ONCE → QUERY MANY**。会话事件只�
 
 ### Ingest（进入一次）
 
-- DSH session/event firehose 逐事件增量摄入（baseline + seq 去重 + fingerprint reconcile 兜底）
-- 损坏会话只读 salvage：重解压移入 worker_threads，不阻塞查询
-- 会话索引增量补录：插件启动后新建的会话由周期 reconciliation 自动发现并入索引（无需重启）；resume 的会话保留恢复前的完整历史（仅真实 fork 继承的 seed 事件除外）
+- **session/event firehose = primary incremental path**（baseline + seq 去重）；已索引会话保持增量、去重，绝不重复计数
+- **periodic reconcile = discovery / recovery path**：发现插件启动后新建的 session header 并纳入索引，不需要 restart；损坏会话只读 salvage（worker_threads 解压，不阻塞查询）
+- resume 的会话保留恢复前的完整历史（仅真实 fork 继承的 seed 事件除外）
+- v0.6.1 uses INDEX_VERSION 18：previously persisted indexes built under the old resume/session interpretation are automatically rebuilt
 - 持久化：canonical index 用 coalesced checkpoints 落盘，避免反复整库重写
 
 ### Query（查询多次）
@@ -113,10 +153,11 @@ DeepTrace 架构是一句话：**INGEST ONCE → QUERY MANY**。会话事件只�
 
 ### Exact accounting（精确对账）
 
-- 窗口边界逐事件精确过滤（无比例近似），Raw Oracle 对账 costDiff = 0.0000
+- 窗口边界逐事件精确过滤（无比例近似）；对于完整可读的 event history，integer token accounting 与 raw-event oracle **exactly** 一致，cost 由同一 canonical 贡献按历史价格边界计算
 - 统计与周期口径统一 Asia/Shanghai（不依赖机器时区）
+- Source-log gaps 或 truncated session logs 会限制历史完整性——DeepTrace 不虚构缺失事件
 
-当前 version：**v0.6.1**（官方兼容基线 DSH 0.1.1-rc.2）
+当前 version：**v0.6.1**（npm `latest`；官方兼容基线 DSH 0.1.1-rc.2）· [v0.6.1 release](https://github.com/SenmuuuuW/dsh-whale-report/releases/tag/v0.6.1)
 
 ## Performance
 
@@ -138,7 +179,7 @@ IMPROVE → REVIEW CHANGE → APPLY → OBSERVE → VERIFY → OPTIONAL REVERT
 
 - **默认只读**：DeepTrace 永远先只产出建议与证据
 - **每次 Apply 都需要用户明确批准**（Review change → Apply）
-- 当前 v0.6 只支持一个受控修改：**Repeated bash timeout → `shell.timeoutMs` 调整**
+- As of v0.6.1，唯一受控修改仍是：**Repeated bash timeout → `shell.timeoutMs` 调整**（shell.timeoutMs only）
 - 不支持任意配置修改、不支持 arbitrary shell / code mutation、不自动 rollback、不 self-healing
 
 ### 示例
@@ -180,7 +221,7 @@ Verify 使用 **exact before/after windows**，以 Apply 时刻为切点：
 
 | | |
 | --- | --- |
-| **Cost** | 官方峰谷价分段计算（定价页实时抓取、6h 缓存、内置价兜底）：工作日 09:00–12:00、14:00–18:00 为高峰（北京时间，谷时 2 倍）；**自 2026-08-23 起周末（周六/周日）全天低谷**，此前历史按旧规则回溯；**价格沿革按真实生效日回溯：2026-08-17 峰谷定价生效前的历史统一按当时旧价计费**；按模型与会话分账，报告带峰谷占比（peakShare / peakRatio）与「挪到谷时约省 ¥X」估算；**费用为估算，最终以 DeepSeek Platform 实际账单为准** |
+| **Cost** | 官方峰谷价分段计算（定价页实时抓取、6h 缓存、内置价兜底）：工作日 09:00–12:00、14:00–18:00 为高峰（北京时间，谷时 2 倍）；**2026-08-23 起周末（周六/周日）全天低谷**；**价格沿革按真实生效日回溯：2026-08-17 峰谷定价生效前按当时 legacy flat price 计费，2026-08-17 起按 peak/off-peak（Asia/Shanghai），2026-08-23 起周末全天 off-peak**；按模型与会话分账，报告带峰谷占比（peakShare / peakRatio）与「挪到谷时约省 ¥X」估算；**费用为估算，最终以 DeepSeek Platform 实际账单为准** |
 | **Live session** | 进行中会话实时计费：由 session/event firehose **增量维护**（steady state <1ms，不再 30s 整读），token 与费用按当前时段价折算，右上角常驻峰/谷徽标 + 双模型价目表 |
 | **Tokens** | input / output / cache read / reasoning，按模型拆分 |
 | **Sessions** | 会话数、回合数、事件数、活跃天数、最忙日 |
@@ -207,7 +248,7 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 - explicit rules
 - reproducible report generation
 
-10 条确定性 Finding 规则：深夜消耗、峰谷时段成本、重试风暴、缓存命中率变化、致命级操作、需留意操作、会话碎片化、疑似密钥、费用趋势、工具健康。每条都带阈值、归因与估算口径。
+确定性 Finding 规则覆盖：深夜消耗、峰谷时段成本、重试风暴、缓存命中率变化、危险操作（致命 / 需留意）、会话碎片化、疑似密钥、费用趋势、工具健康。每条都带阈值、归因与估算口径。
 
 **IMPROVE 引擎（v0.5）**：Finding 回答"发生了什么"，Improve 回答"值不值得改、怎么改"。4 条确定性规则：
 
@@ -228,9 +269,10 @@ DeepTrace 的统计与洞察**不是让另一个 AI 随机点评你的数据**�
 
 报告本身由本地确定性代码生成——**REPORT GENERATION · 0 TOKENS · LOCAL DETERMINISTIC**，生成报告不消耗模型调用。
 
-## Privacy / read-only
+## Privacy / read-only by default
 
-- **只读**：绝不改写任何 session 历史；统计排除 DeepTrace 自身的 `whale/*` 事件
+- **默认只读**：绝不改写任何 session 历史；统计排除 DeepTrace 自身的 `whale/*` 事件
+- **唯一受控 Apply seam**：只有用户批准后的 `shell.timeoutMs` 调整会写 settings（见 Apply & Verify）；除此之外不自动执行任何修改
 - **不自动执行**：修复建议只输出方案与命令模板，需要你亲自确认
 - **Secret Scan 不重印**：只记录模式标签、时间与来源，报告与导出里都不出现 secret 原文
 - **危险命令只存首行**：引号段剥离，防止 grep 模式被误报
@@ -318,18 +360,21 @@ Overview / Report / History（Web / HTML / PDF / PNG）
 pnpm install
 pnpm link-dsh   # 软链本地 harness 闭包（typecheck 需要）
 pnpm typecheck
-pnpm test       # 314 个单测（28 个文件）：引擎与统计 / 洞察与 Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 客户端刷新韧性 / Query Engine 与周期不变量 / Oracle 对账 / 增量 ingest / 时区矩阵 / persistence
+pnpm test       # 409 个单测（38 个文件）：引擎与统计 / 洞察与 Improve 规则 / fault isolation / salvage / usage 口径 / 主题 / 峰谷计价 / 导出 / 客户端刷新韧性 / Query Engine 与周期不变量 / Oracle 对账 / 增量 ingest / 时区矩阵 / persistence
 pnpm build      # tsc + tsdown（客户端单文件 bundle）
 ```
 
-## Status & limitations
+## Known limitations
 
 当前边界，如实说明：
 
+- **费用为估算**：cost is an estimate, not the provider invoice —— 按官方峰谷价与真实生效日期估算，最终以 DeepSeek Platform 账单为准
+- **Source-log gaps 可限制历史完整性**：单个会话日志存在 seq gap 或截断时，DeepTrace 以官方读取器的保守语义处理，不虚构缺失事件；完整可读历史的对账是 integer-exact 的
+- **Apply 目前只支持 `shell.timeoutMs`**：唯一受控、用户批准、可回滚的修改；不支持 arbitrary config / shell / code mutation，不自动 rollback，不 self-healing
 - **会话跳转**：报告提供 Session ID 复制，尚未实现"一键跳回原会话"（待官方 client API 明确）
-- **费用为估算**：按官方峰谷价分段估算，以平台账单为准
-- **IMPROVE 默认只读**：只落 DETECTED / DISMISSED 与 VERIFY 计划；v0.6 起 Apply 需用户逐次批准（仅 Repeated bash timeout → `shell.timeoutMs` 一个受控修改），自动 Verify 闭环已实现；self-healing / 自动 rollback **永不支持**；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
+- **IMPROVE 默认只读**：只落 DETECTED / DISMISSED 与 VERIFY 计划；自动 Verify 闭环已实现；Repeated User Correction 标记 EXPERIMENTAL（保守阈值 + 首条消息过滤）
 - **PNG 主报告导出暂不含 IMPROVE 区**（HTML / PDF / markdown / 面板已含）
+- **DSH 官方兼容基线**：`>=0.1.1-rc.2 <0.2.0`（package peerDependencies 声明为准；prerelease alpha 不在正式支持范围）
 
 ## License
 
